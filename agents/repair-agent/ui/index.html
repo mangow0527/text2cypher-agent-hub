@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Repair Service Console</title>
+  <link rel="stylesheet" href="/ui/styles.css" />
+</head>
+<body>
+  <main class="layout">
+    <section class="masthead">
+      <div>
+        <p class="eyebrow">Repair Service</p>
+        <h1>问题分析与修复计划控制台</h1>
+        <p>接收测试服务发送的问题单，进行根因分析，生成修复计划，并分发给相应的服务。</p>
+      </div>
+      <div class="pulse-card">
+        <span></span>
+        Root Cause Analyzer
+      </div>
+    </section>
+
+    <section class="panels">
+      <section class="panel panel-form">
+        <h2>问题单管理</h2>
+        <div class="section-title">查询问题单</div>
+        <label>
+          <span>问题单ID</span>
+          <input id="ticket-lookup-id" placeholder="例如：ticket-001" />
+        </label>
+        <button type="button" class="secondary" id="lookup-ticket">查询问题单</button>
+        
+        <div class="section-title">创建修复计划</div>
+        <div class="form-group">
+          <label>
+            <span>问题单ID</span>
+            <input id="plan-ticket-id" placeholder="例如：ticket-001" />
+          </label>
+          <label>
+            <span>原始问题ID</span>
+            <input id="plan-original-id" placeholder="例如：qa-001" />
+          </label>
+        </div>
+        <button type="button" class="secondary" id="create-plan">手动创建修复计划</button>
+      </section>
+
+      <section class="panel panel-output">
+        <h2>修复计划结果</h2>
+        <div class="banner" id="banner">等待操作</div>
+        
+        <div class="output-block">
+          <h3>服务状态</h3>
+          <pre id="status-view">加载中...</pre>
+        </div>
+        
+        <div class="chips" id="chips"></div>
+        
+        <div class="output-block">
+          <h3>问题单详情</h3>
+          <pre id="ticket-view">{}</pre>
+        </div>
+        
+        <div class="output-block">
+          <h3>修复计划</h3>
+          <pre id="plan-view">{}</pre>
+        </div>
+        
+        <div class="output-block">
+          <h3>操作日志</h3>
+          <pre id="dispatch-view">{}</pre>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>

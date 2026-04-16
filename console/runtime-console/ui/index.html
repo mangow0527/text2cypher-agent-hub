@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>运行结果中心</title>
+  <link rel="stylesheet" href="/ui/styles.css" />
+</head>
+<body>
+  <main class="layout">
+    <section class="masthead">
+      <div>
+        <p class="eyebrow">QA Runtime / 运行结果中心</p>
+        <h1>运行结果中心 <span>Runtime Results Center</span></h1>
+        <p>自动汇总来自 QA 生成服务的任务，查看全流程状态、当前生成的 Cypher，以及这一轮结果的质量概括。</p>
+      </div>
+      <div class="pulse-card">
+        <span></span>
+        Live Task Feed
+      </div>
+    </section>
+
+    <section class="panel services-panel">
+      <div class="section-heading">
+        <h2>服务运行状态 <span>Runtime Service Status</span></h2>
+        <p>继续保留五个核心服务的实时状态，方便你在查看任务时同步判断链路健康度。</p>
+      </div>
+      <div class="service-grid" id="service-grid"></div>
+    </section>
+
+    <section class="workspace">
+      <aside class="panel task-list-panel">
+        <div class="section-heading">
+          <h2>任务列表 <span>Task Feed</span></h2>
+          <p>这里只展示来自 QA 生成服务的任务，页面会持续刷新。</p>
+        </div>
+        <div class="task-list" id="task-list"></div>
+      </aside>
+
+      <section class="detail-column">
+        <article class="panel summary-panel">
+          <div class="section-heading">
+            <h2>运行结果总览 <span>Run Summary</span></h2>
+            <p id="task-meta">请选择左侧任务查看详情。</p>
+          </div>
+          <div class="overview-grid" id="overview-grid"></div>
+        </article>
+
+        <article class="panel cypher-panel">
+          <div class="section-heading">
+            <h2>Cypher 结果与质量 <span>Cypher Result & Quality</span></h2>
+            <p id="quality-summary">这里会展示当前生成的 Cypher 与测试服务给出的质量概括。</p>
+          </div>
+          <div class="quality-strip">
+            <span class="quality-pill" id="quality-pill">待评估</span>
+          </div>
+          <pre id="cypher-view"></pre>
+          <div class="findings" id="quality-findings"></div>
+        </article>
+
+        <article class="panel improvement-panel">
+          <div class="section-heading">
+            <h2>改进评估 <span>Improvement Assessment</span></h2>
+            <p id="improvement-summary">这里会展示当前轮次与上一轮相比是否更接近正确结果。</p>
+          </div>
+          <div class="quality-strip">
+            <span class="quality-pill" id="improvement-pill">首轮</span>
+          </div>
+          <div class="overview-grid" id="improvement-dimensions"></div>
+          <div class="findings" id="improvement-highlights"></div>
+        </article>
+
+        <article class="panel improvement-panel">
+          <div class="section-heading">
+            <h2>KRSS 诊断摘要 <span>KRSS Diagnosis</span></h2>
+            <p id="krss-summary">这里会展示 KRSS 的主根因类型、验证模式和最终建议。</p>
+          </div>
+          <div class="overview-grid" id="krss-diagnosis-grid"></div>
+          <div class="findings" id="krss-diagnosis-findings"></div>
+        </article>
+
+        <section class="artifact-grid">
+          <article class="panel">
+            <h3>评测与执行 <span>Evaluation & Execution</span></h3>
+            <pre id="evaluation-view"></pre>
+          </article>
+          <article class="panel">
+            <h3>修复闭环 <span>Repair Trace</span></h3>
+            <pre id="repair-view"></pre>
+          </article>
+        </section>
+      </section>
+    </section>
+  </main>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>

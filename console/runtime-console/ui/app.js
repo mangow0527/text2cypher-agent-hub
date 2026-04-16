@@ -1,0 +1,260 @@
+const taskList = document.getElementById('task-list');
+const serviceGrid = document.getElementById('service-grid');
+const taskMeta = document.getElementById('task-meta');
+const overviewGrid = document.getElementById('overview-grid');
+const qualityPill = document.getElementById('quality-pill');
+const qualitySummary = document.getElementById('quality-summary');
+const qualityFindings = document.getElementById('quality-findings');
+const improvementPill = document.getElementById('improvement-pill');
+const improvementSummary = document.getElementById('improvement-summary');
+const improvementDimensions = document.getElementById('improvement-dimensions');
+const improvementHighlights = document.getElementById('improvement-highlights');
+const krssSummary = document.getElementById('krss-summary');
+const krssDiagnosisGrid = document.getElementById('krss-diagnosis-grid');
+const krssDiagnosisFindings = document.getElementById('krss-diagnosis-findings');
+const cypherView = document.getElementById('cypher-view');
+const evaluationView = document.getElementById('evaluation-view');
+const repairView = document.getElementById('repair-view');
+
+let selectedTaskId = null;
+
+function pretty(value) {
+  return JSON.stringify(value ?? {}, null, 2);
+}
+
+function tone(status) {
+  switch (status) {
+    case 'passed':
+    case 'good':
+      return 'ok';
+    case 'failed':
+    case 'bad':
+      return 'danger';
+    case 'running':
+    case 'risky':
+      return 'warn';
+    default:
+      return 'neutral';
+  }
+}
+
+function renderTaskList(tasks) {
+  if (!tasks.length) {
+    taskList.innerHTML = '<p class="empty">暂无可展示的 QA 任务。</p>';
+    return;
+  }
+  if (!selectedTaskId) {
+    selectedTaskId = tasks[0].id;
+  }
+  taskList.innerHTML = tasks
+    .map(
+      (task) => `
+        <button type="button" class="task-card ${task.id === selectedTaskId ? 'is-active' : ''}" data-task-id="${task.id}">
+          <div class="task-card-head">
+            <strong>${task.id}</strong>
+            <span class="status-pill tone-${tone(task.final_verdict === 'pass' ? 'passed' : task.final_verdict === 'fail' ? 'failed' : 'pending')}">${task.final_verdict}</span>
+          </div>
+          <p>${task.question || '未提供问题文本'}</p>
+          <div class="task-card-meta">
+            <span>${task.current_stage}</span>
+            <span>${task.cypher_quality_label_zh}</span>
+            <span>${task.improvement_status}</span>
+          </div>
+        </button>
+      `
+    )
+    .join('');
+  Array.from(document.querySelectorAll('.task-card')).forEach((node) => {
+    node.addEventListener('click', () => {
+      selectedTaskId = node.dataset.taskId;
+      loadTaskDetail();
+      renderTaskList(tasks);
+    });
+  });
+}
+
+function renderServiceCards(services) {
+  serviceGrid.innerHTML = services
+    .map(
+      (service) => `
+        <article class="service-card">
+          <div class="task-card-head">
+            <div>
+              <strong>${service.label_zh}</strong>
+              <p>${service.label_en}</p>
+            </div>
+            <span class="status-pill tone-${tone(service.status)}">${service.status}</span>
+          </div>
+          <div class="task-card-meta">
+            <span>Port ${service.port}</span>
+            <span>${service.base_url}</span>
+          </div>
+          <p>${service.description_zh}</p>
+        </article>
+      `
+    )
+    .join('');
+}
+
+function renderOverview(detail) {
+  taskMeta.textContent = `${detail.id} · ${detail.question || '未提供问题文本'}`;
+  overviewGrid.innerHTML = Object.entries(detail.stages || {})
+    .map(
+      ([stageKey, stage]) => `
+        <article class="overview-card">
+          <div>
+            <h3>${stage.label_zh}</h3>
+            <p>${stage.label_en}</p>
+          </div>
+          <span class="status-pill tone-${tone(stage.status)}">${stage.status}</span>
+          <small>${stageKey}</small>
+        </article>
+      `
+    )
+    .join('');
+}
+
+function renderQuality(detail) {
+  const quality = detail.cypher_quality || {};
+  qualityPill.textContent = quality.label_zh || '待评估';
+  qualityPill.className = `quality-pill tone-${tone(quality.label || 'pending')}`;
+  qualitySummary.textContent = quality.summary_zh || '暂无质量概括。';
+  cypherView.textContent = detail.generated_cypher || '// 暂无 Cypher';
+  qualityFindings.innerHTML = (quality.findings || [])
+    .map((finding) => `<div class="finding-item">${finding}</div>`)
+    .join('');
+}
+
+function renderArtifacts(detail) {
+  evaluationView.textContent = pretty({
+    evaluation: detail.artifacts?.evaluation,
+    execution: detail.artifacts?.execution,
+    golden: detail.artifacts?.golden,
+  });
+  repairView.textContent = pretty(detail.artifacts?.repair);
+}
+
+function renderKrssDiagnosis(detail) {
+  const analysis = detail.artifacts?.repair?.analysis || {};
+  const request = analysis.knowledge_repair_request || {};
+  const validationResult = analysis.validation_result || {};
+  krssSummary.textContent = analysis.rationale || '暂无 KRSS 诊断摘要。';
+  krssDiagnosisGrid.innerHTML = [
+    ['主根因类型', analysis.primary_knowledge_type || '未提供'],
+    ['候选修复类型', (analysis.candidate_patch_types || []).join(', ') || '未提供'],
+    ['验证模式', analysis.validation_mode || 'disabled'],
+    ['最终下发类型', (request.knowledge_types || []).join(', ') || '未提供'],
+  ]
+    .map(
+      ([label, value]) => `
+        <article class="overview-card">
+          <div>
+            <h3>${label}</h3>
+            <p>${value}</p>
+          </div>
+        </article>
+      `
+    )
+    .join('');
+  krssDiagnosisFindings.innerHTML = [
+    request.suggestion ? `最终建议: ${request.suggestion}` : null,
+    (validationResult.validated_patch_types || []).length
+      ? `验证通过: ${(validationResult.validated_patch_types || []).join(', ')}`
+      : null,
+    (validationResult.rejected_patch_types || []).length
+      ? `验证拒绝: ${(validationResult.rejected_patch_types || []).join(', ')}`
+      : null,
+    ...((validationResult.validation_reasoning || []).map((item) => `验证说明: ${item}`)),
+  ]
+    .filter(Boolean)
+    .map((item) => `<div class="finding-item">${item}</div>`)
+    .join('');
+}
+
+function improvementTone(status) {
+  switch (status) {
+    case 'improved':
+      return 'ok';
+    case 'regressed':
+      return 'danger';
+    case 'unchanged':
+      return 'warn';
+    default:
+      return 'neutral';
+  }
+}
+
+function improvementLabel(status) {
+  const labels = {
+    first_run: '首轮',
+    improved: '已改善',
+    regressed: '已回退',
+    unchanged: '无明显变化',
+    not_comparable: '暂不可比较',
+  };
+  return labels[status] || '暂不可比较';
+}
+
+function renderImprovement(detail) {
+  const assessment = detail.improvement_assessment || {};
+  improvementPill.textContent = improvementLabel(assessment.status);
+  improvementPill.className = `quality-pill tone-${improvementTone(assessment.status)}`;
+  improvementSummary.textContent = assessment.summary_zh || '暂无改进评估。';
+
+  const dimensions = assessment.dimensions || {};
+  improvementDimensions.innerHTML = Object.entries(dimensions)
+    .map(
+      ([key, value]) => `
+        <article class="overview-card">
+          <div>
+            <h3>${key}</h3>
+            <p>${improvementLabel(value)}</p>
+          </div>
+          <span class="status-pill tone-${improvementTone(value)}">${value}</span>
+        </article>
+      `
+    )
+    .join('');
+  improvementHighlights.innerHTML = (assessment.highlights || [])
+    .map((item) => `<div class="finding-item">${item}</div>`)
+    .join('');
+}
+
+async function loadTasks() {
+  const response = await fetch('/api/v1/tasks');
+  const payload = await response.json();
+  renderTaskList(payload.tasks || []);
+  if (selectedTaskId) {
+    loadTaskDetail().catch((error) => {
+      taskMeta.textContent = `详情加载失败: ${String(error)}`;
+    });
+  }
+}
+
+async function loadServices() {
+  const response = await fetch('/api/v1/runtime/services');
+  const payload = await response.json();
+  renderServiceCards(payload.services || []);
+}
+
+async function loadTaskDetail() {
+  if (!selectedTaskId) {
+    return;
+  }
+  const response = await fetch(`/api/v1/tasks/${selectedTaskId}`);
+  const payload = await response.json();
+  renderOverview(payload);
+  renderQuality(payload);
+  renderImprovement(payload);
+  renderKrssDiagnosis(payload);
+  renderArtifacts(payload);
+}
+
+Promise.all([loadServices(), loadTasks()]).catch((error) => {
+  taskList.innerHTML = `<p class="empty">${String(error)}</p>`;
+});
+
+setInterval(() => {
+  loadServices().catch(() => {});
+  loadTasks().catch(() => {});
+}, 5000);
