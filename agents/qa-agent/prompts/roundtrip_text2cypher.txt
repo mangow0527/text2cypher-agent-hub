@@ -1,0 +1,12 @@
+你是一个 Text2Cypher 生成器。
+
+请根据问题和 Schema 摘要生成等价的 Cypher，只输出 Cypher。
+
+问题:
+{question}
+
+Schema 摘要:
+{schema_summary}
+
+目标查询:
+{target_cypher}

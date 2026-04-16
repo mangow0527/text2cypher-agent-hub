@@ -1,0 +1,25 @@
+{
+  "node_types": ["Person", "Project"],
+  "edge_types": ["WORKS_ON"],
+  "node_properties": {
+    "Person": {
+      "name": "string",
+      "title": "string"
+    },
+    "Project": {
+      "name": "string",
+      "year": "integer"
+    }
+  },
+  "edge_properties": {
+    "WORKS_ON": {
+      "role": "string"
+    }
+  },
+  "value_catalog": {
+    "Person.name": ["Alice"],
+    "Person.title": ["Researcher"],
+    "Project.name": ["Graph QA"]
+  }
+}
+

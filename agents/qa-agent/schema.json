@@ -1,0 +1,559 @@
+[
+  {
+    "label": "NetworkElement",
+    "type": "VERTEX",
+    "description": "Network element (router/switch/firewall) - RFC 1812, RFC 2401",
+    "primary": "id",
+    "properties": [
+      {
+        "name": "id",
+        "type": "STRING",
+        "optional": false,
+        "unique": true,
+        "index": true,
+        "description": "Unique identifier; pattern ^ne-[0-9]{4}$"
+      },
+      {
+        "name": "ip_address",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false,
+        "description": "IPv4 address"
+      },
+      {
+        "name": "location",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "model",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "name",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "software_version",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "type",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false,
+        "description": "router | switch | firewall | load_balancer | wan_optimizer"
+      },
+      {
+        "name": "vendor",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      }
+    ]
+  },
+  {
+    "label": "Protocol",
+    "type": "VERTEX",
+    "description": "Network protocol definition - RFC 791 (IP), RFC 4271 (BGP)",
+    "primary": "id",
+    "properties": [
+      {
+        "name": "id",
+        "type": "STRING",
+        "optional": false,
+        "unique": true,
+        "index": true,
+        "description": "pattern ^proto-[a-z0-9-]+$"
+      },
+      {
+        "name": "ietf_category",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false,
+        "description": "Routing | Transport | Applications | Security | Management"
+      },
+      {
+        "name": "name",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "standard",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false,
+        "description": "pattern RFC [0-9]+"
+      },
+      {
+        "name": "version",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      }
+    ]
+  },
+  {
+    "label": "Tunnel",
+    "type": "VERTEX",
+    "description": "Network tunnel instance - RFC 3209 (MPLS-TE), RFC 4301 (IPsec). Path defined EXCLUSIVELY via path_through_edges / PATH_THROUGH.",
+    "primary": "id",
+    "properties": [
+      {
+        "name": "bandwidth",
+        "type": "DOUBLE",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "latency",
+        "type": "DOUBLE",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "id",
+        "type": "STRING",
+        "optional": false,
+        "unique": true,
+        "index": true,
+        "description": "pattern ^tun-[a-z-]+-[0-9]+$"
+      },
+      {
+        "name": "ietf_standard",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false,
+        "description": "pattern RFC [0-9]+"
+      },
+      {
+        "name": "name",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "type",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false,
+        "description": "MPLS-TE | GRE | IPsec | L2TP | VXLAN | MPLS-VPN"
+      }
+    ]
+  },
+  {
+    "label": "Service",
+    "type": "VERTEX",
+    "description": "Business/service layer - RFC 4364 (MPLS-VPN), RFC 2475 (DiffServ)",
+    "primary": "id",
+    "properties": [
+      {
+        "name": "bandwidth",
+        "type": "DOUBLE",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "latency",
+        "type": "DOUBLE",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "id",
+        "type": "STRING",
+        "optional": false,
+        "unique": true,
+        "index": true,
+        "description": "pattern ^svc-[a-z-]+-[0-9]+$"
+      },
+      {
+        "name": "name",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "quality_of_service",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false,
+        "description": "Gold | Silver | Bronze | Best_Effort"
+      },
+      {
+        "name": "type",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false,
+        "description": "MPLS-VPN | QoS | L3VPN | MPLS-TE | Firewall_Service"
+      }
+    ]
+  },
+  {
+    "label": "Port",
+    "type": "VERTEX",
+    "description": "Physical/logical interface - RFC 2863 (Interfaces MIB), IEEE 802.3",
+    "primary": "id",
+    "properties": [
+      {
+        "name": "speed",
+        "type": "DOUBLE",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "id",
+        "type": "STRING",
+        "optional": false,
+        "unique": true,
+        "index": true,
+        "description": "pattern ^port-[a-z0-9-]+$"
+      },
+      {
+        "name": "mac_address",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "name",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "status",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false,
+        "description": "up | down | administratively_down"
+      },
+      {
+        "name": "type",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false,
+        "description": "physical | logical | virtual"
+      },
+      {
+        "name": "vlan_id",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      }
+    ]
+  },
+  {
+    "label": "Fiber",
+    "type": "VERTEX",
+    "description": "Physical fiber optic cable - ITU-T G.652/G.657, RFC 2615",
+    "primary": "id",
+    "properties": [
+      {
+        "name": "bandwidth_capacity",
+        "type": "DOUBLE",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "length",
+        "type": "DOUBLE",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "id",
+        "type": "STRING",
+        "optional": false,
+        "unique": true,
+        "index": true,
+        "description": "pattern ^fiber-[0-9]{4}$"
+      },
+      {
+        "name": "location",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "name",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "type",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false,
+        "description": "single-mode | multi-mode"
+      },
+      {
+        "name": "wavelength",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false,
+        "description": "pattern ^[0-9]+nm$"
+      }
+    ]
+  },
+  {
+    "label": "Link",
+    "type": "VERTEX",
+    "description": "Logical/physical link between ports - RFC 2863 (ifTable), RFC 1213 (MIB-II)",
+    "primary": "id",
+    "properties": [
+      {
+        "name": "bandwidth",
+        "type": "DOUBLE",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "latency",
+        "type": "DOUBLE",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "mtu",
+        "type": "INT32",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "admin_status",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false,
+        "description": "up | down | testing"
+      },
+      {
+        "name": "id",
+        "type": "STRING",
+        "optional": false,
+        "unique": true,
+        "index": true,
+        "description": "pattern ^link-[0-9]{4}$"
+      },
+      {
+        "name": "name",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "protocol",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "status",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "type",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      },
+      {
+        "name": "vlan_id",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false
+      }
+    ]
+  },
+  {
+    "label": "HAS_PORT",
+    "type": "EDGE",
+    "description": "NetworkElement owns Port (RFC 2863 Interfaces MIB); JSON key: has_port_edges",
+    "constraints": [
+      [
+        "NetworkElement",
+        "Port"
+      ]
+    ],
+    "properties": [
+      {
+        "name": "admin_status",
+        "type": "STRING",
+        "optional": false,
+        "unique": false,
+        "index": false,
+        "description": "Administrative status per RFC 2863"
+      }
+    ]
+  },
+  {
+    "label": "FIBER_SRC",
+    "type": "EDGE",
+    "description": "Fiber source termination: Fiber → Port (physical layer); JSON key: fiber_src_edges",
+    "constraints": [
+      [
+        "Fiber",
+        "Port"
+      ]
+    ],
+    "properties": []
+  },
+  {
+    "label": "FIBER_DST",
+    "type": "EDGE",
+    "description": "Fiber destination termination: Fiber → Port (physical layer); JSON key: fiber_dst_edges",
+    "constraints": [
+      [
+        "Fiber",
+        "Port"
+      ]
+    ],
+    "properties": []
+  },
+  {
+    "label": "LINK_SRC",
+    "type": "EDGE",
+    "description": "Link source termination: Link → Port (logical layer); JSON key: link_src_edges",
+    "constraints": [
+      [
+        "Link",
+        "Port"
+      ]
+    ],
+    "properties": []
+  },
+  {
+    "label": "LINK_DST",
+    "type": "EDGE",
+    "description": "Link destination termination: Link → Port (logical layer); JSON key: link_dst_edges",
+    "constraints": [
+      [
+        "Link",
+        "Port"
+      ]
+    ],
+    "properties": []
+  },
+  {
+    "label": "TUNNEL_SRC",
+    "type": "EDGE",
+    "description": "Tunnel source endpoint: Tunnel → NetworkElement (redundant for query efficiency, primary path via path_through_edges); JSON key: tunnel_src_edges",
+    "constraints": [
+      [
+        "Tunnel",
+        "NetworkElement"
+      ]
+    ],
+    "properties": []
+  },
+  {
+    "label": "TUNNEL_DST",
+    "type": "EDGE",
+    "description": "Tunnel destination endpoint: Tunnel → NetworkElement; JSON key: tunnel_dst_edges",
+    "constraints": [
+      [
+        "Tunnel",
+        "NetworkElement"
+      ]
+    ],
+    "properties": []
+  },
+  {
+    "label": "TUNNEL_PROTO",
+    "type": "EDGE",
+    "description": "Tunnel protocol binding: Tunnel → Protocol (RFC 3209); JSON key: tunnel_proto_edges",
+    "constraints": [
+      [
+        "Tunnel",
+        "Protocol"
+      ]
+    ],
+    "properties": []
+  },
+  {
+    "label": "PATH_THROUGH",
+    "type": "EDGE",
+    "description": "Tunnel path sequence: Tunnel → NetworkElement (RFC 3209 ERO). hop_order defines path order (0=source, n=destination). JSON key: path_through_edges",
+    "constraints": [
+      [
+        "Tunnel",
+        "NetworkElement"
+      ]
+    ],
+    "properties": [
+      {
+        "name": "hop_order",
+        "type": "INT32",
+        "optional": false,
+        "unique": false,
+        "index": false,
+        "description": "Path sequence index (0=ingress LSR, n=egress LSR)"
+      }
+    ]
+  },
+  {
+    "label": "SERVICE_USES_TUNNEL",
+    "type": "EDGE",
+    "description": "Service leverages Tunnel: Service → Tunnel (RFC 4364 MPLS-VPN architecture); JSON key: service_uses_tunnel_edges",
+    "constraints": [
+      [
+        "Service",
+        "Tunnel"
+      ]
+    ],
+    "properties": []
+  }
+]

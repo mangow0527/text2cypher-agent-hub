@@ -1,0 +1,9 @@
+{
+  "id": "chg_1987b35f1a62",
+  "filename": "business_knowledge.md",
+  "target_type": "business_knowledge",
+  "suggestion": "Add business-term mapping guidance and a few-shot example that matches the failed question pattern.",
+  "created_at": "2026-04-13T13:06:51.105638+00:00",
+  "before": "## Terminology Mapping\n\n[id: protocol_version_mapping]\n- “协议版本”优先映射到 `Protocol.version`。\n\n[id: network_element_alias]\n- “网元”对应 `NetworkElement`。\n\n[id: tunnel_owner_path]\n- “隧道所属网元”优先理解为 `(:NetworkElement)-[:FIBER_SRC]->(:Tunnel)` 路径上的上游设备。\n\n## protocol_specification\n\n[id: protocol_version_mapping]\n{'v1': {'status': 'deprecated', 'features': ['basic_auth', 'rest_api_v1'], 'sunset_date': '2023-12-31'}, 'v2': {'status': 'supported', 'features': ['oauth2', 'rest_api_v2', 'graphql_readonly'], 'sunset_date': None}, 'v3': {'status': 'beta', 'features': ['mtls', 'grpc_api', 'graphql_full'], 'sunset_date': None}}\n",
+  "after": "## Terminology Mapping\n\n[id: protocol_version_mapping]\n- “协议版本”优先映射到 `Protocol.version`。\n\n[id: network_element_alias]\n- “网元”对应 `NetworkElement`。\n\n[id: tunnel_owner_path]\n- “隧道所属网元”优先理解为 `(:NetworkElement)-[:FIBER_SRC]->(:Tunnel)` 路径上的上游设备。\n\n\n[id: add_business_term_mapping_guidance_and_a_few_sho]\n- Add business-term mapping guidance and a few-shot example that matches the failed question pattern.\n## protocol_specification\n\n[id: protocol_version_mapping]\n{'v1': {'status': 'deprecated', 'features': ['basic_auth', 'rest_api_v1'], 'sunset_date': '2023-12-31'}, 'v2': {'status': 'supported', 'features': ['oauth2', 'rest_api_v2', 'graphql_readonly'], 'sunset_date': None}, 'v3': {'status': 'beta', 'features': ['mtls', 'grpc_api', 'graphql_full'], 'sunset_date': None}}\n"
+}
