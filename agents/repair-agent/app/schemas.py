@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from .models import IssueTicket, KRSSAnalysisRecord, KRSSIssueTicketResponse, KnowledgeRepairSuggestionRequest
+from .models import IssueTicket, KnowledgeRepairSuggestionRequest, RepairAnalysisRecord, RepairIssueTicketResponse
 
 
 __all__ = [
     "IssueTicket",
-    "KRSSIssueTicketResponse",
-    "KRSSAnalysisRecord",
+    "RepairIssueTicketResponse",
+    "RepairAnalysisRecord",
     "KnowledgeRepairSuggestionRequest",
 ]

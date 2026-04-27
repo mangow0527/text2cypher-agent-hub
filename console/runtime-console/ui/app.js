@@ -9,9 +9,9 @@ const improvementPill = document.getElementById('improvement-pill');
 const improvementSummary = document.getElementById('improvement-summary');
 const improvementDimensions = document.getElementById('improvement-dimensions');
 const improvementHighlights = document.getElementById('improvement-highlights');
-const krssSummary = document.getElementById('krss-summary');
-const krssDiagnosisGrid = document.getElementById('krss-diagnosis-grid');
-const krssDiagnosisFindings = document.getElementById('krss-diagnosis-findings');
+const repairSummary = document.getElementById('repair-summary');
+const repairDiagnosisGrid = document.getElementById('repair-diagnosis-grid');
+const repairDiagnosisFindings = document.getElementById('repair-diagnosis-findings');
 const cypherView = document.getElementById('cypher-view');
 const evaluationView = document.getElementById('evaluation-view');
 const repairView = document.getElementById('repair-view');
@@ -134,12 +134,19 @@ function renderArtifacts(detail) {
   repairView.textContent = pretty(detail.artifacts?.repair);
 }
 
-function renderKrssDiagnosis(detail) {
+function renderRepairDiagnosis(detail) {
   const analysis = detail.artifacts?.repair?.analysis || {};
+  const issueTicket = detail.artifacts?.repair?.issue_ticket || {};
   const request = analysis.knowledge_repair_request || {};
   const validationResult = analysis.validation_result || {};
-  krssSummary.textContent = analysis.rationale || '暂无 KRSS 诊断摘要。';
-  krssDiagnosisGrid.innerHTML = [
+  const promptSnapshotSource = analysis.prompt_snapshot
+    ? 'Testing Service 持久化的 RepairAnalysisRecord.prompt_snapshot'
+    : issueTicket.generation_evidence?.input_prompt_snapshot
+      ? 'Testing Service 持久化的 IssueTicket.generation_evidence.input_prompt_snapshot'
+      : '未提供';
+  repairSummary.textContent = analysis.rationale || '暂无 repair-agent 诊断摘要。';
+  repairDiagnosisGrid.innerHTML = [
+    ['Prompt snapshot 来源', promptSnapshotSource],
     ['主根因类型', analysis.primary_knowledge_type || '未提供'],
     ['候选修复类型', (analysis.candidate_patch_types || []).join(', ') || '未提供'],
     ['验证模式', analysis.validation_mode || 'disabled'],
@@ -156,7 +163,7 @@ function renderKrssDiagnosis(detail) {
       `
     )
     .join('');
-  krssDiagnosisFindings.innerHTML = [
+  repairDiagnosisFindings.innerHTML = [
     request.suggestion ? `最终建议: ${request.suggestion}` : null,
     (validationResult.validated_patch_types || []).length
       ? `验证通过: ${(validationResult.validated_patch_types || []).join(', ')}`
@@ -186,7 +193,6 @@ function improvementTone(status) {
 
 function improvementLabel(status) {
   const labels = {
-    first_run: '首轮',
     improved: '已改善',
     regressed: '已回退',
     unchanged: '无明显变化',
@@ -195,13 +201,33 @@ function improvementLabel(status) {
   return labels[status] || '暂不可比较';
 }
 
+function improvementOverview(dimensions) {
+  const values = Object.values(dimensions || {});
+  if (!values.length || values.every((value) => value === 'not_comparable')) {
+    return { label: '暂不可比较', tone: 'neutral' };
+  }
+  const improved = values.filter((value) => value === 'improved').length;
+  const regressed = values.filter((value) => value === 'regressed').length;
+  const unchanged = values.filter((value) => value === 'unchanged').length;
+  const parts = [`${improved} 项改善`, `${regressed} 项回退`, `${unchanged} 项不变`];
+  const notComparable = values.filter((value) => value === 'not_comparable').length;
+  if (notComparable) {
+    parts.push(`${notComparable} 项暂不可比较`);
+  }
+  return {
+    label: parts.join(' / '),
+    tone: regressed ? 'danger' : improved ? 'ok' : 'warn',
+  };
+}
+
 function renderImprovement(detail) {
   const assessment = detail.improvement_assessment || {};
-  improvementPill.textContent = improvementLabel(assessment.status);
-  improvementPill.className = `quality-pill tone-${improvementTone(assessment.status)}`;
+  const dimensions = assessment.dimensions || {};
+  const overview = improvementOverview(dimensions);
+  improvementPill.textContent = overview.label;
+  improvementPill.className = `quality-pill tone-${overview.tone}`;
   improvementSummary.textContent = assessment.summary_zh || '暂无改进评估。';
 
-  const dimensions = assessment.dimensions || {};
   improvementDimensions.innerHTML = Object.entries(dimensions)
     .map(
       ([key, value]) => `
@@ -246,7 +272,7 @@ async function loadTaskDetail() {
   renderOverview(payload);
   renderQuality(payload);
   renderImprovement(payload);
-  renderKrssDiagnosis(payload);
+  renderRepairDiagnosis(payload);
   renderArtifacts(payload);
 }
 

@@ -1,60 +1,31 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
-from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
 
 Difficulty = Literal["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8"]
-DimensionStatus = Literal["pass", "fail"]
-Verdict = Literal["pass", "fail", "partial_fail"]
-RootCauseType = Literal[
-    "generator_logic_issue",
-    "knowledge_gap_issue",
-    "qa_question_issue",
-    "mixed_issue",
-    "unknown",
-]
-ActionTarget = Literal["query_generator_service", "knowledge_ops_service", "qa_generation_service"]
-ActionType = Literal["prompt_adjustment", "knowledge_enrichment", "question_rewrite", "manual_review"]
-GenerationProcessingStatus = Literal[
-    "received",
-    "prompt_fetch_failed",
-    "prompt_ready",
-    "generated",
-    "model_invocation_failed",
-    "output_parsing_failed",
-    "guardrail_rejected",
-    "submitted_to_testing",
-    "failed",
-]
+Verdict = Literal["pass", "fail"]
 EvaluationState = Literal[
     "received_golden_only",
     "received_submission_only",
-    "waiting_for_golden",
     "ready_to_evaluate",
     "repair_pending",
     "repair_submission_failed",
     "issue_ticket_created",
     "passed",
 ]
-RepairPlanState = Literal[
-    "received_ticket",
-    "analyzing",
-    "counterfactual_checking",
-    "repair_plan_created",
-    "dispatched",
+StrictCheckStatus = Literal["pass", "fail", "not_run"]
+SemanticCheckStatus = Literal["pass", "fail", "not_run"]
+ExecutionAccuracyReason = Literal[
+    "strict_equal",
+    "semantic_equivalent",
+    "grammar_failed",
+    "execution_failed",
+    "not_equivalent",
 ]
-DispatchStatus = Literal["sent", "stored_for_later"]
-KnowledgeType = Literal["cypher_syntax", "few_shot", "system_prompt", "business_knowledge"]
-ImprovementStatus = Literal["first_run", "improved", "regressed", "unchanged", "not_comparable"]
-ImprovementDimensionStatus = Literal["improved", "regressed", "unchanged", "not_comparable"]
-
-
-class QAQuestionRequest(BaseModel):
-    id: str = Field(..., description="Globally unique identifier for the QA item.")
-    question: str
+ImprovementStatus = Literal["improved", "regressed", "unchanged"]
 
 
 class QAGoldenRequest(BaseModel):
@@ -64,229 +35,178 @@ class QAGoldenRequest(BaseModel):
     difficulty: Difficulty
 
 
-# Legacy repair analysis context kept for issue tickets and counterfactual experiments.
-class KnowledgeContext(BaseModel):
-    package_id: str
-    version: str
-    graph_name: str
-    summary: str
-    loaded_knowledge_tags: List[str] = Field(default_factory=list)
+class QAGoldenResponse(BaseModel):
+    id: str
+    status: EvaluationState
+    verdict: Optional[Verdict] = None
+    issue_ticket_id: Optional[str] = None
 
 
-# Repair-only experimental knowledge package contract.
-class KnowledgePackage(BaseModel):
-    package_id: str
-    version: str
-    graph_name: str
-    summary: str
-    schema_facts: Dict[str, Any]
-    business_terms: Dict[str, List[str]]
-    query_patterns: Dict[str, str]
-    constraints: Dict[str, List[str]]
-    knowledge_tags: List[str]
-
-
-# Repair-only legacy generation context. Not part of the Cypher Generation Service main contract.
-class GenerationContext(BaseModel):
+class GeneratedCypherSubmissionRequest(BaseModel):
     id: str
     question: str
-    schema_hint: Optional[str] = None
-    attempt: int = Field(default=1, ge=1)
-    prior_feedback: List[str] = Field(default_factory=list)
-    knowledge_context: Optional[KnowledgeContext] = None
+    generation_run_id: str
+    generated_cypher: str
+    input_prompt_snapshot: str
 
 
-# Repair-only counterfactual generation request.
-class CypherGenerationRequest(BaseModel):
-    context: GenerationContext
+class SubmissionReceipt(BaseModel):
+    accepted: bool
 
 
-# Repair-only generated result shape used by counterfactual experiments.
-class GeneratedCypher(BaseModel):
-    cypher: str
-    model: str
-    reasoning_summary: str
-    prompt_version: str = "v1"
-
-
-class TuGraphExecutionResult(BaseModel):
+class ExecutionResult(BaseModel):
     success: bool
-    rows: List[Dict[str, Any]] = Field(default_factory=list)
-    row_count: int = 0
+    rows: Optional[List[Dict[str, Any]]] = None
+    row_count: Optional[int] = None
     error_message: Optional[str] = None
     elapsed_ms: int = 0
 
 
-# Current runtime contract between Cypher Generation Service and Testing Service.
-class EvaluationSubmissionRequest(BaseModel):
-    id: str
-    question: str
-    generation_run_id: str
-    attempt_no: int = Field(default=1, ge=1)
-    generated_cypher: str
-    parse_summary: str
-    guardrail_summary: str
-    raw_output_snapshot: str
-    input_prompt_snapshot: str
+class GrammarMetric(BaseModel):
+    score: int = Field(ge=0, le=1)
+    parser_error: Optional[str] = None
+    message: Optional[str] = None
 
 
-class EvaluationDimensions(BaseModel):
-    syntax_validity: DimensionStatus
-    schema_alignment: DimensionStatus
-    result_correctness: DimensionStatus
-    question_alignment: DimensionStatus
+class StrictDiff(BaseModel):
+    missing_rows: List[Any] = Field(default_factory=list)
+    unexpected_rows: List[Any] = Field(default_factory=list)
+    order_mismatch: Optional[bool] = None
+
+
+class StrictEvidence(BaseModel):
+    golden_answer: List[Any]
+    actual_answer: List[Any]
+    diff: StrictDiff
+
+
+class StrictCheck(BaseModel):
+    status: StrictCheckStatus
+    message: Optional[str] = None
+    order_sensitive: bool = False
+    expected_row_count: int = 0
+    actual_row_count: int = 0
+    evidence: Optional[StrictEvidence] = None
+
+
+class SemanticCheck(BaseModel):
+    status: SemanticCheckStatus
+    message: Optional[str] = None
+    raw_output: Optional[Dict[str, Any]] = None
+
+
+class ExecutionAccuracy(BaseModel):
+    score: int = Field(ge=0, le=1)
+    reason: ExecutionAccuracyReason
+    strict_check: StrictCheck
+    semantic_check: SemanticCheck
+
+
+class GLEUSignal(BaseModel):
+    score: float = Field(ge=0.0, le=1.0)
+    tokenizer: str
+    min_n: int
+    max_n: int
+
+
+class JaroWinklerSimilaritySignal(BaseModel):
+    score: float = Field(ge=0.0, le=1.0)
+    normalization: str
+    library: str
+
+
+class SecondarySignals(BaseModel):
+    gleu: GLEUSignal
+    jaro_winkler_similarity: JaroWinklerSimilaritySignal
+
+
+class PrimaryMetrics(BaseModel):
+    grammar: GrammarMetric
+    execution_accuracy: ExecutionAccuracy
 
 
 class EvaluationSummary(BaseModel):
     verdict: Verdict
-    dimensions: EvaluationDimensions
-    symptom: str
-    evidence: List[str] = Field(default_factory=list)
+    primary_metrics: PrimaryMetrics
+    secondary_signals: SecondarySignals
 
 
-class ExpectedAnswer(BaseModel):
+class ExpectedPayload(BaseModel):
     cypher: str
     answer: Any
 
 
-class ActualAnswer(BaseModel):
+class ActualPayload(BaseModel):
     generated_cypher: str
-    execution: TuGraphExecutionResult
+    execution: Optional[ExecutionResult] = None
 
 
-class IssueTicket(BaseModel):
-    ticket_id: str = Field(default_factory=lambda: str(uuid4()))
-    id: str
-    difficulty: Difficulty
-    question: str
-    expected: ExpectedAnswer
-    actual: ActualAnswer
-    knowledge_context: Optional[KnowledgeContext] = None
-    evaluation: EvaluationSummary
-    input_prompt_snapshot: str = ""
-
-
-class RepairAction(BaseModel):
-    target_service: ActionTarget
-    action_type: ActionType
-    instruction: str
-    evidence: List[str] = Field(default_factory=list)
-    dispatch_status: Optional[DispatchStatus] = None
-
-
-class RepairPlan(BaseModel):
-    plan_id: str = Field(default_factory=lambda: str(uuid4()))
-    ticket_id: str
-    id: str
-    root_cause: RootCauseType
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    actions: List[RepairAction] = Field(default_factory=list)
-    state: RepairPlanState = "repair_plan_created"
-    analysis_summary: str = ""
-    counterfactuals: List[Dict[str, Any]] = Field(default_factory=list)
-
-
-class QueryQuestionResponse(BaseModel):
-    id: str
+class GenerationEvidence(BaseModel):
     generation_run_id: str
-    attempt_no: int = Field(default=1, ge=1)
-    generation_status: GenerationProcessingStatus
-    generated_cypher: str = ""
-    parse_summary: str = ""
-    guardrail_summary: str = ""
-    raw_output_snapshot: str = ""
-    failure_stage: Optional[str] = None
-    failure_reason_summary: Optional[str] = None
-    input_prompt_snapshot: str = ""
-
-
-class PromptFetchRequest(BaseModel):
-    id: str
-    question: str
-
-
-class PromptSnapshotResponse(BaseModel):
-    id: str
-    attempt_no: int = Field(default=1, ge=1)
+    attempt_no: int = Field(ge=1)
     input_prompt_snapshot: str
 
 
-class ImprovementDimensions(BaseModel):
-    verdict_change: ImprovementDimensionStatus = "not_comparable"
-    execution_change: ImprovementDimensionStatus = "not_comparable"
-    syntax_change: ImprovementDimensionStatus = "not_comparable"
-    semantic_change: ImprovementDimensionStatus = "not_comparable"
-    repair_effectiveness: ImprovementDimensionStatus = "not_comparable"
+class IssueTicket(BaseModel):
+    ticket_id: str
+    id: str
+    difficulty: Difficulty
+    question: str
+    expected: ExpectedPayload
+    actual: ActualPayload
+    evaluation: EvaluationSummary
+    generation_evidence: GenerationEvidence
+
+
+class ImprovementMetricChange(BaseModel):
+    previous: Any
+    current: Any
+    status: ImprovementStatus
+
+
+class ImprovementMetrics(BaseModel):
+    grammar_score: ImprovementMetricChange
+    execution_accuracy_score: ImprovementMetricChange
+    gleu_score: ImprovementMetricChange
+    jaro_winkler_similarity_score: ImprovementMetricChange
 
 
 class ImprovementAssessment(BaseModel):
     qa_id: str
     current_attempt_no: int = Field(ge=1)
     previous_attempt_no: Optional[int] = Field(default=None, ge=1)
-    status: ImprovementStatus
     summary_zh: str
-    dimensions: ImprovementDimensions = Field(default_factory=ImprovementDimensions)
+    metrics: ImprovementMetrics
     highlights: List[str] = Field(default_factory=list)
     evidence: List[str] = Field(default_factory=list)
 
 
-class KnowledgeRepairSuggestionRequest(BaseModel):
+class SubmissionRecord(BaseModel):
     id: str
-    suggestion: str
-    knowledge_types: List[KnowledgeType]
-
-
-class KRSSIssueTicketResponse(BaseModel):
-    status: Literal["applied"] = "applied"
-    analysis_id: str
-    id: str
-    knowledge_repair_request: KnowledgeRepairSuggestionRequest
-    knowledge_ops_response: Optional[Dict[str, Any]] = None
-    applied: bool = True
-
-
-class KRSSAnalysisRecord(BaseModel):
-    analysis_id: str
-    ticket_id: str
-    id: str
-    status: Literal["applied"] = "applied"
-    prompt_snapshot: str
-    knowledge_repair_request: KnowledgeRepairSuggestionRequest
-    knowledge_ops_response: Optional[Dict[str, Any]] = None
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    rationale: str = ""
-    used_experiments: bool = False
-    primary_knowledge_type: Optional[KnowledgeType] = None
-    secondary_knowledge_types: List[KnowledgeType] = Field(default_factory=list)
-    candidate_patch_types: List[KnowledgeType] = Field(default_factory=list)
-    validation_mode: Literal["lightweight", "disabled"] = "disabled"
-    validation_result: Dict[str, Any] = Field(default_factory=dict)
-    diagnosis_context_summary: Dict[str, Any] = Field(default_factory=dict)
-    applied: bool = True
-    created_at: str
-    applied_at: str
-
-
-class QAGoldenResponse(BaseModel):
-    id: str
-    status: EvaluationState
+    attempt_no: int
+    question: str
+    generation_run_id: str
+    generated_cypher: str
+    input_prompt_snapshot: str
+    state: EvaluationState
+    execution: Optional[ExecutionResult] = None
+    evaluation: Optional[EvaluationSummary] = None
     issue_ticket_id: Optional[str] = None
-    verdict: Optional[Verdict] = None
+    repair_response: Optional[Dict[str, Any]] = None
+    improvement_assessment: Optional[ImprovementAssessment] = None
+    received_at: str
+    updated_at: str
 
 
-class EvaluationSubmissionResponse(BaseModel):
+class SaveSubmissionResult(BaseModel):
+    created: bool
+    attempt_no: int
+    record: SubmissionRecord
+
+
+class EvaluationStatusResponse(BaseModel):
     id: str
-    status: EvaluationState
-    issue_ticket_id: Optional[str] = None
-    verdict: Optional[Verdict] = None
-
-
-class RepairPlanEnvelope(BaseModel):
-    status: str
-    plan: RepairPlan
-
-
-class QueryGeneratorRepairReceipt(BaseModel):
-    status: str
-    plan_id: str
-    id: str
+    golden: Optional[Dict[str, Any]] = None
+    submission: Optional[Dict[str, Any]] = None
+    attempts: List[Dict[str, Any]] = Field(default_factory=list)
+    issue_ticket: Optional[Dict[str, Any]] = None

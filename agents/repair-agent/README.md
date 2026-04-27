@@ -1,3 +1,3 @@
-# Repair Agent
+# repair-agent
 
-This service analyzes failed evaluations, produces knowledge repair suggestions, and dispatches repair payloads to the knowledge service.
+This service analyzes failed evaluations, produces knowledge repair suggestions, and dispatches repair payloads to `knowledge-agent`.

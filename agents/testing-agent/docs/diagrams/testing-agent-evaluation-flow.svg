@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1740" viewBox="0 0 1280 1740" role="img" aria-labelledby="title desc">
+  <title id="title">Testing-agent evaluation flow</title>
+  <desc id="desc">Vertical evaluation flow showing grammar check, execution, strict compare, optional semantic review, execution accuracy assembly, verdict, and pass or issue ticket outcomes.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#334155" />
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 30px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 16px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #475569; }
+      .text { font: 600 20px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #0f172a; }
+      .small { font: 400 16px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #334155; }
+      .tiny { font: 400 13px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #64748b; }
+      .input { fill: #eef6ff; stroke: #2563eb; stroke-width: 2; }
+      .process { fill: #ffffff; stroke: #334155; stroke-width: 1.8; }
+      .decision { fill: #ffffff; stroke: #475569; stroke-width: 1.8; }
+      .semantic { fill: #fff7ed; stroke: #ea580c; stroke-width: 2; }
+      .summary { fill: #f8fafc; stroke: #64748b; stroke-width: 1.8; }
+      .success { fill: #ecfdf5; stroke: #059669; stroke-width: 2; }
+      .failure { fill: #fff7ed; stroke: #ea580c; stroke-width: 2; }
+      .line { stroke: #334155; stroke-width: 1.8; fill: none; marker-end: url(#arrow); }
+      .dash { stroke: #64748b; stroke-width: 1.6; fill: none; stroke-dasharray: 7 6; marker-end: url(#arrow); }
+      .label { font: 600 14px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #475569; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1280" height="1740" />
+  <text x="56" y="56" class="title">Testing-agent 评测主链路</text>
+  <text x="56" y="88" class="subtitle">核心过程：从配对完成开始，沿 grammar、执行、strict compare、语义复核一路收敛到 verdict。</text>
+
+  <rect x="370" y="140" width="540" height="92" rx="12" class="input" />
+  <text x="400" y="177" class="text">golden + submission</text>
+  <text x="400" y="205" class="small">同一 `id` 已完成配对，正式进入评测</text>
+
+  <rect x="370" y="300" width="540" height="100" rx="12" class="process" />
+  <text x="400" y="339" class="text">Grammar Check</text>
+  <text x="400" y="369" class="small">parser 判定 generated_cypher 是否是合法 Cypher / GQL 语句</text>
+
+  <polygon points="640,450 780,525 640,600 500,525" class="decision" />
+  <text x="640" y="518" class="text" text-anchor="middle">grammar 通过?</text>
+  <text x="640" y="545" class="small" text-anchor="middle">yes / no</text>
+
+  <rect x="80" y="471" width="240" height="108" rx="12" class="failure" />
+  <text x="200" y="515" class="text" text-anchor="middle">grammar failed</text>
+  <text x="200" y="547" class="small" text-anchor="middle">execution_accuracy = 0</text>
+  <text x="200" y="571" class="small" text-anchor="middle">verdict = fail</text>
+
+  <rect x="370" y="654" width="540" height="110" rx="12" class="process" />
+  <text x="400" y="694" class="text">执行 generated_cypher</text>
+  <text x="400" y="724" class="small">连接 TuGraph，得到 actual_answer 或 execution error</text>
+
+  <polygon points="640,818 780,893 640,968 500,893" class="decision" />
+  <text x="640" y="886" class="text" text-anchor="middle">执行成功?</text>
+  <text x="640" y="913" class="small" text-anchor="middle">yes / no</text>
+
+  <rect x="80" y="839" width="240" height="108" rx="12" class="failure" />
+  <text x="200" y="883" class="text" text-anchor="middle">execution failed</text>
+  <text x="200" y="915" class="small" text-anchor="middle">strict_check = not_run</text>
+  <text x="200" y="939" class="small" text-anchor="middle">verdict = fail</text>
+
+  <rect x="370" y="1022" width="540" height="116" rx="12" class="process" />
+  <text x="400" y="1062" class="text">Strict Compare</text>
+  <text x="400" y="1092" class="small">规范化 golden_answer / actual_answer</text>
+  <text x="400" y="1118" class="small">生成 strict_check 与 evidence</text>
+
+  <polygon points="640,1196 780,1271 640,1346 500,1271" class="decision" />
+  <text x="640" y="1264" class="text" text-anchor="middle">strict 通过?</text>
+  <text x="640" y="1291" class="small" text-anchor="middle">yes / no</text>
+
+  <rect x="930" y="1208" width="280" height="116" rx="12" class="semantic" />
+  <text x="962" y="1250" class="text">Semantic Review</text>
+  <text x="962" y="1282" class="small">仅在 strict fail 且 LLM 可用时触发</text>
+  <text x="962" y="1308" class="small">输出 semantic_check</text>
+
+  <rect x="370" y="1438" width="540" height="108" rx="12" class="summary" />
+  <text x="400" y="1480" class="text">Execution Accuracy + EvaluationSummary</text>
+  <text x="400" y="1512" class="small">汇总 strict_check / semantic_check</text>
+  <text x="400" y="1538" class="small">生成 execution_accuracy、primary_metrics 与 verdict</text>
+
+  <polygon points="640,1600 760,1668 640,1736 520,1668" class="decision" />
+  <text x="640" y="1662" class="text" text-anchor="middle">verdict?</text>
+  <text x="640" y="1688" class="small" text-anchor="middle">pass / fail</text>
+
+  <rect x="150" y="1610" width="190" height="108" rx="12" class="success" />
+  <text x="245" y="1652" class="text" text-anchor="middle">pass</text>
+  <text x="245" y="1684" class="small" text-anchor="middle">标记 passed</text>
+
+  <rect x="940" y="1610" width="210" height="108" rx="12" class="failure" />
+  <text x="1045" y="1652" class="text" text-anchor="middle">fail</text>
+  <text x="1045" y="1684" class="small" text-anchor="middle">生成 IssueTicket</text>
+  <text x="1045" y="1710" class="small" text-anchor="middle">并进入 repair-agent</text>
+
+  <path d="M640 232 V300" class="line" />
+  <path d="M640 400 V450" class="line" />
+  <path d="M500 525 H320" class="dash" />
+  <path d="M640 600 V654" class="line" />
+  <path d="M640 764 V818" class="line" />
+  <path d="M500 893 H320" class="dash" />
+  <path d="M640 968 V1022" class="line" />
+  <path d="M640 1138 V1196" class="line" />
+  <path d="M780 1271 H930" class="dash" />
+  <path d="M640 1346 V1438" class="line" />
+  <path d="M930 1271 C900 1271 870 1380 870 1438" class="dash" />
+  <path d="M640 1546 V1600" class="line" />
+  <path d="M520 1668 H340" class="line" />
+  <path d="M760 1668 H940" class="dash" />
+
+  <text x="408" y="510" class="label">no</text>
+  <text x="658" y="630" class="label">yes</text>
+  <text x="408" y="878" class="label">no</text>
+  <text x="658" y="998" class="label">yes</text>
+  <text x="810" y="1254" class="label">no</text>
+  <text x="658" y="1386" class="label">yes</text>
+  <text x="884" y="1416" class="label">semantic_check 参与汇总</text>
+  <text x="392" y="1654" class="label">pass</text>
+  <text x="798" y="1654" class="label">fail</text>
+
+</svg>

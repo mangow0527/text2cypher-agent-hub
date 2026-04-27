@@ -4,10 +4,16 @@ import logging
 from functools import lru_cache
 from typing import Any, Dict, Optional, Protocol
 
-from .models import IssueTicket, KRSSAnalysisRecord, KRSSIssueTicketResponse, KnowledgeRepairSuggestionRequest, KnowledgeType, PromptSnapshotResponse
+from .models import (
+    IssueTicket,
+    KnowledgeRepairSuggestionRequest,
+    KnowledgeType,
+    RepairAnalysisRecord,
+    RepairIssueTicketResponse,
+)
 
-from .analysis import DiagnosisContext, KRSSAnalyzer
-from .clients import CGSPromptSnapshotClient, KnowledgeOpsRepairApplyClient, OpenAICompatibleKRSSAnalyzer
+from .analysis import DiagnosisContext, RepairAnalyzer
+from .clients import KnowledgeOpsRepairApplyClient, OpenAICompatibleRepairAnalyzer
 from .config import Settings, get_settings
 from .repository import RepairRepository, _utc_now
 
@@ -20,11 +26,6 @@ def _coerce_model_payload(value: Any) -> Any:
     return value
 
 
-class PromptSnapshotFetcher(Protocol):
-    async def fetch(self, id: str) -> PromptSnapshotResponse:
-        ...
-
-
 class KnowledgeRepairApplier(Protocol):
     async def apply(self, payload: KnowledgeRepairSuggestionRequest) -> Dict[str, object] | None:
         ...
@@ -34,37 +35,35 @@ class RepairService:
     def __init__(
         self,
         repository: RepairRepository,
-        prompt_snapshot_client: PromptSnapshotFetcher,
-        analyzer: KRSSAnalyzer,
+        analyzer: RepairAnalyzer,
         apply_client: KnowledgeRepairApplier,
         settings: Optional[Settings] = None,
     ) -> None:
         self.repository = repository
-        self.prompt_snapshot_client = prompt_snapshot_client
         self.analyzer = analyzer
         self.apply_client = apply_client
         self.settings = settings
 
-    async def create_issue_ticket_response(self, issue_ticket: IssueTicket) -> KRSSIssueTicketResponse:
+    async def create_issue_ticket_response(self, issue_ticket: IssueTicket) -> RepairIssueTicketResponse:
         existing = self.repository.get_analysis(self._analysis_id_for_ticket(issue_ticket.ticket_id))
         if existing is not None:
-            return KRSSIssueTicketResponse(
+            return RepairIssueTicketResponse(
                 analysis_id=existing.analysis_id,
                 id=existing.id,
                 knowledge_repair_request=_coerce_model_payload(existing.knowledge_repair_request),
                 knowledge_ops_response=existing.knowledge_ops_response,
                 applied=existing.applied,
             )
-        prompt_snapshot_response = await self.prompt_snapshot_client.fetch(issue_ticket.id)
-        analysis = await self.analyzer.analyze(issue_ticket, prompt_snapshot_response.input_prompt_snapshot)
+        prompt_snapshot = _prompt_snapshot_from_issue_ticket(issue_ticket)
+        analysis = await self.analyzer.analyze(issue_ticket, prompt_snapshot)
         request = analysis.to_request()
         knowledge_ops_response = await self.apply_client.apply(request)
 
-        record = KRSSAnalysisRecord(
+        record = RepairAnalysisRecord(
             analysis_id=self._analysis_id_for_ticket(issue_ticket.ticket_id),
             ticket_id=issue_ticket.ticket_id,
             id=issue_ticket.id,
-            prompt_snapshot=prompt_snapshot_response.input_prompt_snapshot,
+            prompt_snapshot=prompt_snapshot,
             knowledge_repair_request=_coerce_model_payload(request),
             knowledge_ops_response=knowledge_ops_response,
             confidence=analysis.confidence,
@@ -80,7 +79,7 @@ class RepairService:
             applied_at=_utc_now(),
         )
         self.repository.save_analysis(record)
-        return KRSSIssueTicketResponse(
+        return RepairIssueTicketResponse(
             analysis_id=record.analysis_id,
             id=record.id,
             knowledge_repair_request=_coerce_model_payload(record.knowledge_repair_request),
@@ -88,19 +87,18 @@ class RepairService:
             applied=record.applied,
         )
 
-    def get_analysis(self, analysis_id: str) -> Optional[KRSSAnalysisRecord]:
+    def get_analysis(self, analysis_id: str) -> Optional[RepairAnalysisRecord]:
         return self.repository.get_analysis(analysis_id)
 
     def get_service_status(self) -> Dict[str, object]:
         settings = self.settings or get_settings()
         return {
             "storage": settings.data_dir,
-            "cgs_base_url": settings.cgs_base_url,
-            "knowledge_ops_repairs_apply_url": settings.knowledge_ops_repairs_apply_url,
+            "knowledge_agent_apply_url": settings.knowledge_ops_repairs_apply_url,
             "llm_enabled": settings.llm_enabled,
             "llm_model": settings.llm_model_name,
             "llm_configured": True,
-            "mode": "krss_apply",
+            "mode": "repair_apply",
             "diagnosis_mode": "llm",
         }
 
@@ -109,9 +107,17 @@ class RepairService:
         return f"analysis-{ticket_id}"
 
 
-def _build_analyzer(settings: Settings) -> KRSSAnalyzer:
-    return KRSSAnalyzer(
-        diagnosis_client=OpenAICompatibleKRSSAnalyzer(
+def _prompt_snapshot_from_issue_ticket(issue_ticket: IssueTicket) -> str:
+    evidence_prompt = issue_ticket.generation_evidence.input_prompt_snapshot
+    if isinstance(evidence_prompt, str) and evidence_prompt:
+        return evidence_prompt
+    fallback_prompt = getattr(issue_ticket, "input_prompt_snapshot", "")
+    return fallback_prompt if isinstance(fallback_prompt, str) else ""
+
+
+def _build_analyzer(settings: Settings) -> RepairAnalyzer:
+    return RepairAnalyzer(
+        diagnosis_client=OpenAICompatibleRepairAnalyzer(
             base_url=settings.llm_base_url or "",
             api_key=settings.llm_api_key or "",
             model=settings.llm_model_name or "",
@@ -195,10 +201,6 @@ def _build_validation_reason(
 def build_repair_service(settings: Settings) -> RepairService:
     return RepairService(
         repository=RepairRepository(data_dir=settings.data_dir),
-        prompt_snapshot_client=CGSPromptSnapshotClient(
-            base_url=settings.cgs_base_url,
-            timeout_seconds=settings.request_timeout_seconds,
-        ),
         analyzer=_build_analyzer(settings),
         apply_client=KnowledgeOpsRepairApplyClient(
             apply_url=settings.knowledge_ops_repairs_apply_url,

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from .schemas import KRSSAnalysisRecord
+from .schemas import RepairAnalysisRecord
 
 
 class RepairRepository:
@@ -13,16 +13,16 @@ class RepairRepository:
         self._analyses_dir = Path(data_dir) / "analyses"
         self._analyses_dir.mkdir(parents=True, exist_ok=True)
 
-    def save_analysis(self, record: KRSSAnalysisRecord) -> None:
+    def save_analysis(self, record: RepairAnalysisRecord) -> None:
         path = self._analyses_dir / f"{record.analysis_id}.json"
         path.write_text(json.dumps(record.model_dump(mode="json"), ensure_ascii=False, indent=2), encoding="utf-8")
 
-    def get_analysis(self, analysis_id: str) -> Optional[KRSSAnalysisRecord]:
+    def get_analysis(self, analysis_id: str) -> Optional[RepairAnalysisRecord]:
         path = self._analyses_dir / f"{analysis_id}.json"
         if not path.exists():
             return None
         payload = json.loads(path.read_text(encoding="utf-8"))
-        return KRSSAnalysisRecord.model_validate(payload)
+        return RepairAnalysisRecord.model_validate(payload)
 
 
 def _utc_now() -> str:

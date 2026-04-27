@@ -10,7 +10,7 @@
 
 ## 目录结构
 
-- `agents/query-generator-agent/`
+- `agents/cypher-generator-agent/`
 - `agents/testing-agent/`
 - `agents/repair-agent/`
 - `agents/knowledge-agent/`
@@ -31,7 +31,7 @@
 单服务同步：
 
 ```bash
-./sync/scripts/sync_query_generator.sh
+./sync/scripts/sync_cypher_generator.sh
 ./sync/scripts/sync_testing.sh
 ./sync/scripts/sync_repair.sh
 ./sync/scripts/sync_knowledge.sh
@@ -44,7 +44,7 @@
 
 默认来源定义在 [sync/sources.conf](/Users/mangowmac/Desktop/code/text2cypher-agent-hub/sync/sources.conf)。
 
-- `query-generator-agent`
+- `cypher-generator-agent`
 - `testing-agent`
 - `repair-agent`
 - `runtime-console`
@@ -55,9 +55,8 @@
 - `knowledge-agent`
 - `qa-agent`
 
-默认来自本地 [third_party](/Users/mangowmac/Desktop/code/NL2Cypher/third_party) 目录中的最新代码副本。
+默认来自本地 [third_party](/Users/mangowmac/Desktop/code/NL2Cypher/third_party) 目录中的最新代码副本；如果本地不存在，对应同步步骤会自动跳过。
 
 ## 使用说明
 
 详细同步说明见 [docs/sync-guide.md](/Users/mangowmac/Desktop/code/text2cypher-agent-hub/docs/sync-guide.md)。
-

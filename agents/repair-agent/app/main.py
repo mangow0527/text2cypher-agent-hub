@@ -6,12 +6,12 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 
-from .models import IssueTicket, KRSSAnalysisRecord, KRSSIssueTicketResponse
+from .models import IssueTicket, RepairAnalysisRecord, RepairIssueTicketResponse
 
 from .config import get_settings
 from .service import get_repair_service
 
-app = FastAPI(title="Knowledge Repair Suggestion Service", version="1.0.0")
+app = FastAPI(title="repair-agent", version="1.0.0")
 ui_dir = Path(__file__).resolve().parents[1] / "ui"
 app.mount("/ui", StaticFiles(directory=ui_dir), name="repair-ui")
 
@@ -28,7 +28,7 @@ async def console() -> FileResponse:
 
 @app.get("/health")
 async def healthcheck() -> Dict[str, str]:
-    return {"status": "ok", "service": "knowledge_repair_suggestion_service"}
+    return {"status": "ok", "service": "repair-agent"}
 
 
 @app.get("/api/v1/status")
@@ -36,16 +36,16 @@ async def service_status() -> Dict[str, object]:
     return get_repair_service().get_service_status()
 
 
-@app.post("/api/v1/issue-tickets", response_model=KRSSIssueTicketResponse)
-async def create_issue_ticket_response(issue_ticket: IssueTicket) -> KRSSIssueTicketResponse:
+@app.post("/api/v1/issue-tickets", response_model=RepairIssueTicketResponse)
+async def create_issue_ticket_response(issue_ticket: IssueTicket) -> RepairIssueTicketResponse:
     return await get_repair_service().create_issue_ticket_response(issue_ticket)
 
 
-@app.get("/api/v1/krss-analyses/{analysis_id}", response_model=KRSSAnalysisRecord)
-async def get_krss_analysis(analysis_id: str) -> KRSSAnalysisRecord:
+@app.get("/api/v1/analyses/{analysis_id}", response_model=RepairAnalysisRecord)
+async def get_repair_analysis(analysis_id: str) -> RepairAnalysisRecord:
     analysis = get_repair_service().get_analysis(analysis_id)
     if analysis is None:
-        raise HTTPException(status_code=404, detail=f"No KRSS analysis found for analysis_id={analysis_id}")
+        raise HTTPException(status_code=404, detail=f"No repair analysis found for analysis_id={analysis_id}")
     return analysis
 
 

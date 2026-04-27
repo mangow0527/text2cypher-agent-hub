@@ -10,7 +10,7 @@ from .models import IssueTicket, KnowledgeRepairSuggestionRequest, KnowledgeType
 DiagnosisContext = Dict[str, Any]
 
 
-class KRSSDiagnosisClient(Protocol):
+class RepairDiagnosisClient(Protocol):
     async def diagnose(self, context: DiagnosisContext) -> Dict[str, Any]:
         ...
 
@@ -22,7 +22,7 @@ _ALLOWED_KNOWLEDGE_TYPES = frozenset({"cypher_syntax", "few_shot", "system_promp
 
 
 @dataclass(slots=True)
-class KRSSAnalysisResult:
+class RepairAnalysisResult:
     id: str
     suggestion: str
     knowledge_types: List[KnowledgeType]
@@ -51,6 +51,8 @@ def build_diagnosis_context(
     recent_applied_repairs: Optional[List[Dict[str, Any]]] = None,
 ) -> DiagnosisContext:
     return {
+        "ticket_id": ticket.ticket_id,
+        "id": ticket.id,
         "question": ticket.question,
         "difficulty": ticket.difficulty,
         "sql_pair": {
@@ -59,20 +61,21 @@ def build_diagnosis_context(
         },
         "evaluation_summary": {
             "verdict": ticket.evaluation.verdict,
-            "dimensions": ticket.evaluation.dimensions.model_dump(mode="json"),
-            "symptom": ticket.evaluation.symptom,
-            "evidence_preview": ticket.evaluation.evidence[:2],
+            "primary_metrics": ticket.evaluation.primary_metrics.model_dump(mode="json"),
+            "secondary_signals": ticket.evaluation.secondary_signals.model_dump(mode="json"),
         },
         "failure_diff": _build_failure_diff(ticket),
+        "prompt_evidence": _build_prompt_evidence(prompt_snapshot),
+        "generation_evidence": _build_generation_evidence(ticket, prompt_snapshot),
         "relevant_prompt_fragments": _extract_relevant_prompt_fragments(prompt_snapshot),
         "recent_applied_repairs": recent_applied_repairs or [],
     }
 
 
-class KRSSAnalyzer:
+class RepairAnalyzer:
     def __init__(
         self,
-        diagnosis_client: KRSSDiagnosisClient,
+        diagnosis_client: RepairDiagnosisClient,
         *,
         min_confidence_for_direct_return: float = 0.8,
         experiment_runner: Optional[ExperimentRunner] = None,
@@ -81,7 +84,7 @@ class KRSSAnalyzer:
         self.min_confidence_for_direct_return = min_confidence_for_direct_return
         self.experiment_runner = experiment_runner
 
-    async def analyze(self, ticket: IssueTicket, prompt_snapshot: str) -> KRSSAnalysisResult:
+    async def analyze(self, ticket: IssueTicket, prompt_snapshot: str) -> RepairAnalysisResult:
         context = build_diagnosis_context(ticket, prompt_snapshot)
         diagnosis = await self.diagnosis_client.diagnose(context)
 
@@ -94,7 +97,7 @@ class KRSSAnalyzer:
         need_validation = bool(diagnosis.get("need_validation"))
 
         if not need_validation or not candidate_patch_types or self.experiment_runner is None:
-            return KRSSAnalysisResult(
+            return RepairAnalysisResult(
                 id=ticket.id,
                 suggestion=suggestion,
                 knowledge_types=[primary_knowledge_type],
@@ -133,15 +136,14 @@ class KRSSAnalyzer:
                 elif patch_metric == best_metric:
                     best_patch_types.append(patch_type)
                 best_confidence = max(best_confidence, self._coerce_confidence(experiment_result.get("confidence"), fallback=best_confidence))
-                experiment_suggestion = experiment_result.get("suggestion")
-                if experiment_suggestion:
-                    best_suggestion = str(experiment_suggestion)
+                if experiment_result.get("suggestion"):
+                    best_suggestion = str(experiment_result["suggestion"])
             else:
                 rejected_patch_types.append(patch_type)
                 validation_reasoning.append(str(experiment_result.get("reason") or f"{patch_type} did not improve the diagnosis"))
 
         selected_knowledge_types = best_patch_types or [primary_knowledge_type]
-        return KRSSAnalysisResult(
+        return RepairAnalysisResult(
             id=ticket.id,
             suggestion=best_suggestion,
             knowledge_types=selected_knowledge_types,
@@ -214,6 +216,7 @@ class KRSSAnalyzer:
                 for key, value in context["relevant_prompt_fragments"].items()
                 if isinstance(value, str)
             },
+            "prompt_evidence_length": len(str(context.get("prompt_evidence") or "")),
         }
 
 
@@ -221,15 +224,27 @@ def _build_failure_diff(ticket: IssueTicket) -> Dict[str, Any]:
     expected = ticket.expected.cypher.lower()
     actual = ticket.actual.generated_cypher.lower()
     question = ticket.question.lower()
-    dimensions = ticket.evaluation.dimensions
+    grammar = ticket.evaluation.primary_metrics.grammar
+    execution_accuracy = ticket.evaluation.primary_metrics.execution_accuracy
+    semantic_check = execution_accuracy.semantic_check
+    strict_check = execution_accuracy.strict_check
+    similarity = ticket.evaluation.secondary_signals.jaro_winkler_similarity.score
     execution = ticket.actual.execution
 
     ordering_problem = ("order by" in expected) and ("order by" not in actual)
     limit_problem = ("limit" in expected) and ("limit" not in actual or _extract_limit(expected) != _extract_limit(actual))
     return_shape_problem = (" return " in expected and " return " in actual) and _return_shape(expected) != _return_shape(actual)
-    syntax_problem = dimensions.syntax_validity == "fail"
-    execution_problem = (not execution.success) or bool(execution.error_message)
-    entity_or_relation_problem = dimensions.question_alignment == "fail" or _mentions_relation(question, expected, actual)
+    syntax_problem = grammar.score == 0 or bool(grammar.parser_error)
+    execution_problem = bool(execution and ((execution.success is False) or execution.error_message))
+    entity_or_relation_problem = (
+        execution_accuracy.score == 0
+        and (
+            strict_check.status == "fail"
+            or semantic_check.status == "fail"
+            or similarity < 0.9
+            or _mentions_relation(question, expected, actual)
+        )
+    )
 
     missing_or_wrong_clauses: List[str] = []
     if ordering_problem:
@@ -245,8 +260,11 @@ def _build_failure_diff(ticket: IssueTicket) -> Dict[str, Any]:
     if execution_problem:
         missing_or_wrong_clauses.append("execution")
 
-    extra_projection = "projected_properties" if " as " in actual and " as " not in expected else ""
-    semantic_mismatch_summary = ticket.evaluation.symptom or "; ".join(ticket.evaluation.evidence[:2])
+    semantic_mismatch_summary = (
+        strict_check.message
+        or semantic_check.message
+        or execution_accuracy.reason
+    )
     return {
         "ordering_problem": ordering_problem,
         "limit_problem": limit_problem,
@@ -255,7 +273,6 @@ def _build_failure_diff(ticket: IssueTicket) -> Dict[str, Any]:
         "execution_problem": execution_problem,
         "syntax_problem": syntax_problem,
         "missing_or_wrong_clauses": missing_or_wrong_clauses,
-        "extra_projection": extra_projection,
         "semantic_mismatch_summary": semantic_mismatch_summary,
     }
 
@@ -281,6 +298,33 @@ def _extract_relevant_prompt_fragments(prompt_snapshot: str) -> Dict[str, str]:
         elif "repair" in lower_line:
             fragments["recent_repair_fragment"] = _append_fragment(fragments["recent_repair_fragment"], line, 300)
     return fragments
+
+
+def _build_prompt_evidence(prompt_snapshot: str, max_chars: int = 1200) -> str:
+    compact_lines: List[str] = []
+    seen_lines: set[str] = set()
+    for raw_line in prompt_snapshot.strip().splitlines():
+        line = raw_line.rstrip()
+        normalized = line.strip()
+        if not normalized or "appendix:" in normalized.lower():
+            continue
+        if normalized in seen_lines:
+            continue
+        seen_lines.add(normalized)
+        compact_lines.append(line)
+    compacted = "\n".join(compact_lines)
+    if len(compacted) <= max_chars:
+        return compacted
+    marker = "\n...[prompt truncated]...\n"
+    head_budget = max_chars // 2
+    tail_budget = max_chars - head_budget - len(marker)
+    return compacted[:head_budget].rstrip() + marker + compacted[-tail_budget:].lstrip()
+
+
+def _build_generation_evidence(ticket: IssueTicket, prompt_snapshot: str) -> Dict[str, Any]:
+    payload = ticket.generation_evidence.model_dump(mode="json")
+    payload["input_prompt_snapshot"] = _build_prompt_evidence(prompt_snapshot, max_chars=600)
+    return payload
 
 
 def _append_fragment(existing: str, line: str, max_chars: int) -> str:

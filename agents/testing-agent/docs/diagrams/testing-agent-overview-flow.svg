@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="1220" viewBox="0 0 1320 1220" role="img" aria-labelledby="title desc">
+  <title id="title">Testing-agent overview flow</title>
+  <desc id="desc">Vertical overview flow for testing-agent, from golden and submission intake to evaluation, improvement assessment, and pass or issue ticket outcomes.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#334155" />
+    </marker>
+    <style>
+      .bg { fill: #f8fafc; }
+      .title { font: 700 30px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 16px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #475569; }
+      .text { font: 600 20px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #0f172a; }
+      .small { font: 400 16px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #334155; }
+      .tiny { font: 400 13px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #64748b; }
+      .input { fill: #eef6ff; stroke: #2563eb; stroke-width: 2; }
+      .process { fill: #ffffff; stroke: #334155; stroke-width: 1.8; }
+      .summary { fill: #f8fafc; stroke: #64748b; stroke-width: 1.8; }
+      .success { fill: #ecfdf5; stroke: #059669; stroke-width: 2; }
+      .failure { fill: #fff7ed; stroke: #ea580c; stroke-width: 2; }
+      .decision { fill: #ffffff; stroke: #475569; stroke-width: 1.8; }
+      .line { stroke: #334155; stroke-width: 1.8; fill: none; marker-end: url(#arrow); }
+      .dash { stroke: #64748b; stroke-width: 1.6; fill: none; stroke-dasharray: 7 6; marker-end: url(#arrow); }
+      .label { font: 600 14px -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #475569; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1320" height="1220" />
+  <text x="56" y="56" class="title">Testing-agent 总览流程</text>
+  <text x="56" y="88" class="subtitle">服务级总览：先等 golden 与 submission 配对，再进入评测；评测结束后收口为 passed 或 IssueTicket。</text>
+
+  <rect x="110" y="150" width="380" height="118" rx="12" class="input" />
+  <text x="140" y="193" class="text">QAGoldenRequest</text>
+  <text x="140" y="226" class="small">保存 golden</text>
+  <text x="140" y="250" class="small">若 submission 已存在，则进入评测</text>
+
+  <rect x="830" y="150" width="380" height="132" rx="12" class="input" />
+  <text x="880" y="193" class="text">GeneratedCypher</text>
+  <text x="880" y="225" class="text">SubmissionRequest</text>
+  <text x="880" y="254" class="small">保存 submission</text>
+  <text x="880" y="278" class="small">若 golden 已存在，则进入评测</text>
+
+  <rect x="405" y="370" width="510" height="130" rx="12" class="process" />
+  <text x="445" y="414" class="text">配对完成</text>
+  <text x="445" y="448" class="small">同一 `id` 下 golden 与 submission 都到齐</text>
+  <text x="445" y="472" class="small">testing-agent 进入正式评测主链路</text>
+
+  <rect x="360" y="590" width="600" height="210" rx="12" class="process" />
+  <text x="400" y="634" class="text">评测</text>
+  <text x="400" y="668" class="small">1. grammar check</text>
+  <text x="400" y="696" class="small">2. 执行 generated_cypher</text>
+  <text x="400" y="724" class="small">3. strict result compare</text>
+  <text x="400" y="752" class="small">4. 必要时执行 LLM 语义校验</text>
+  <text x="400" y="780" class="small">5. 生成 EvaluationSummary</text>
+
+  <rect x="360" y="880" width="600" height="110" rx="12" class="summary" />
+  <text x="400" y="924" class="text">ImprovementAssessment</text>
+  <text x="400" y="956" class="small">若存在上一轮 attempt，</text>
+  <text x="400" y="980" class="small">则比较前后两轮 EvaluationSummary 后生成</text>
+
+  <polygon points="660,1050 790,1124 660,1198 530,1124" class="decision" />
+  <text x="660" y="1118" class="text" text-anchor="middle">verdict?</text>
+  <text x="660" y="1145" class="small" text-anchor="middle">pass / fail</text>
+
+  <rect x="120" y="1070" width="230" height="118" rx="12" class="success" />
+  <text x="235" y="1116" class="text" text-anchor="middle">pass</text>
+  <text x="235" y="1150" class="small" text-anchor="middle">标记 passed</text>
+
+  <rect x="950" y="1070" width="250" height="118" rx="12" class="failure" />
+  <text x="1075" y="1116" class="text" text-anchor="middle">fail</text>
+  <text x="1075" y="1150" class="small" text-anchor="middle">生成 IssueTicket</text>
+  <text x="1075" y="1176" class="small" text-anchor="middle">并投递 repair-agent</text>
+
+  <path d="M490 210 C560 210 585 330 620 370" class="line" />
+  <path d="M830 216 C760 216 735 330 700 370" class="line" />
+  <path d="M660 500 V590" class="line" />
+  <path d="M660 800 V880" class="dash" />
+  <path d="M660 990 V1050" class="line" />
+  <path d="M530 1124 H350" class="line" />
+  <path d="M790 1124 H950" class="line" />
+
+  <text x="676" y="862" class="label">存在上一轮 attempt 时生成</text>
+  <text x="418" y="1110" class="label">pass</text>
+  <text x="846" y="1110" class="label">fail</text>
+
+</svg>

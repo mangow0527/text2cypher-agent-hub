@@ -5,26 +5,34 @@ import re
 from pathlib import Path
 from typing import Any
 
-from services.testing_agent.app.clients import ServiceHealthClient
+import httpx
+from pydantic import ValidationError
+
+from services.repair_agent.app.models import RepairAnalysisRecord
+from services.testing_agent.app.models import IssueTicket
+
+
+class ServiceHealthClient:
+    async def read_health(self, base_url: str, timeout_seconds: float) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            response = await client.get(f"{base_url.rstrip('/')}/health")
+            response.raise_for_status()
+            return response.json()
 
 
 class RuntimeResultsService:
     def __init__(
         self,
         *,
-        query_generator_data_dir: str,
         testing_data_dir: str,
         repair_data_dir: str,
-        query_generator_base_url: str,
+        cypher_generator_agent_base_url: str,
         testing_service_base_url: str,
         repair_service_base_url: str,
         knowledge_ops_base_url: str,
         qa_generator_base_url: str,
         health_client: ServiceHealthClient | None = None,
     ) -> None:
-        self._questions_dir = Path(query_generator_data_dir) / "questions"
-        self._runs_dir = Path(query_generator_data_dir) / "generation_runs"
-        self._attempt_runs_dir = Path(query_generator_data_dir) / "generation_attempts"
         self._goldens_dir = Path(testing_data_dir) / "goldens"
         self._submissions_dir = Path(testing_data_dir) / "submissions"
         self._attempt_submissions_dir = Path(testing_data_dir) / "submission_attempts"
@@ -33,41 +41,41 @@ class RuntimeResultsService:
         self._health_client = health_client or ServiceHealthClient()
         self._service_cards = [
             {
-                "service_key": "cgs",
-                "label_zh": "查询生成服务",
-                "label_en": "Query Generator Service",
-                "base_url": query_generator_base_url,
+                "service_key": "cypher-generator-agent",
+                "label_zh": "Cypher 生成服务",
+                "label_en": "cypher-generator-agent",
+                "base_url": cypher_generator_agent_base_url,
                 "port": "8000",
-                "description_zh": "接收问题、拉取提示词并生成 Cypher。",
+                "description_zh": "接收问题、获取上下文并生成 Cypher submission。",
             },
             {
-                "service_key": "testing_service",
+                "service_key": "testing-agent",
                 "label_zh": "测试服务",
-                "label_en": "Testing Service",
+                "label_en": "testing-agent",
                 "base_url": testing_service_base_url,
                 "port": "8003",
                 "description_zh": "执行 TuGraph、评测结果并触发失败闭环。",
             },
             {
-                "service_key": "krss",
+                "service_key": "repair-agent",
                 "label_zh": "知识修复建议服务",
-                "label_en": "Knowledge Repair Suggestion Service",
+                "label_en": "repair-agent",
                 "base_url": repair_service_base_url,
                 "port": "8002",
                 "description_zh": "分析失败样本并生成知识修复建议。",
             },
             {
-                "service_key": "knowledge_ops",
+                "service_key": "knowledge-agent",
                 "label_zh": "知识运营服务",
-                "label_en": "Knowledge Ops Service",
+                "label_en": "knowledge-agent",
                 "base_url": knowledge_ops_base_url,
                 "port": "8010",
                 "description_zh": "提供提示词包并接收知识修复建议。",
             },
             {
-                "service_key": "qa_generator",
+                "service_key": "qa-agent",
                 "label_zh": "问答生成服务",
-                "label_en": "QA Generator Service",
+                "label_en": "qa-agent",
                 "base_url": qa_generator_base_url,
                 "port": "8020",
                 "description_zh": "负责产出并推送新的 QA 任务。",
@@ -97,7 +105,7 @@ class RuntimeResultsService:
 
     def list_tasks(self) -> dict[str, Any]:
         tasks = []
-        for path in sorted(self._questions_dir.glob("*.json")):
+        for path in sorted(self._submissions_dir.glob("*.json")):
             task = self._build_task_summary(path)
             if task is not None:
                 tasks.append(task)
@@ -109,26 +117,26 @@ class RuntimeResultsService:
         }
 
     def get_task_detail(self, id: str) -> dict[str, Any] | None:
-        question = self._read_json(self._questions_dir / f"{id}.json")
-        if question is None or not self._is_visible_task(id):
+        if not self._is_visible_task(id):
             return None
-        generation = self._read_generation(id, question)
+        submission = self._read_submission(id)
+        if submission is None:
+            return None
         golden = self._read_json(self._goldens_dir / f"{id}.json")
-        submission = self._read_submission(id, question)
         ticket = self._read_ticket(submission)
         analysis = self._read_analysis(submission, id)
-        stages = self._build_stages(generation, submission, ticket, analysis)
-        quality = self._build_cypher_quality(generation, golden, submission, ticket)
+        stages = self._build_stages(submission, ticket, analysis)
+        quality = self._build_cypher_quality(golden, submission, ticket)
         return {
             "id": id,
             "source": "qa_generator",
             "title_zh": "运行结果中心",
             "title_en": "Runtime Results Center",
-            "question": question.get("question", ""),
-            "attempt_no": int((generation or {}).get("attempt_no") or (submission or {}).get("attempt_no") or 1),
-            "received_at": question.get("received_at"),
-            "updated_at": self._latest_timestamp(question, generation, golden, submission, ticket, analysis),
-            "generated_cypher": (generation or {}).get("generated_cypher") or (submission or {}).get("generated_cypher") or "",
+            "question": submission.get("question", ""),
+            "attempt_no": int((submission or {}).get("attempt_no") or 1),
+            "received_at": submission.get("received_at"),
+            "updated_at": self._latest_timestamp(golden, submission, ticket, analysis),
+            "generated_cypher": (submission or {}).get("generated_cypher") or "",
             "final_verdict": self._final_verdict(stages),
             "stages": stages,
             "timeline": self._build_timeline(stages),
@@ -136,40 +144,46 @@ class RuntimeResultsService:
             "improvement_assessment": (submission or {}).get("improvement_assessment")
             or self._fallback_improvement_assessment(submission),
             "artifacts": {
-                "question": question,
-                "generation": generation,
+                "question": {"id": id, "question": submission.get("question", ""), "received_at": submission.get("received_at")},
+                "generation": {
+                    "generation_run_id": submission.get("generation_run_id"),
+                    "generation_status": "submission_persisted_by_testing",
+                    "generated_cypher": submission.get("generated_cypher"),
+                    "input_prompt_snapshot": submission.get("input_prompt_snapshot"),
+                    "attempt_no": submission.get("attempt_no"),
+                    "submission_state": submission.get("state"),
+                    "updated_at": submission.get("updated_at"),
+                },
                 "golden": golden,
                 "submission": submission,
                 "evaluation": ticket.get("evaluation") if ticket else self._pending_evaluation(submission),
                 "execution": self._execution_snapshot(submission, ticket),
                 "repair": {
                     "issue_ticket": ticket,
-                    "krss_response": (submission or {}).get("krss_response"),
+                    "repair_response": self._read_repair_response(submission),
                     "analysis": analysis,
                 },
             },
         }
 
-    def _build_task_summary(self, question_path: Path) -> dict[str, Any] | None:
-        question = self._read_json(question_path)
-        if question is None:
+    def _build_task_summary(self, submission_path: Path) -> dict[str, Any] | None:
+        submission = self._read_json(submission_path)
+        if submission is None:
             return None
-        id = str(question.get("id") or question_path.stem)
+        id = str(submission.get("id") or submission_path.stem)
         if not self._is_visible_task(id):
             return None
-        generation = self._read_generation(id, question)
-        submission = self._read_submission(id, question)
         ticket = self._read_ticket(submission)
         analysis = self._read_analysis(submission, id)
-        stages = self._build_stages(generation, submission, ticket, analysis)
-        quality = self._build_cypher_quality(generation, None, submission, ticket)
+        stages = self._build_stages(submission, ticket, analysis)
+        quality = self._build_cypher_quality(None, submission, ticket)
         return {
             "id": id,
             "source": "qa_generator",
-            "question": question.get("question", ""),
-            "attempt_no": int((generation or {}).get("attempt_no") or (submission or {}).get("attempt_no") or 1),
-            "received_at": question.get("received_at"),
-            "updated_at": self._latest_timestamp(question, generation, submission, ticket, analysis),
+            "question": submission.get("question", ""),
+            "attempt_no": int((submission or {}).get("attempt_no") or 1),
+            "received_at": submission.get("received_at"),
+            "updated_at": self._latest_timestamp(submission, ticket, analysis),
             "current_stage": self._current_stage(stages),
             "final_verdict": self._final_verdict(stages),
             "cypher_quality": quality["label"],
@@ -179,30 +193,27 @@ class RuntimeResultsService:
             ),
         }
 
-    def _read_generation(self, id: str, question: dict[str, Any] | None) -> dict[str, Any] | None:
-        preferred_attempt_no = int((question or {}).get("latest_attempt_no") or 0)
-        if preferred_attempt_no > 0:
-            preferred = self._read_json(self._attempt_runs_dir / f"{id}__attempt_{preferred_attempt_no}.json")
-            if preferred is not None:
-                return preferred
-        return self._read_json(self._runs_dir / f"{id}.json")
-
-    def _read_submission(self, id: str, question: dict[str, Any] | None) -> dict[str, Any] | None:
-        preferred_attempt_no = int((question or {}).get("latest_attempt_no") or 0)
+    def _read_submission(self, id: str) -> dict[str, Any] | None:
+        latest = self._read_json(self._submissions_dir / f"{id}.json")
+        preferred_attempt_no = int((latest or {}).get("attempt_no") or 0)
         if preferred_attempt_no > 0:
             preferred = self._read_json(self._attempt_submissions_dir / f"{id}__attempt_{preferred_attempt_no}.json")
             if preferred is not None:
                 return preferred
+        if latest is not None:
+            return latest
+        attempts = sorted(self._attempt_submissions_dir.glob(f"{id}__attempt_*.json"))
+        if attempts:
+            return self._read_json(attempts[-1])
         return self._read_json(self._submissions_dir / f"{id}.json")
 
     def _build_stages(
         self,
-        generation: dict[str, Any] | None,
         submission: dict[str, Any] | None,
         ticket: dict[str, Any] | None,
         analysis: dict[str, Any] | None,
     ) -> dict[str, dict[str, str]]:
-        generation_status = self._generation_stage_status(generation)
+        generation_status = self._generation_stage_status(submission)
         evaluation_status = self._evaluation_stage_status(submission, ticket)
         repair_status = self._repair_stage_status(evaluation_status, submission, analysis)
         apply_status = self._apply_stage_status(repair_status, submission, analysis)
@@ -229,22 +240,11 @@ class RuntimeResultsService:
             },
         }
 
-    def _generation_stage_status(self, generation: dict[str, Any] | None) -> str:
-        if generation is None:
+    def _generation_stage_status(self, submission: dict[str, Any] | None) -> str:
+        if submission is None:
             return "pending"
-        status = str(generation.get("generation_status") or "")
-        if generation.get("failure_stage") or status in {
-            "prompt_fetch_failed",
-            "model_invocation_failed",
-            "output_parsing_failed",
-            "guardrail_rejected",
-            "failed",
-        }:
-            return "failed"
-        if status in {"generated", "submitted_to_testing"}:
+        if submission.get("generated_cypher"):
             return "passed"
-        if status in {"received", "prompt_ready"}:
-            return "running"
         return "pending"
 
     def _evaluation_stage_status(self, submission: dict[str, Any] | None, ticket: dict[str, Any] | None) -> str:
@@ -252,14 +252,14 @@ class RuntimeResultsService:
             return "failed"
         if submission is None:
             return "pending"
-        status = str(submission.get("status") or "")
+        status = str(submission.get("state") or "")
         if status == "passed":
             return "passed"
         if status in {"issue_ticket_created"}:
             return "failed"
         if status == "repair_submission_failed":
             return "failed"
-        if status in {"ready_to_evaluate", "waiting_for_golden", "received_submission_only"}:
+        if status in {"ready_to_evaluate", "received_submission_only"}:
             return "pending"
         if status == "repair_pending":
             return "failed"
@@ -271,9 +271,11 @@ class RuntimeResultsService:
         submission: dict[str, Any] | None,
         analysis: dict[str, Any] | None,
     ) -> str:
-        if analysis is not None or ((submission or {}).get("krss_response") is not None):
+        if analysis is not None or ((submission or {}).get("repair_response") is not None):
+            if analysis is None and self._read_repair_response(submission) is None:
+                return "failed"
             return "passed"
-        status = str((submission or {}).get("status") or "")
+        status = str((submission or {}).get("state") or "")
         if status == "repair_pending":
             return "running"
         if status == "repair_submission_failed":
@@ -290,8 +292,9 @@ class RuntimeResultsService:
         submission: dict[str, Any] | None,
         analysis: dict[str, Any] | None,
     ) -> str:
-        response = (analysis or {}).get("knowledge_ops_response") or ((submission or {}).get("krss_response") or {}).get(
-            "knowledge_ops_response"
+        response = (
+            (analysis or {}).get("knowledge_ops_response")
+            or (self._read_repair_response(submission) or {}).get("knowledge_ops_response")
         )
         if response and response.get("status") == "ok":
             return "passed"
@@ -314,12 +317,11 @@ class RuntimeResultsService:
 
     def _build_cypher_quality(
         self,
-        generation: dict[str, Any] | None,
         golden: dict[str, Any] | None,
         submission: dict[str, Any] | None,
         ticket: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        generated_cypher = (generation or {}).get("generated_cypher") or (submission or {}).get("generated_cypher") or ""
+        generated_cypher = (submission or {}).get("generated_cypher") or ""
         if not generated_cypher:
             return {
                 "label": "pending",
@@ -329,7 +331,7 @@ class RuntimeResultsService:
                 "findings": [],
             }
         if ticket is None:
-            status = str((submission or {}).get("status") or "")
+            status = str((submission or {}).get("state") or "")
             if status == "passed":
                 return {
                     "label": "good",
@@ -382,21 +384,27 @@ class RuntimeResultsService:
         if submission is None:
             return {
                 "verdict": "pending",
-                "dimensions": {},
+                "primary_metrics": {},
+                "secondary_signals": {},
                 "symptom": "No evaluation snapshot is available yet.",
-                "evidence": [],
             }
         return {
             "verdict": "pending",
-            "dimensions": {},
+            "primary_metrics": {},
+            "secondary_signals": {},
             "symptom": "Evaluation is still pending or has not been persisted yet.",
-            "evidence": [f"submission_status={submission.get('status')}"] if submission.get("status") else [],
+            "evidence": [f"submission_state={submission.get('state')}"]
+            if submission.get("state")
+            else [],
         }
 
     def _execution_snapshot(self, submission: dict[str, Any] | None, ticket: dict[str, Any] | None) -> dict[str, Any]:
         ticket_execution = ((ticket or {}).get("actual") or {}).get("execution")
         if ticket_execution is not None:
             return ticket_execution
+        execution = (submission or {}).get("execution")
+        if execution is not None:
+            return execution
         raw = (submission or {}).get("execution_json")
         if raw:
             return json.loads(raw)
@@ -431,22 +439,39 @@ class RuntimeResultsService:
         if ticket_record is None:
             return None
         ticket_json = ticket_record.get("ticket_json")
-        if not ticket_json:
+        payload = json.loads(ticket_json) if ticket_json else ticket_record
+        try:
+            return IssueTicket.model_validate(payload).model_dump(mode="json")
+        except ValidationError:
             return None
-        return json.loads(ticket_json)
 
     def _read_analysis(self, submission: dict[str, Any] | None, id: str) -> dict[str, Any] | None:
-        krss_response = (submission or {}).get("krss_response") or {}
-        analysis_id = krss_response.get("analysis_id")
+        repair_response = self._read_repair_response(submission) or {}
+        analysis_id = repair_response.get("analysis_id")
         if analysis_id:
             analysis = self._read_json(self._analyses_dir / f"{analysis_id}.json")
             if analysis is not None:
-                return analysis
+                try:
+                    return RepairAnalysisRecord.model_validate(analysis).model_dump(mode="json")
+                except ValidationError:
+                    return None
         for path in self._analyses_dir.glob("*.json"):
             analysis = self._read_json(path)
             if analysis and analysis.get("id") == id:
-                return analysis
+                try:
+                    return RepairAnalysisRecord.model_validate(analysis).model_dump(mode="json")
+                except ValidationError:
+                    continue
         return None
+
+    def _read_repair_response(self, submission: dict[str, Any] | None) -> dict[str, Any] | None:
+        payload = (submission or {}).get("repair_response")
+        if not isinstance(payload, dict):
+            return None
+        analysis_id = payload.get("analysis_id")
+        if analysis_id is not None and not isinstance(analysis_id, str):
+            return None
+        return payload
 
     def _latest_timestamp(self, *records: dict[str, Any] | None) -> str:
         timestamps: list[str] = []

@@ -36,6 +36,19 @@ sync_dir() {
   echo "✅ synced ${label}"
 }
 
+sync_dir_optional() {
+  local source_dir="$1"
+  local target_dir="$2"
+  local label="$3"
+
+  if [ ! -d "${source_dir}" ]; then
+    echo "⚠️ skipped ${label}: source not found (${source_dir})"
+    return 0
+  fi
+
+  sync_dir "${source_dir}" "${target_dir}" "${label}"
+}
+
 write_manifest() {
   local timestamp
   timestamp="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
@@ -44,7 +57,7 @@ write_manifest() {
 {
   "synced_at_utc": "${timestamp}",
   "sources": {
-    "query_generator_agent": "${SOURCE_QUERY_GENERATOR}",
+    "cypher_generator_agent": "${SOURCE_CYPHER_GENERATOR}",
     "testing_agent": "${SOURCE_TESTING}",
     "repair_agent": "${SOURCE_REPAIR}",
     "knowledge_agent": "${SOURCE_KNOWLEDGE}",
@@ -53,7 +66,7 @@ write_manifest() {
     "contracts": "${SOURCE_CONTRACTS}"
   },
   "targets": {
-    "query_generator_agent": "agents/query-generator-agent",
+    "cypher_generator_agent": "agents/cypher-generator-agent",
     "testing_agent": "agents/testing-agent",
     "repair_agent": "agents/repair-agent",
     "knowledge_agent": "agents/knowledge-agent",
@@ -64,4 +77,3 @@ write_manifest() {
 }
 EOF
 }
-

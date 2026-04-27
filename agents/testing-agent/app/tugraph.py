@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import time
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import httpx
 
-from .models import TuGraphExecutionResult
+from .models import ExecutionResult
 
 
 class TuGraphClient:
@@ -23,35 +23,30 @@ class TuGraphClient:
         self.graph = graph
         self.mock_mode = mock_mode
 
-    async def execute(self, cypher: str) -> TuGraphExecutionResult:
+    async def execute(self, cypher: str) -> ExecutionResult:
         if self.mock_mode:
             return self._mock_execute(cypher)
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             jwt = await self._login(client)
-            start = time.perf_counter()
+            started = time.perf_counter()
             response = await client.post(
                 f"{self.base_url}/cypher",
                 json={"graph": self.graph, "script": cypher},
-                headers={
-                    "Authorization": f"Bearer {jwt}",
-                    "Content-Type": "application/json",
-                },
+                headers={"Authorization": f"Bearer {jwt}", "Content-Type": "application/json"},
             )
-            elapsed_ms = int((time.perf_counter() - start) * 1000)
+            elapsed_ms = int((time.perf_counter() - started) * 1000)
             if response.status_code >= 400:
                 return self._build_error_result(response, elapsed_ms)
             data = response.json()
             rows = self._normalize_rows(data)
-            return TuGraphExecutionResult(
+            return ExecutionResult(
                 success=True,
                 rows=rows,
                 row_count=len(rows),
+                error_message=None,
                 elapsed_ms=elapsed_ms,
             )
-
-    async def test_connection(self) -> TuGraphExecutionResult:
-        return await self.execute("MATCH (n) RETURN n LIMIT 1")
 
     async def _login(self, client: httpx.AsyncClient) -> str:
         response = await client.post(
@@ -83,43 +78,44 @@ class TuGraphClient:
             normalized.append(item)
         return normalized
 
-    def _build_error_result(self, response: httpx.Response, elapsed_ms: int) -> TuGraphExecutionResult:
-        error_message = response.text
+    def _build_error_result(self, response: httpx.Response, elapsed_ms: int) -> ExecutionResult:
+        message = response.text
         try:
-            payload = response.json()
-            error_message = payload.get("error_message", error_message)
+            message = response.json().get("error_message", message)
         except ValueError:
             pass
-        return TuGraphExecutionResult(
+        return ExecutionResult(
             success=False,
-            error_message=str(error_message),
+            rows=None,
+            row_count=None,
+            error_message=str(message),
             elapsed_ms=elapsed_ms,
         )
 
-    def _mock_execute(self, cypher: str) -> TuGraphExecutionResult:
+    def _mock_execute(self, cypher: str) -> ExecutionResult:
         normalized = cypher.lower()
-        if ":film" in normalized or ":device" in normalized:
-            return TuGraphExecutionResult(
+        if "matchh" in normalized or "syntax_error" in normalized:
+            return ExecutionResult(
                 success=False,
-                error_message="Schema error: requested label does not exist in network_schema_v10.",
-                elapsed_ms=12,
-            )
-        if "syntax_error" in normalized:
-            return TuGraphExecutionResult(
-                success=False,
+                rows=None,
+                row_count=None,
                 error_message="Cypher syntax error near RETURN.",
                 elapsed_ms=8,
             )
-        if "count(" in normalized:
-            return TuGraphExecutionResult(
-                success=True,
-                rows=[{"count": 3}],
-                row_count=1,
-                elapsed_ms=9,
+        if ":film" in normalized or ":device" in normalized:
+            return ExecutionResult(
+                success=False,
+                rows=None,
+                row_count=None,
+                error_message="Schema error: requested label does not exist in network_schema_v10.",
+                elapsed_ms=12,
             )
-        return TuGraphExecutionResult(
+        if "count(" in normalized:
+            return ExecutionResult(success=True, rows=[{"count": 3}], row_count=1, error_message=None, elapsed_ms=9)
+        return ExecutionResult(
             success=True,
             rows=[{"id": "ne-1", "name": "edge-router-1"}],
             row_count=1,
+            error_message=None,
             elapsed_ms=15,
         )

@@ -10,7 +10,7 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 import httpx
 
 from .llm_retry import classify_retryable_error, extract_request_id, sleep_with_backoff
-from .models import IssueTicket, KnowledgeRepairSuggestionRequest, PromptSnapshotResponse
+from .models import IssueTicket, KnowledgeRepairSuggestionRequest
 from services.repair_agent.app.analysis import build_diagnosis_context
 
 logger = logging.getLogger("repair_service")
@@ -66,7 +66,7 @@ def _compact_json_value(value: Any, max_chars: int = 600) -> Any:
     return _trim_text(serialized, max_chars)
 
 
-def _build_krss_ticket_payload(ticket: IssueTicket) -> dict[str, Any]:
+def _build_repair_ticket_payload(ticket: IssueTicket) -> dict[str, Any]:
     execution = ticket.actual.execution
     return {
         "ticket_id": ticket.ticket_id,
@@ -85,14 +85,13 @@ def _build_krss_ticket_payload(ticket: IssueTicket) -> dict[str, Any]:
         },
         "evaluation": {
             "verdict": ticket.evaluation.verdict,
-            "dimensions": ticket.evaluation.dimensions.model_dump(mode="json"),
-            "symptom": _trim_text(ticket.evaluation.symptom, 240),
-            "evidence_preview": ticket.evaluation.evidence[:2],
+            "primary_metrics": ticket.evaluation.primary_metrics.model_dump(mode="json"),
+            "secondary_signals": ticket.evaluation.secondary_signals.model_dump(mode="json"),
         },
     }
 
 
-def _build_krss_ticket_payload_from_context(context: Dict[str, Any]) -> dict[str, Any]:
+def _build_repair_ticket_payload_from_context(context: Dict[str, Any]) -> dict[str, Any]:
     evaluation_summary = context.get("evaluation_summary") or {}
     return {
         "ticket_id": context.get("ticket_id") or "diagnosis-context",
@@ -103,9 +102,8 @@ def _build_krss_ticket_payload_from_context(context: Dict[str, Any]) -> dict[str
         "actual": {"generated_cypher": (context.get("sql_pair") or {}).get("actual_cypher", "")},
         "evaluation": {
             "verdict": evaluation_summary.get("verdict") or "fail",
-            "dimensions": evaluation_summary.get("dimensions") or {},
-            "symptom": _trim_text(str(evaluation_summary.get("symptom") or ""), 240),
-            "evidence_preview": (evaluation_summary.get("evidence_preview") or [])[:2],
+            "primary_metrics": evaluation_summary.get("primary_metrics") or {},
+            "secondary_signals": evaluation_summary.get("secondary_signals") or {},
         },
     }
 
@@ -144,19 +142,42 @@ def _compact_recent_repairs(repairs: Any) -> list[dict[str, Any]]:
     return compacted
 
 
+def _compact_prompt_evidence_for_context(context: Dict[str, Any]) -> str:
+    prompt_evidence = str(context.get("prompt_evidence") or "")
+    fragments = context.get("relevant_prompt_fragments") or {}
+    fragment_lines: set[str] = set()
+    if isinstance(fragments, dict):
+        for value in fragments.values():
+            if not isinstance(value, str):
+                continue
+            fragment_lines.update(line.strip() for line in value.splitlines() if line.strip())
+    if not fragment_lines:
+        return _compact_prompt_snapshot(prompt_evidence, max_chars=1200)
+    filtered_lines = [
+        raw_line
+        for raw_line in prompt_evidence.splitlines()
+        if raw_line.strip() and raw_line.strip() not in fragment_lines
+    ]
+    return _compact_prompt_snapshot("\n".join(filtered_lines), max_chars=1200)
+
+
 def _compact_diagnosis_context(context: Dict[str, Any]) -> Dict[str, Any]:
+    generation_evidence = dict(context.get("generation_evidence") or {})
+    generation_evidence.pop("input_prompt_snapshot", None)
     return {
         "question": context.get("question"),
         "difficulty": context.get("difficulty"),
         "sql_pair": context.get("sql_pair"),
         "evaluation_summary": context.get("evaluation_summary"),
         "failure_diff": context.get("failure_diff"),
+        "prompt_evidence": _compact_prompt_evidence_for_context(context),
+        "generation_evidence": _compact_json_value(generation_evidence, max_chars=900),
         "relevant_prompt_fragments": _compact_relevant_prompt_fragments(context.get("relevant_prompt_fragments", {})),
         "recent_applied_repairs": _compact_recent_repairs(context.get("recent_applied_repairs")),
     }
 
 
-class OpenAICompatibleKRSSAnalyzer:
+class OpenAICompatibleRepairAnalyzer:
     def __init__(
         self,
         base_url: str,
@@ -192,7 +213,7 @@ class OpenAICompatibleKRSSAnalyzer:
                 raise ValueError("ticket is required when context is not provided")
             context = build_diagnosis_context(ticket, prompt_snapshot or "")
         compact_context = _compact_diagnosis_context(context)
-        compact_ticket = _build_krss_ticket_payload(ticket) if ticket is not None else _build_krss_ticket_payload_from_context(context)
+        compact_ticket = _build_repair_ticket_payload(ticket) if ticket is not None else _build_repair_ticket_payload_from_context(context)
         system_prompt = (
             "You are the Knowledge Repair Suggestion Service for a Text2Cypher system. "
             "Diagnose root cause using only these knowledge types: cypher_syntax, few_shot, system_prompt, business_knowledge. "
@@ -209,7 +230,7 @@ class OpenAICompatibleKRSSAnalyzer:
         compact_context_chars = len(json.dumps(compact_context, ensure_ascii=False, default=str))
         logger.warning(
             "llm_call_started target=%s qa_id=%s ticket_id=%s model=%s base_url=%s context_chars=%s compact_ticket_chars=%s",
-            "repair.krss_diagnosis",
+            "repair.diagnosis",
             ticket.id if ticket is not None else str(context.get("id") or "unknown"),
             ticket.ticket_id if ticket is not None else str(context.get("ticket_id") or "diagnosis-context"),
             self.model,
@@ -217,7 +238,7 @@ class OpenAICompatibleKRSSAnalyzer:
             compact_context_chars,
             compact_ticket_chars,
             extra={
-                "target": "repair.krss_diagnosis",
+                "target": "repair.diagnosis",
                 "qa_id": ticket.id if ticket is not None else str(context.get("id") or "unknown"),
                 "ticket_id": ticket.ticket_id if ticket is not None else str(context.get("ticket_id") or "diagnosis-context"),
                 "model": self.model,
@@ -263,7 +284,7 @@ class OpenAICompatibleKRSSAnalyzer:
                             )
                             logger.warning(
                                 "llm_call_retry target=%s qa_id=%s ticket_id=%s model=%s base_url=%s attempt=%s elapsed_ms=%s retry_reason=%s status_code=%s retry_delay_seconds=%s body_preview=%s",
-                                "repair.krss_diagnosis",
+                                "repair.diagnosis",
                                 ticket.id if ticket is not None else str(context.get("id") or "unknown"),
                                 ticket.ticket_id if ticket is not None else str(context.get("ticket_id") or "diagnosis-context"),
                                 self.model,
@@ -275,7 +296,7 @@ class OpenAICompatibleKRSSAnalyzer:
                                 delay_seconds,
                                 retry.body_preview,
                                 extra={
-                                    "target": "repair.krss_diagnosis",
+                                    "target": "repair.diagnosis",
                                     "qa_id": ticket.id if ticket is not None else str(context.get("id") or "unknown"),
                                     "ticket_id": ticket.ticket_id if ticket is not None else str(context.get("ticket_id") or "diagnosis-context"),
                                     "model": self.model,
@@ -291,7 +312,7 @@ class OpenAICompatibleKRSSAnalyzer:
                             continue
                         logger.warning(
                             "llm_call_failed target=%s qa_id=%s ticket_id=%s model=%s base_url=%s elapsed_ms=%s attempts=%s retry_reason=%s status_code=%s body_preview=%s error=%s",
-                            "repair.krss_diagnosis",
+                            "repair.diagnosis",
                             ticket.id if ticket is not None else str(context.get("id") or "unknown"),
                             ticket.ticket_id if ticket is not None else str(context.get("ticket_id") or "diagnosis-context"),
                             self.model,
@@ -303,7 +324,7 @@ class OpenAICompatibleKRSSAnalyzer:
                             retry.body_preview,
                             str(exc),
                             extra={
-                                "target": "repair.krss_diagnosis",
+                                "target": "repair.diagnosis",
                                 "qa_id": ticket.id if ticket is not None else str(context.get("id") or "unknown"),
                                 "ticket_id": ticket.ticket_id if ticket is not None else str(context.get("ticket_id") or "diagnosis-context"),
                                 "model": self.model,
@@ -326,7 +347,7 @@ class OpenAICompatibleKRSSAnalyzer:
 
         parsed = json.loads(content)
         if not isinstance(parsed, dict):
-            raise ValueError("KRSS diagnosis response must be a JSON object")
+            raise ValueError("repair diagnosis response must be a JSON object")
         if "primary_knowledge_type" not in parsed and parsed.get("knowledge_types"):
             knowledge_types = parsed.get("knowledge_types") or []
             primary = knowledge_types[0] if knowledge_types else "system_prompt"
@@ -339,7 +360,7 @@ class OpenAICompatibleKRSSAnalyzer:
         request_id = extract_request_id(getattr(response, "headers", None))
         logger.warning(
             "llm_call_succeeded target=%s qa_id=%s ticket_id=%s model=%s base_url=%s elapsed_ms=%s request_id=%s",
-            "repair.krss_diagnosis",
+            "repair.diagnosis",
             ticket.id if ticket is not None else str(context.get("id") or "unknown"),
             ticket.ticket_id if ticket is not None else str(context.get("ticket_id") or "diagnosis-context"),
             self.model,
@@ -347,7 +368,7 @@ class OpenAICompatibleKRSSAnalyzer:
             elapsed_ms,
             request_id,
             extra={
-                "target": "repair.krss_diagnosis",
+                "target": "repair.diagnosis",
                 "qa_id": ticket.id if ticket is not None else str(context.get("id") or "unknown"),
                 "ticket_id": ticket.ticket_id if ticket is not None else str(context.get("ticket_id") or "diagnosis-context"),
                 "model": self.model,
@@ -357,41 +378,6 @@ class OpenAICompatibleKRSSAnalyzer:
             },
         )
         return parsed
-
-class CGSPromptSnapshotClient:
-    def __init__(self, base_url: str, timeout_seconds: float) -> None:
-        self.base_url = base_url.rstrip("/")
-        self.timeout_seconds = timeout_seconds
-
-    async def fetch(self, id: str) -> PromptSnapshotResponse:
-        started = time.monotonic()
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            try:
-                response = await client.get(f"{self.base_url}/api/v1/questions/{id}/prompt")
-            except Exception as exc:
-                elapsed_ms = int((time.monotonic() - started) * 1000)
-                logger.warning(
-                    "outbound_call_failed",
-                    extra={
-                        "target": "cgs.prompt_snapshot",
-                        "qa_id": id,
-                        "elapsed_ms": elapsed_ms,
-                        "error": str(exc),
-                    },
-                )
-                raise
-            response.raise_for_status()
-            elapsed_ms = int((time.monotonic() - started) * 1000)
-            logger.info(
-                "outbound_call_ok",
-                extra={
-                    "target": "cgs.prompt_snapshot",
-                    "qa_id": id,
-                    "status_code": response.status_code,
-                    "elapsed_ms": elapsed_ms,
-                },
-            )
-            return PromptSnapshotResponse.model_validate(response.json())
 
 
 class KnowledgeOpsRepairApplyClient:

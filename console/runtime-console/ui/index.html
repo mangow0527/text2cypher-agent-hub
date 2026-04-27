@@ -12,7 +12,7 @@
       <div>
         <p class="eyebrow">QA Runtime / 运行结果中心</p>
         <h1>运行结果中心 <span>Runtime Results Center</span></h1>
-        <p>自动汇总来自 QA 生成服务的任务，查看全流程状态、当前生成的 Cypher，以及这一轮结果的质量概括。</p>
+        <p>自动汇总来自 QA 生成服务的任务，查看全流程状态、当前生成的 Cypher，以及这一轮结果的质量概括。repair-agent 诊断区会直接读取 Testing Service 持久化的 IssueTicket 与 RepairAnalysisRecord，不再假设它回头向 CGS 拉取 prompt snapshot。</p>
       </div>
       <div class="pulse-card">
         <span></span>
@@ -72,11 +72,11 @@
 
         <article class="panel improvement-panel">
           <div class="section-heading">
-            <h2>KRSS 诊断摘要 <span>KRSS Diagnosis</span></h2>
-            <p id="krss-summary">这里会展示 KRSS 的主根因类型、验证模式和最终建议。</p>
+            <h2>repair-agent 诊断摘要 <span>repair-agent Diagnosis</span></h2>
+            <p id="repair-summary">这里会展示 Testing Service 记录的 IssueTicket / RepairAnalysisRecord 中的 prompt snapshot 来源、主根因类型、验证模式和最终建议。</p>
           </div>
-          <div class="overview-grid" id="krss-diagnosis-grid"></div>
-          <div class="findings" id="krss-diagnosis-findings"></div>
+          <div class="overview-grid" id="repair-diagnosis-grid"></div>
+          <div class="findings" id="repair-diagnosis-findings"></div>
         </article>
 
         <section class="artifact-grid">

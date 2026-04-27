@@ -33,7 +33,7 @@
 
 同步完成后会更新：
 
-- `agents/query-generator-agent/`
+- `agents/cypher-generator-agent/`
 - `agents/testing-agent/`
 - `agents/repair-agent/`
 - `agents/knowledge-agent/`
@@ -88,4 +88,3 @@
 3. 回到本仓执行同步脚本
 4. 检查差异是否符合预期
 5. 提交本仓变更
-
