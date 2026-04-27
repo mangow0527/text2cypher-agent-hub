@@ -16,8 +16,7 @@
 执行同步前，建议先确认：
 
 1. 源目录已经切到你想同步的最新状态
-2. 外部两个服务的本地代码也已经更新完成
-3. 本仓没有未处理的手工修改
+2. 本仓没有未处理的手工修改
 
 ## 默认来源
 
@@ -36,8 +35,6 @@
 - `agents/cypher-generator-agent/`
 - `agents/testing-agent/`
 - `agents/repair-agent/`
-- `agents/knowledge-agent/`
-- `agents/qa-agent/`
 - `console/runtime-console/`
 - `contracts/`
 - `sync/manifests/latest-sync.json`
@@ -47,8 +44,10 @@
 只同步一个服务时，直接执行对应脚本。例如：
 
 ```bash
-./sync/scripts/sync_knowledge.sh
+./sync/scripts/sync_testing.sh
 ```
+
+`knowledge-agent` 和 `qa-agent` 在展示仓中保留为独立外部代码目录，不参与本仓同步脚本。
 
 ## 排除规则
 

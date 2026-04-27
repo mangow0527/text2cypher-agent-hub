@@ -34,8 +34,6 @@
 ./sync/scripts/sync_cypher_generator.sh
 ./sync/scripts/sync_testing.sh
 ./sync/scripts/sync_repair.sh
-./sync/scripts/sync_knowledge.sh
-./sync/scripts/sync_qa.sh
 ./sync/scripts/sync_console.sh
 ./sync/scripts/sync_contracts.sh
 ```
@@ -52,10 +50,7 @@
 
 都来自本地 [NL2Cypher](/Users/mangowmac/Desktop/code/NL2Cypher) 仓库。
 
-- `knowledge-agent`
-- `qa-agent`
-
-默认来自本地 [third_party](/Users/mangowmac/Desktop/code/NL2Cypher/third_party) 目录中的最新代码副本；如果本地不存在，对应同步步骤会自动跳过。
+`knowledge-agent` 和 `qa-agent` 目录作为外部服务代码展示区单独保留，不参与本仓同步脚本。
 
 ## 使用说明
 
