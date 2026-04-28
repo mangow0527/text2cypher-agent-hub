@@ -24,6 +24,7 @@ jobs:
           fetch-depth: 0
 
       - name: Prepare source repository access token
+        id: source_tokens
         env:
           RAW_SOURCE_REPO_TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
           RAW_NL2CYPHER_REPO_TOKEN: ${{ secrets.NL2CYPHER_REPO_TOKEN }}
@@ -59,68 +60,36 @@ jobs:
           echo "::add-mask::${NL2CYPHER_TOKEN}"
           echo "::add-mask::${KNOWLEDGE_TOKEN}"
           echo "::add-mask::${QA_TOKEN}"
-          echo "NL2CYPHER_REPO_TOKEN=${NL2CYPHER_TOKEN}" >> "${GITHUB_ENV}"
-          echo "KNOWLEDGE_REPO_TOKEN=${KNOWLEDGE_TOKEN}" >> "${GITHUB_ENV}"
-          echo "QA_REPO_TOKEN=${QA_TOKEN}" >> "${GITHUB_ENV}"
+          echo "nl2cypher_token=${NL2CYPHER_TOKEN}" >> "${GITHUB_OUTPUT}"
+          echo "knowledge_token=${KNOWLEDGE_TOKEN}" >> "${GITHUB_OUTPUT}"
+          echo "qa_token=${QA_TOKEN}" >> "${GITHUB_OUTPUT}"
 
-      - name: Checkout source repositories
-        run: |
-          mkdir -p _source _debug
-          CHECKOUT_LOG="_debug/source-checkout.log"
-          : > "${CHECKOUT_LOG}"
-
-          clone_repo() {
-            local label="$1"
-            local repo_path="$2"
-            local target="$3"
-            local token="$4"
-            local auth_header
-            local clone_status
-            auth_header="$(printf 'x-access-token:%s' "${token}" | base64 | tr -d '\n')"
-
-            {
-              echo "=== Cloning ${label} ==="
-              echo "Repository: https://github.com/${repo_path}.git"
-              set +e
-              git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" clone --depth 1 "https://github.com/${repo_path}.git" "${target}"
-              clone_status=$?
-              set -e
-              if [ "${clone_status}" -eq 0 ]; then
-                echo "Clone completed: ${label}"
-              fi
-              echo
-            } >> "${CHECKOUT_LOG}" 2>&1
-
-            if [ "${clone_status}" -ne 0 ] || [ ! -d "${target}/.git" ]; then
-              echo "::error title=Failed to clone ${label}::git clone failed for https://github.com/${repo_path}.git with exit code ${clone_status}. See the job summary for log details."
-              {
-                echo "### Failed to clone ${label}"
-                echo
-                echo "Repository: https://github.com/${repo_path}.git"
-                echo
-                echo "Exit code: ${clone_status}"
-                echo
-                echo "Last lines from source-checkout.log:"
-                echo
-                echo '```text'
-                tail -n 80 "${CHECKOUT_LOG}"
-                echo '```'
-              } >> "${GITHUB_STEP_SUMMARY}"
-              exit 128
-            fi
-          }
-
-          clone_repo "NL2Cypher" "mangow0527/NL2Cypher" "_source/NL2Cypher" "${NL2CYPHER_REPO_TOKEN}"
-          clone_repo "knowledge-agent" "KG-AT-HOME/knowledge-agent" "_source/knowledge-agent" "${KNOWLEDGE_REPO_TOKEN}"
-          clone_repo "qa-agent" "KG-AT-HOME/qa-agent" "_source/qa-agent" "${QA_REPO_TOKEN}"
-
-      - name: Upload sync debug logs
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Checkout source repository
+        uses: actions/checkout@v4
         with:
-          name: sync-debug-logs
-          path: _debug/source-checkout.log
-          if-no-files-found: ignore
+          repository: mangow0527/NL2Cypher
+          path: _source/NL2Cypher
+          fetch-depth: 1
+          token: ${{ steps.source_tokens.outputs.nl2cypher_token }}
+          persist-credentials: false
+
+      - name: Checkout knowledge-agent repository
+        uses: actions/checkout@v4
+        with:
+          repository: KG-AT-HOME/knowledge-agent
+          path: _source/knowledge-agent
+          fetch-depth: 1
+          token: ${{ steps.source_tokens.outputs.knowledge_token }}
+          persist-credentials: false
+
+      - name: Checkout qa-agent repository
+        uses: actions/checkout@v4
+        with:
+          repository: KG-AT-HOME/qa-agent
+          path: _source/qa-agent
+          fetch-depth: 1
+          token: ${{ steps.source_tokens.outputs.qa_token }}
+          persist-credentials: false
 
       - name: Run sync scripts
         env:

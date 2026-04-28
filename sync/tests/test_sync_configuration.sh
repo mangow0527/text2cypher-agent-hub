@@ -34,16 +34,13 @@ assert_file_contains "${WORKFLOW_FILE}" "QA_REPO_TOKEN"
 assert_file_contains "${WORKFLOW_FILE}" "tr -d '\\r\\n'"
 assert_file_contains "${WORKFLOW_FILE}" "value#token "
 assert_file_contains "${WORKFLOW_FILE}" "value#Bearer "
-assert_file_contains "${WORKFLOW_FILE}" "x-access-token:%s"
-assert_file_contains "${WORKFLOW_FILE}" "extraheader=AUTHORIZATION: basic"
-assert_file_contains "${WORKFLOW_FILE}" "clone_repo"
-assert_file_contains "${WORKFLOW_FILE}" "clone --depth 1"
-assert_file_contains "${WORKFLOW_FILE}" "clone_status="
-assert_file_contains "${WORKFLOW_FILE}" "set +e"
-assert_file_contains "${WORKFLOW_FILE}" "Failed to clone"
-assert_file_contains "${WORKFLOW_FILE}" "_debug/source-checkout.log"
-assert_file_contains "${WORKFLOW_FILE}" "actions/upload-artifact"
-assert_file_contains "${WORKFLOW_FILE}" "sync-debug-logs"
+assert_file_contains "${WORKFLOW_FILE}" "id: source_tokens"
+assert_file_contains "${WORKFLOW_FILE}" "nl2cypher_token="
+assert_file_contains "${WORKFLOW_FILE}" "knowledge_token="
+assert_file_contains "${WORKFLOW_FILE}" "qa_token="
+assert_file_contains "${WORKFLOW_FILE}" 'token: ${{ steps.source_tokens.outputs.nl2cypher_token }}'
+assert_file_contains "${WORKFLOW_FILE}" 'token: ${{ steps.source_tokens.outputs.knowledge_token }}'
+assert_file_contains "${WORKFLOW_FILE}" 'token: ${{ steps.source_tokens.outputs.qa_token }}'
 assert_file_contains "${WORKFLOW_FILE}" "SOURCE_ROOT_NL2CYPHER:"
 assert_file_contains "${WORKFLOW_FILE}" "SOURCE_KNOWLEDGE:"
 assert_file_contains "${WORKFLOW_FILE}" "SOURCE_QA:"
@@ -59,8 +56,8 @@ if grep -Fq 'github.token' "${WORKFLOW_FILE}"; then
   exit 1
 fi
 
-if grep -Fq 'https://x-access-token:' "${WORKFLOW_FILE}" || grep -Fq 'token: ${{ secrets.SOURCE_REPO_TOKEN }}' "${WORKFLOW_FILE}" || grep -Fq 'token: ${{ env.SOURCE_REPO_TOKEN }}' "${WORKFLOW_FILE}"; then
-  echo "Expected ${WORKFLOW_FILE} to use sanitized git clone credentials for source repositories" >&2
+if grep -Fq 'https://x-access-token:' "${WORKFLOW_FILE}" || grep -Fq 'extraheader=AUTHORIZATION: basic' "${WORKFLOW_FILE}" || grep -Fq 'token: ${{ secrets.SOURCE_REPO_TOKEN }}' "${WORKFLOW_FILE}" || grep -Fq 'token: ${{ env.SOURCE_REPO_TOKEN }}' "${WORKFLOW_FILE}"; then
+  echo "Expected ${WORKFLOW_FILE} to use sanitized token outputs for source repository checkout" >&2
   exit 1
 fi
 
