@@ -74,21 +74,27 @@ jobs:
             local repo_path="$2"
             local target="$3"
             local token="$4"
+            local clone_status
 
             {
               echo "=== Cloning ${label} ==="
               echo "Repository: https://github.com/${repo_path}.git"
+              set +e
               git clone --depth 1 "https://x-access-token:${token}@github.com/${repo_path}.git" "${target}"
+              clone_status=$?
+              set -e
               echo "Clone completed: ${label}"
               echo
             } >> "${CHECKOUT_LOG}" 2>&1
 
-            if [ ! -d "${target}/.git" ]; then
-              echo "::error title=Failed to clone ${label}::git clone failed for https://github.com/${repo_path}.git. See the job summary for log details."
+            if [ "${clone_status}" -ne 0 ] || [ ! -d "${target}/.git" ]; then
+              echo "::error title=Failed to clone ${label}::git clone failed for https://github.com/${repo_path}.git with exit code ${clone_status}. See the job summary for log details."
               {
                 echo "### Failed to clone ${label}"
                 echo
                 echo "Repository: https://github.com/${repo_path}.git"
+                echo
+                echo "Exit code: ${clone_status}"
                 echo
                 echo "Last lines from source-checkout.log:"
                 echo
