@@ -31,12 +31,13 @@ jobs:
           RAW_QA_REPO_TOKEN: ${{ secrets.QA_REPO_TOKEN }}
         run: |
           sanitize_token() {
-            printf '%s' "$1" \
-              | tr -d '\r\n' \
-              | sed -e 's/^[[:space:]]*//' \
-                    -e 's/[[:space:]]*$//' \
-                    -e 's/^token[[:space:]]\+//' \
-                    -e 's/^Bearer[[:space:]]\+//'
+            local value
+            value="$(printf '%s' "$1" | tr -d '\r\n')"
+            value="${value#"${value%%[![:space:]]*}"}"
+            value="${value%"${value##*[![:space:]]}"}"
+            value="${value#token }"
+            value="${value#Bearer }"
+            printf '%s' "${value}"
           }
 
           NL2CYPHER_TOKEN="$(sanitize_token "${RAW_NL2CYPHER_REPO_TOKEN:-${RAW_SOURCE_REPO_TOKEN:-}}")"
@@ -68,18 +69,16 @@ jobs:
 
           clone_repo() {
             local label="$1"
-            local url="$2"
+            local repo_path="$2"
             local target="$3"
             local token="$4"
-            local auth_header
             local error_log
-            auth_header="$(printf 'x-access-token:%s' "${token}" | base64 | tr -d '\n')"
             error_log="$(mktemp)"
 
             echo "Cloning ${label}..."
-            if ! git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" clone --depth 1 "${url}" "${target}" 2>"${error_log}"; then
-              echo "::error title=Failed to clone ${label}::git clone failed for ${url}"
-              sed -e "s/${token}/[MASKED]/g" "${error_log}"
+            if ! git clone --depth 1 "https://x-access-token:${token}@github.com/${repo_path}.git" "${target}" 2>"${error_log}"; then
+              echo "::error title=Failed to clone ${label}::git clone failed for https://github.com/${repo_path}.git"
+              cat "${error_log}"
               rm -f "${error_log}"
               exit 128
             fi
@@ -87,9 +86,9 @@ jobs:
             rm -f "${error_log}"
           }
 
-          clone_repo "NL2Cypher" "https://github.com/mangow0527/NL2Cypher.git" "_source/NL2Cypher" "${NL2CYPHER_REPO_TOKEN}"
-          clone_repo "knowledge-agent" "https://github.com/KG-AT-HOME/knowledge-agent.git" "_source/knowledge-agent" "${KNOWLEDGE_REPO_TOKEN}"
-          clone_repo "qa-agent" "https://github.com/KG-AT-HOME/qa-agent.git" "_source/qa-agent" "${QA_REPO_TOKEN}"
+          clone_repo "NL2Cypher" "mangow0527/NL2Cypher" "_source/NL2Cypher" "${NL2CYPHER_REPO_TOKEN}"
+          clone_repo "knowledge-agent" "KG-AT-HOME/knowledge-agent" "_source/knowledge-agent" "${KNOWLEDGE_REPO_TOKEN}"
+          clone_repo "qa-agent" "KG-AT-HOME/qa-agent" "_source/qa-agent" "${QA_REPO_TOKEN}"
 
       - name: Run sync scripts
         env:
