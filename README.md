@@ -27,6 +27,7 @@ GitHub Actions 同步：
 
 - 自动同步：`.github/workflows/sync-latest.yml` 每 6 小时运行一次。
 - 手动同步：在 GitHub Actions 页面运行 `Sync Latest Source Code` workflow。
+- 私有源仓同步需要配置 `SOURCE_REPO_TOKEN` secret，令牌要能读取三个源仓。
 
 本地全量同步：
 

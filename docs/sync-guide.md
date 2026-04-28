@@ -38,7 +38,13 @@ workflow 文件：
 6. 执行 `./sync/scripts/sync_all.sh`
 7. 如果同步后有差异，则提交并 push 回当前运行分支
 
-如果任一源仓是私有仓库，建议在本仓配置 `SOURCE_REPO_TOKEN` secret，并确保它有读取这些源仓的权限。
+GitHub Actions 远端同步必须配置 `SOURCE_REPO_TOKEN` secret。该令牌需要能读取：
+
+- `mangow0527/NL2Cypher`
+- `KG-AT-HOME/knowledge-agent`
+- `KG-AT-HOME/qa-agent`
+
+如果没有配置该 secret，workflow 会在 checkout 源仓前失败并提示配置要求。
 
 ## 同步前检查
 

@@ -23,13 +23,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify source repository access token
+        env:
+          SOURCE_REPO_TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
+        run: |
+          if [ -z "${SOURCE_REPO_TOKEN}" ]; then
+            echo "SOURCE_REPO_TOKEN secret is required to checkout external source repositories."
+            echo "Create a fine-grained PAT or classic PAT with read access to mangow0527/NL2Cypher, KG-AT-HOME/knowledge-agent, and KG-AT-HOME/qa-agent."
+            exit 1
+          fi
+
       - name: Checkout source repository
         uses: actions/checkout@v4
         with:
           repository: mangow0527/NL2Cypher
           path: _source/NL2Cypher
           fetch-depth: 1
-          token: ${{ secrets.SOURCE_REPO_TOKEN || github.token }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
           persist-credentials: false
 
       - name: Checkout knowledge-agent repository
@@ -38,7 +48,7 @@ jobs:
           repository: KG-AT-HOME/knowledge-agent
           path: _source/knowledge-agent
           fetch-depth: 1
-          token: ${{ secrets.SOURCE_REPO_TOKEN || github.token }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
           persist-credentials: false
 
       - name: Checkout qa-agent repository
@@ -47,7 +57,7 @@ jobs:
           repository: KG-AT-HOME/qa-agent
           path: _source/qa-agent
           fetch-depth: 1
-          token: ${{ secrets.SOURCE_REPO_TOKEN || github.token }}
+          token: ${{ secrets.SOURCE_REPO_TOKEN }}
           persist-credentials: false
 
       - name: Run sync scripts
