@@ -65,30 +65,48 @@ jobs:
 
       - name: Checkout source repositories
         run: |
-          mkdir -p _source
+          mkdir -p _source _debug
+          CHECKOUT_LOG="_debug/source-checkout.log"
+          : > "${CHECKOUT_LOG}"
 
           clone_repo() {
             local label="$1"
             local repo_path="$2"
             local target="$3"
             local token="$4"
-            local error_log
-            error_log="$(mktemp)"
 
-            echo "Cloning ${label}..."
-            if ! git clone --depth 1 "https://x-access-token:${token}@github.com/${repo_path}.git" "${target}" 2>"${error_log}"; then
-              echo "::error title=Failed to clone ${label}::git clone failed for https://github.com/${repo_path}.git"
-              cat "${error_log}"
-              rm -f "${error_log}"
+            {
+              echo "=== Cloning ${label} ==="
+              echo "Repository: https://github.com/${repo_path}.git"
+              git clone --depth 1 "https://x-access-token:${token}@github.com/${repo_path}.git" "${target}"
+              echo "Clone completed: ${label}"
+              echo
+            } >> "${CHECKOUT_LOG}" 2>&1
+
+            if [ ! -d "${target}/.git" ]; then
+              echo "::error title=Failed to clone ${label}::git clone failed for https://github.com/${repo_path}.git. Download the sync-debug-logs artifact for details."
+              {
+                echo "### Failed to clone ${label}"
+                echo
+                echo "Repository: https://github.com/${repo_path}.git"
+                echo
+                echo "Download the sync-debug-logs artifact and inspect source-checkout.log."
+              } >> "${GITHUB_STEP_SUMMARY}"
               exit 128
             fi
-
-            rm -f "${error_log}"
           }
 
           clone_repo "NL2Cypher" "mangow0527/NL2Cypher" "_source/NL2Cypher" "${NL2CYPHER_REPO_TOKEN}"
           clone_repo "knowledge-agent" "KG-AT-HOME/knowledge-agent" "_source/knowledge-agent" "${KNOWLEDGE_REPO_TOKEN}"
           clone_repo "qa-agent" "KG-AT-HOME/qa-agent" "_source/qa-agent" "${QA_REPO_TOKEN}"
+
+      - name: Upload sync debug logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-debug-logs
+          path: _debug/source-checkout.log
+          if-no-files-found: ignore
 
       - name: Run sync scripts
         env:
