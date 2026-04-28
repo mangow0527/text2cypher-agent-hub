@@ -38,13 +38,25 @@ workflow 文件：
 6. 执行 `./sync/scripts/sync_all.sh`
 7. 如果同步后有差异，则提交并 push 回当前运行分支
 
-GitHub Actions 远端同步必须配置 `SOURCE_REPO_TOKEN` secret。该令牌需要能读取：
+GitHub Actions 远端同步必须配置源仓读取 token。
+
+如果使用 classic PAT，可以只配置一个 repository secret：
+
+- `SOURCE_REPO_TOKEN`
+
+该令牌需要能读取：
 
 - `mangow0527/NL2Cypher`
 - `KG-AT-HOME/knowledge-agent`
 - `KG-AT-HOME/qa-agent`
 
-如果没有配置该 secret，workflow 会在 checkout 源仓前失败并提示配置要求。
+如果使用 fine-grained PAT，通常需要按资源 owner 分开配置。workflow 支持这些 repository secrets：
+
+- `NL2CYPHER_REPO_TOKEN`：读取 `mangow0527/NL2Cypher`
+- `KNOWLEDGE_REPO_TOKEN`：读取 `KG-AT-HOME/knowledge-agent`
+- `QA_REPO_TOKEN`：读取 `KG-AT-HOME/qa-agent`
+
+如果没有配置对应 secret，workflow 会在 checkout 源仓前失败并提示配置要求。
 
 ## 同步前检查
 

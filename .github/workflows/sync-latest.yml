@@ -26,30 +26,56 @@ jobs:
       - name: Prepare source repository access token
         env:
           RAW_SOURCE_REPO_TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
+          RAW_NL2CYPHER_REPO_TOKEN: ${{ secrets.NL2CYPHER_REPO_TOKEN }}
+          RAW_KNOWLEDGE_REPO_TOKEN: ${{ secrets.KNOWLEDGE_REPO_TOKEN }}
+          RAW_QA_REPO_TOKEN: ${{ secrets.QA_REPO_TOKEN }}
         run: |
-          if [ -z "${RAW_SOURCE_REPO_TOKEN}" ]; then
-            echo "SOURCE_REPO_TOKEN secret is required to checkout external source repositories."
-            echo "Create a fine-grained PAT or classic PAT with read access to mangow0527/NL2Cypher, KG-AT-HOME/knowledge-agent, and KG-AT-HOME/qa-agent."
+          sanitize_token() {
+            printf '%s' "$1" | tr -d '\r\n'
+          }
+
+          NL2CYPHER_TOKEN="$(sanitize_token "${RAW_NL2CYPHER_REPO_TOKEN:-${RAW_SOURCE_REPO_TOKEN:-}}")"
+          KNOWLEDGE_TOKEN="$(sanitize_token "${RAW_KNOWLEDGE_REPO_TOKEN:-${RAW_SOURCE_REPO_TOKEN:-}}")"
+          QA_TOKEN="$(sanitize_token "${RAW_QA_REPO_TOKEN:-${RAW_SOURCE_REPO_TOKEN:-}}")"
+
+          missing_tokens=()
+          [ -n "${NL2CYPHER_TOKEN}" ] || missing_tokens+=("NL2CYPHER_REPO_TOKEN or SOURCE_REPO_TOKEN")
+          [ -n "${KNOWLEDGE_TOKEN}" ] || missing_tokens+=("KNOWLEDGE_REPO_TOKEN or SOURCE_REPO_TOKEN")
+          [ -n "${QA_TOKEN}" ] || missing_tokens+=("QA_REPO_TOKEN or SOURCE_REPO_TOKEN")
+
+          if [ "${#missing_tokens[@]}" -gt 0 ]; then
+            echo "Repository access token secrets are required to checkout source repositories."
+            printf 'Missing: %s\n' "${missing_tokens[@]}"
+            echo "Use SOURCE_REPO_TOKEN for a classic PAT with access to all sources, or use per-repository fine-grained PATs."
             exit 1
           fi
 
-          CLEAN_SOURCE_REPO_TOKEN="$(printf '%s' "${RAW_SOURCE_REPO_TOKEN}" | tr -d '\r\n')"
-          if [ -z "${CLEAN_SOURCE_REPO_TOKEN}" ]; then
-            echo "SOURCE_REPO_TOKEN secret is empty after trimming carriage returns and newlines."
-            exit 1
-          fi
-
-          echo "::add-mask::${CLEAN_SOURCE_REPO_TOKEN}"
-          echo "SOURCE_REPO_TOKEN=${CLEAN_SOURCE_REPO_TOKEN}" >> "${GITHUB_ENV}"
+          echo "::add-mask::${NL2CYPHER_TOKEN}"
+          echo "::add-mask::${KNOWLEDGE_TOKEN}"
+          echo "::add-mask::${QA_TOKEN}"
+          echo "NL2CYPHER_REPO_TOKEN=${NL2CYPHER_TOKEN}" >> "${GITHUB_ENV}"
+          echo "KNOWLEDGE_REPO_TOKEN=${KNOWLEDGE_TOKEN}" >> "${GITHUB_ENV}"
+          echo "QA_REPO_TOKEN=${QA_TOKEN}" >> "${GITHUB_ENV}"
 
       - name: Checkout source repositories
         run: |
           mkdir -p _source
-          AUTH_HEADER="$(printf 'x-access-token:%s' "${SOURCE_REPO_TOKEN}" | base64 -w 0)"
 
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" clone --depth 1 https://github.com/mangow0527/NL2Cypher.git _source/NL2Cypher
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" clone --depth 1 https://github.com/KG-AT-HOME/knowledge-agent.git _source/knowledge-agent
-          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" clone --depth 1 https://github.com/KG-AT-HOME/qa-agent.git _source/qa-agent
+          clone_repo() {
+            local label="$1"
+            local url="$2"
+            local target="$3"
+            local token="$4"
+            local auth_header
+            auth_header="$(printf 'x-access-token:%s' "${token}" | base64 -w 0)"
+
+            echo "Cloning ${label}..."
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth_header}" clone --depth 1 "${url}" "${target}"
+          }
+
+          clone_repo "NL2Cypher" "https://github.com/mangow0527/NL2Cypher.git" "_source/NL2Cypher" "${NL2CYPHER_REPO_TOKEN}"
+          clone_repo "knowledge-agent" "https://github.com/KG-AT-HOME/knowledge-agent.git" "_source/knowledge-agent" "${KNOWLEDGE_REPO_TOKEN}"
+          clone_repo "qa-agent" "https://github.com/KG-AT-HOME/qa-agent.git" "_source/qa-agent" "${QA_REPO_TOKEN}"
 
       - name: Run sync scripts
         env:
