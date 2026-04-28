@@ -84,13 +84,17 @@ jobs:
             } >> "${CHECKOUT_LOG}" 2>&1
 
             if [ ! -d "${target}/.git" ]; then
-              echo "::error title=Failed to clone ${label}::git clone failed for https://github.com/${repo_path}.git. Download the sync-debug-logs artifact for details."
+              echo "::error title=Failed to clone ${label}::git clone failed for https://github.com/${repo_path}.git. See the job summary for log details."
               {
                 echo "### Failed to clone ${label}"
                 echo
                 echo "Repository: https://github.com/${repo_path}.git"
                 echo
-                echo "Download the sync-debug-logs artifact and inspect source-checkout.log."
+                echo "Last lines from source-checkout.log:"
+                echo
+                echo '```text'
+                tail -n 80 "${CHECKOUT_LOG}"
+                echo '```'
               } >> "${GITHUB_STEP_SUMMARY}"
               exit 128
             fi
