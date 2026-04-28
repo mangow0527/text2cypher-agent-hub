@@ -6,7 +6,8 @@
 
 - 本仓库用于统一浏览五个服务的代码与文档。
 - 各服务继续在自己的原始开发位置维护。
-- 只有在你主动执行同步脚本时，本仓库才会更新到本地最新代码。
+- GitHub Actions 每 6 小时会自动从源仓同步最新代码并提交回本仓库。
+- 你也可以通过 GitHub Actions 手动触发同步，或在本地执行同步脚本。
 
 ## 目录结构
 
@@ -22,7 +23,12 @@
 
 ## 同步命令
 
-全量同步：
+GitHub Actions 同步：
+
+- 自动同步：`.github/workflows/sync-latest.yml` 每 6 小时运行一次。
+- 手动同步：在 GitHub Actions 页面运行 `Sync Latest Source Code` workflow。
+
+本地全量同步：
 
 ```bash
 ./sync/scripts/sync_all.sh

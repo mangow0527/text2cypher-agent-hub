@@ -1,0 +1,60 @@
+name: Sync Latest Source Code
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */6 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-latest-source-code
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync NL2Cypher into agent hub
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout hub repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+        with:
+          repository: mangow0527/NL2Cypher
+          path: _source/NL2Cypher
+          fetch-depth: 1
+          token: ${{ secrets.SOURCE_REPO_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Run sync scripts
+        env:
+          SOURCE_ROOT_NL2CYPHER: ${{ github.workspace }}/_source/NL2Cypher
+        run: ./sync/scripts/sync_all.sh
+
+      - name: Commit and push changes
+        run: |
+          SYNC_PATHS=(
+            agents/cypher-generator-agent
+            agents/testing-agent
+            agents/repair-agent
+            console/runtime-console
+            contracts
+            sync/manifests/latest-sync.json
+          )
+
+          if [ -z "$(git status --porcelain -- "${SYNC_PATHS[@]}")" ]; then
+            echo "No sync changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "${SYNC_PATHS[@]}"
+          git commit -m "chore: sync latest source code"
+          git push origin HEAD:${{ github.ref_name }}
