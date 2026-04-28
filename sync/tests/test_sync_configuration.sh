@@ -24,11 +24,13 @@ fi
 
 assert_file_contains "${WORKFLOW_FILE}" "workflow_dispatch:"
 assert_file_contains "${WORKFLOW_FILE}" "cron: \"0 */6 * * *\""
-assert_file_contains "${WORKFLOW_FILE}" "repository: mangow0527/NL2Cypher"
-assert_file_contains "${WORKFLOW_FILE}" "repository: KG-AT-HOME/knowledge-agent"
-assert_file_contains "${WORKFLOW_FILE}" "repository: KG-AT-HOME/qa-agent"
+assert_file_contains "${WORKFLOW_FILE}" "https://github.com/mangow0527/NL2Cypher.git"
+assert_file_contains "${WORKFLOW_FILE}" "https://github.com/KG-AT-HOME/knowledge-agent.git"
+assert_file_contains "${WORKFLOW_FILE}" "https://github.com/KG-AT-HOME/qa-agent.git"
 assert_file_contains "${WORKFLOW_FILE}" "SOURCE_REPO_TOKEN secret is required"
-assert_file_contains "${WORKFLOW_FILE}" 'token: ${{ secrets.SOURCE_REPO_TOKEN }}'
+assert_file_contains "${WORKFLOW_FILE}" "tr -d '\\r\\n'"
+assert_file_contains "${WORKFLOW_FILE}" "x-access-token:%s"
+assert_file_contains "${WORKFLOW_FILE}" "clone --depth 1"
 assert_file_contains "${WORKFLOW_FILE}" "SOURCE_ROOT_NL2CYPHER:"
 assert_file_contains "${WORKFLOW_FILE}" "SOURCE_KNOWLEDGE:"
 assert_file_contains "${WORKFLOW_FILE}" "SOURCE_QA:"
@@ -41,6 +43,11 @@ assert_file_contains "${WORKFLOW_FILE}" "git push"
 
 if grep -Fq 'github.token' "${WORKFLOW_FILE}"; then
   echo "Expected ${WORKFLOW_FILE} not to fall back to github.token for source repository checkout" >&2
+  exit 1
+fi
+
+if grep -Fq 'token: ${{ secrets.SOURCE_REPO_TOKEN }}' "${WORKFLOW_FILE}" || grep -Fq 'token: ${{ env.SOURCE_REPO_TOKEN }}' "${WORKFLOW_FILE}"; then
+  echo "Expected ${WORKFLOW_FILE} to use sanitized git clone credentials for source repositories" >&2
   exit 1
 fi
 

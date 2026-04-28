@@ -23,42 +23,33 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify source repository access token
+      - name: Prepare source repository access token
         env:
-          SOURCE_REPO_TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
+          RAW_SOURCE_REPO_TOKEN: ${{ secrets.SOURCE_REPO_TOKEN }}
         run: |
-          if [ -z "${SOURCE_REPO_TOKEN}" ]; then
+          if [ -z "${RAW_SOURCE_REPO_TOKEN}" ]; then
             echo "SOURCE_REPO_TOKEN secret is required to checkout external source repositories."
             echo "Create a fine-grained PAT or classic PAT with read access to mangow0527/NL2Cypher, KG-AT-HOME/knowledge-agent, and KG-AT-HOME/qa-agent."
             exit 1
           fi
 
-      - name: Checkout source repository
-        uses: actions/checkout@v4
-        with:
-          repository: mangow0527/NL2Cypher
-          path: _source/NL2Cypher
-          fetch-depth: 1
-          token: ${{ secrets.SOURCE_REPO_TOKEN }}
-          persist-credentials: false
+          CLEAN_SOURCE_REPO_TOKEN="$(printf '%s' "${RAW_SOURCE_REPO_TOKEN}" | tr -d '\r\n')"
+          if [ -z "${CLEAN_SOURCE_REPO_TOKEN}" ]; then
+            echo "SOURCE_REPO_TOKEN secret is empty after trimming carriage returns and newlines."
+            exit 1
+          fi
 
-      - name: Checkout knowledge-agent repository
-        uses: actions/checkout@v4
-        with:
-          repository: KG-AT-HOME/knowledge-agent
-          path: _source/knowledge-agent
-          fetch-depth: 1
-          token: ${{ secrets.SOURCE_REPO_TOKEN }}
-          persist-credentials: false
+          echo "::add-mask::${CLEAN_SOURCE_REPO_TOKEN}"
+          echo "SOURCE_REPO_TOKEN=${CLEAN_SOURCE_REPO_TOKEN}" >> "${GITHUB_ENV}"
 
-      - name: Checkout qa-agent repository
-        uses: actions/checkout@v4
-        with:
-          repository: KG-AT-HOME/qa-agent
-          path: _source/qa-agent
-          fetch-depth: 1
-          token: ${{ secrets.SOURCE_REPO_TOKEN }}
-          persist-credentials: false
+      - name: Checkout source repositories
+        run: |
+          mkdir -p _source
+          AUTH_HEADER="$(printf 'x-access-token:%s' "${SOURCE_REPO_TOKEN}" | base64 -w 0)"
+
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" clone --depth 1 https://github.com/mangow0527/NL2Cypher.git _source/NL2Cypher
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" clone --depth 1 https://github.com/KG-AT-HOME/knowledge-agent.git _source/knowledge-agent
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" clone --depth 1 https://github.com/KG-AT-HOME/qa-agent.git _source/qa-agent
 
       - name: Run sync scripts
         env:
