@@ -36,5 +36,15 @@ class StatusResponse(BaseModel):
     status: Literal["ok"]
 
 
+class RedispatchResult(BaseModel):
+    trace_id: str
+    qa_id: str
+    status: str
+    attempt: int
+    max_attempts: int
+    dispatch: dict
+
+
 class ApplyRepairResponse(StatusResponse):
     changes: list[RepairChange] = Field(default_factory=list)
+    redispatch: RedispatchResult

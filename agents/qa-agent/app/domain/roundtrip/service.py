@@ -13,27 +13,28 @@ class RoundtripService:
         self.model_gateway = model_gateway or ModelGateway()
 
     def check(self, sample: QASample, model_config: ModelConfig) -> tuple[bool, list[str], list[str]]:
-        payload = self.model_gateway.generate_text(
-            "question_bundle_consistency",
-            model_config,
-            canonical_question=sample.question_canonical_zh,
-            cypher=sample.cypher,
-            schema_summary=sample.provenance.get("schema_summary", "无摘要"),
-            return_semantics=sample.provenance.get("return_semantics", ",".join(sample.result_signature.columns or ["result"])),
-            result_summary=sample.provenance.get("result_summary", json.dumps({
-                "columns": sample.result_signature.columns,
-                "row_count": sample.result_signature.row_count,
-                "preview": sample.result_signature.result_preview[:2],
-            }, ensure_ascii=False)),
-            variants_json=json.dumps(
-                [
-                    {"style": style, "question": question}
-                    for style, question in zip(sample.question_variant_styles, sample.question_variants_zh)
-                ],
-                ensure_ascii=False,
-            ),
+        payload = {
+            "canonical_pass": self._read_bool(sample.provenance.get("canonical_pass")),
+            "canonical_checks": self._read_json(sample.provenance.get("canonical_checks"), {}),
+            "approved_styles": self._read_json(sample.provenance.get("approved_styles"), []),
+        }
+        canonical_ok, approved_variants, approved_styles = self._parse_bundle_result(
+            json.dumps(payload, ensure_ascii=False),
+            sample,
         )
-        return self._parse_bundle_result(payload, sample)
+        if not canonical_ok:
+            return False, approved_variants, approved_styles
+        consistency_text = self.model_gateway.generate_text(
+            "question_cypher_consistency",
+            model_config,
+            question=sample.question_canonical_zh,
+            cypher=sample.cypher,
+        )
+        return (
+            self._parse_consistency_result(consistency_text),
+            approved_variants,
+            approved_styles,
+        )
 
     def _parse_bundle_result(self, payload: str, sample: QASample) -> tuple[bool, list[str], list[str]]:
         try:
@@ -59,6 +60,25 @@ class RoundtripService:
             canonical_ok = result.startswith("PASS") and self._passes_rule_checks(sample.question_canonical_zh, sample.cypher)
             return canonical_ok, sample.question_variants_zh, sample.question_variant_styles
 
+    def _read_json(self, payload: str | None, fallback):
+        if not payload:
+            return fallback
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError:
+            return fallback
+
+    def _read_bool(self, payload: str | None) -> bool:
+        if not payload:
+            return False
+        try:
+            return bool(json.loads(payload))
+        except json.JSONDecodeError:
+            return payload.strip().lower() == "true"
+
+    def _parse_consistency_result(self, payload: str) -> bool:
+        return payload.strip().upper().startswith("PASS")
+
     def _passes_rule_checks(self, question: str, cypher: str) -> bool:
         text = question.strip().lower()
         cypher_lower = cypher.lower()
@@ -67,7 +87,7 @@ class RoundtripService:
             return False
 
         limit_match = re.search(r"\blimit\s+(\d+)\b", cypher_lower)
-        if limit_match:
+        if limit_match and "order by" in cypher_lower:
             limit_value = limit_match.group(1)
             if not self._mentions_limit(text, limit_value):
                 return False

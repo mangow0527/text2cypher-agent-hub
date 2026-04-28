@@ -1,17 +1,21 @@
 {
-  "synced_at_utc": "2026-04-28T09:38:03Z",
+  "synced_at_utc": "2026-04-28T09:47:07Z",
   "sources": {
-    "cypher_generator_agent": "/home/runner/work/text2cypher-agent-hub/text2cypher-agent-hub/_source/NL2Cypher/services/cypher_generator_agent",
-    "testing_agent": "/home/runner/work/text2cypher-agent-hub/text2cypher-agent-hub/_source/NL2Cypher/services/testing_agent",
-    "repair_agent": "/home/runner/work/text2cypher-agent-hub/text2cypher-agent-hub/_source/NL2Cypher/services/repair_agent",
-    "runtime_console": "/home/runner/work/text2cypher-agent-hub/text2cypher-agent-hub/_source/NL2Cypher/console/runtime_console",
-    "contracts": "/home/runner/work/text2cypher-agent-hub/text2cypher-agent-hub/_source/NL2Cypher/contracts"
+    "cypher_generator_agent": "/Users/mangowmac/Desktop/code/NL2Cypher/services/cypher_generator_agent",
+    "testing_agent": "/Users/mangowmac/Desktop/code/NL2Cypher/services/testing_agent",
+    "repair_agent": "/Users/mangowmac/Desktop/code/NL2Cypher/services/repair_agent",
+    "runtime_console": "/Users/mangowmac/Desktop/code/NL2Cypher/console/runtime_console",
+    "contracts": "/Users/mangowmac/Desktop/code/NL2Cypher/contracts",
+    "knowledge_agent": "/Users/mangowmac/Desktop/code/knowledge-agent",
+    "qa_agent": "/Users/mangowmac/Desktop/code/qa-agent"
   },
   "targets": {
     "cypher_generator_agent": "agents/cypher-generator-agent",
     "testing_agent": "agents/testing-agent",
     "repair_agent": "agents/repair-agent",
     "runtime_console": "console/runtime-console",
-    "contracts": "contracts"
+    "contracts": "contracts",
+    "knowledge_agent": "agents/knowledge-agent",
+    "qa_agent": "agents/qa-agent"
   }
 }

@@ -5,6 +5,10 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    proxy: {
+      "/jobs": "http://127.0.0.1:8020",
+      "/helpers": "http://127.0.0.1:8020",
+      "/qa": "http://127.0.0.1:8020",
+    },
   },
 });
-

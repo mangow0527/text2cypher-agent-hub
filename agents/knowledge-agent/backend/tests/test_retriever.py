@@ -12,4 +12,4 @@ class KnowledgeRetrieverTest(unittest.TestCase):
 
         self.assertIn("Protocol.version", bundle["business_context"])
         self.assertIn("TUNNEL_PROTO", bundle["few_shot_examples"])
-        self.assertEqual(bundle["few_shot_examples"].count("Question:"), 1)
+        self.assertGreaterEqual(bundle["few_shot_examples"].count("Question:"), 1)

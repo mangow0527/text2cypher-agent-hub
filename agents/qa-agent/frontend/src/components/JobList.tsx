@@ -1,5 +1,35 @@
 import { JobRecord } from "../lib/api";
 
+export type JobStatusFilter = "all" | "running" | "completed" | "failed";
+
+const runningStatuses = new Set<JobRecord["status"]>([
+  "created",
+  "schema_ready",
+  "skeleton_ready",
+  "cypher_ready",
+  "validated",
+  "questions_ready",
+  "roundtrip_done",
+  "deduped",
+  "packaged",
+]);
+
+export function jobStatusLabel(status?: JobRecord["status"]) {
+  if (!status) {
+    return "待开始";
+  }
+  if (status === "completed") {
+    return "已完成";
+  }
+  if (status === "failed") {
+    return "失败";
+  }
+  if (runningStatuses.has(status)) {
+    return "生成中";
+  }
+  return status;
+}
+
 export function JobList({
   jobs,
   totalJobs,
@@ -25,9 +55,9 @@ export function JobList({
   totalPages: number;
   onPageChange: (page: number) => void;
   query: string;
-  statusFilter: "all" | JobRecord["status"];
+  statusFilter: JobStatusFilter;
   onQueryChange: (value: string) => void;
-  onStatusFilterChange: (value: "all" | JobRecord["status"]) => void;
+  onStatusFilterChange: (value: JobStatusFilter) => void;
 }) {
   return (
     <section className="surface list-surface">
@@ -55,20 +85,12 @@ export function JobList({
         <select
           className="text-input compact-input"
           value={statusFilter}
-          onChange={(event) => onStatusFilterChange(event.target.value as "all" | JobRecord["status"])}
+          onChange={(event) => onStatusFilterChange(event.target.value as JobStatusFilter)}
         >
           <option value="all">全部状态</option>
-          <option value="created">created</option>
-          <option value="schema_ready">schema_ready</option>
-          <option value="skeleton_ready">skeleton_ready</option>
-          <option value="cypher_ready">cypher_ready</option>
-          <option value="validated">validated</option>
-          <option value="questions_ready">questions_ready</option>
-          <option value="roundtrip_done">roundtrip_done</option>
-          <option value="deduped">deduped</option>
-          <option value="packaged">packaged</option>
-          <option value="completed">completed</option>
-          <option value="failed">failed</option>
+          <option value="running">生成中</option>
+          <option value="completed">已完成</option>
+          <option value="failed">失败</option>
         </select>
         <div className="list-toolbar-meta">
           共 {filteredCount} / {totalJobs} 条
@@ -90,7 +112,7 @@ export function JobList({
                 <button className="row-main-button" onClick={() => onSelect(job.job_id)}>
                   <strong>{job.job_id}</strong>
                 </button>
-                <span className={`status-pill status-${job.status}`}>{job.status}</span>
+                <span className={`status-pill status-${job.status}`}>{jobStatusLabel(job.status)}</span>
                 <span>{Number((job.metrics.selection as { final_count?: number } | undefined)?.final_count ?? job.metrics.sample_count ?? 0)} 条</span>
                 <span>{new Date(job.updated_at).toLocaleString()}</span>
                 <div className="table-actions">

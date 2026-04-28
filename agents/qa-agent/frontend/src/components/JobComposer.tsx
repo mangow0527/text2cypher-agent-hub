@@ -1,5 +1,9 @@
 import { FormEvent, useState } from "react";
 
+const defaultSchemaPath =
+  (import.meta.env.VITE_DEFAULT_SCHEMA_PATH as string | undefined)?.trim() ||
+  "/root/multi-agent/qa-agent/schema.json";
+
 const defaultSchema = {
   node_types: ["Person", "Project"],
   edge_types: ["WORKS_ON"],
@@ -54,7 +58,7 @@ export function JobComposer({
   const [schemaText, setSchemaText] = useState(JSON.stringify(defaultSchema, null, 2));
   const [mode, setMode] = useState<"online" | "offline">("online");
   const [schemaSourceType, setSchemaSourceType] = useState<"inline" | "file" | "url">("inline");
-  const [schemaFilePath, setSchemaFilePath] = useState("/Users/wangxinhao/muti-agent-offline-system/qa-agent/schema.json");
+  const [schemaFilePath, setSchemaFilePath] = useState(defaultSchemaPath);
   const [schemaUrl, setSchemaUrl] = useState("");
   const [tugraphSourceType, setTugraphSourceType] = useState<"env" | "inline">("env");
   const [tugraphBaseUrl, setTugraphBaseUrl] = useState("");
@@ -106,8 +110,8 @@ export function JobComposer({
       <div className="panel-heading-row">
         <div>
           <div className="eyebrow">生成任务</div>
-          <h3>创建一批新的 QA</h3>
-          <p>点击后会立即创建任务并在中间列表里高亮显示，状态会自动刷新。</p>
+          <h3>批量生成 QA 对</h3>
+          <p>创建一个任务，生成多条带难度标签的 QA 对。</p>
         </div>
       </div>
       <form className="stack-form" onSubmit={handleSubmit}>
@@ -191,7 +195,7 @@ export function JobComposer({
         <div className="notice">{message}</div>
         {preflightMessage ? <div className="signal-box">{preflightMessage}</div> : null}
         <div className="form-footer">
-          <p>完成后右侧详情会出现下载入口和发送结果。</p>
+          <p>结果面板展示生成进度、难度覆盖和下载入口。</p>
           <div className="action-row">
             <button className="button secondary" type="button" disabled={busy} onClick={() => void handlePreflight()}>
             预检

@@ -61,14 +61,18 @@ write_manifest() {
     "testing_agent": "${SOURCE_TESTING}",
     "repair_agent": "${SOURCE_REPAIR}",
     "runtime_console": "${SOURCE_CONSOLE}",
-    "contracts": "${SOURCE_CONTRACTS}"
+    "contracts": "${SOURCE_CONTRACTS}",
+    "knowledge_agent": "${SOURCE_KNOWLEDGE}",
+    "qa_agent": "${SOURCE_QA}"
   },
   "targets": {
     "cypher_generator_agent": "agents/cypher-generator-agent",
     "testing_agent": "agents/testing-agent",
     "repair_agent": "agents/repair-agent",
     "runtime_console": "console/runtime-console",
-    "contracts": "contracts"
+    "contracts": "contracts",
+    "knowledge_agent": "agents/knowledge-agent",
+    "qa_agent": "agents/qa-agent"
   }
 }
 EOF

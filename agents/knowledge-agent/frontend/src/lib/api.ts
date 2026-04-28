@@ -1,4 +1,15 @@
-const API_BASE = "http://127.0.0.1:8010";
+function resolveApiBase(): string {
+  const configured = import.meta.env.VITE_API_BASE as string | undefined;
+  if (configured && configured.trim()) {
+    return configured.trim().replace(/\/+$/, "");
+  }
+  if (typeof window !== "undefined") {
+    return `${window.location.protocol}//${window.location.hostname}:8010`;
+  }
+  return "http://127.0.0.1:8010";
+}
+
+const API_BASE = resolveApiBase();
 
 async function parseJsonOrThrow(response: Response) {
   const text = await response.text();

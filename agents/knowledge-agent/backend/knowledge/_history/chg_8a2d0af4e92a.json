@@ -1,9 +1,0 @@
-{
-  "id": "chg_8a2d0af4e92a",
-  "filename": "few_shot.md",
-  "target_type": "few_shot",
-  "suggestion": "Add a few-shot example mapping '查询失败样例' to the golden Cypher to enforce the specific LIMIT (20) and return fields (id, name). Additionally, add business knowledge to clarify that '失败样例' maps to a generic NetworkElement query pattern in this context.",
-  "created_at": "2026-04-13T23:58:46.946157+00:00",
-  "before": "## Reference Examples\n\n[id: tunnel_protocol_version]\nQuestion: 查询协议版本为v2.0的隧道\nCypher: MATCH (t:Tunnel)-[:TUNNEL_PROTO]->(p:Protocol) WHERE p.version = 'v2.0' RETURN t.id, t.name\nWhy: 展示协议版本过滤路径。\n\n[id: networkelement_tunnel_protocol_path]\nQuestion: 查询协议版本为v2.0的隧道所属网元\nCypher: MATCH (n:NetworkElement)-[:FIBER_SRC]->(t:Tunnel)-[:TUNNEL_PROTO]->(p:Protocol) WHERE p.version = 'v2.0' RETURN n.id\nWhy: 展示网元到隧道再到协议的标准路径。\n",
-  "after": "## Reference Examples\n\n[id: tunnel_protocol_version]\nQuestion: 查询协议版本为v2.0的隧道\nCypher: MATCH (t:Tunnel)-[:TUNNEL_PROTO]->(p:Protocol) WHERE p.version = 'v2.0' RETURN t.id, t.name\nWhy: 展示协议版本过滤路径。\n\n[id: networkelement_tunnel_protocol_path]\nQuestion: 查询协议版本为v2.0的隧道所属网元\nCypher: MATCH (n:NetworkElement)-[:FIBER_SRC]->(t:Tunnel)-[:TUNNEL_PROTO]->(p:Protocol) WHERE p.version = 'v2.0' RETURN n.id\nWhy: 展示网元到隧道再到协议的标准路径。\n\n## few_shot\n\n[id: query_failure_case_example]\n{'question': '查询失败样例', 'cypher': 'MATCH (n:NetworkElement) RETURN n.id AS id, n.name AS name LIMIT 20'}\n"
-}

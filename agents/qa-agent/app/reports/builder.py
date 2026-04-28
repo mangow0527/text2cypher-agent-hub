@@ -3,7 +3,8 @@ from __future__ import annotations
 from collections import Counter
 
 from app.domain.generation.registry import QUERY_TYPE_REGISTRY
-from app.domain.models import QASample
+from app.domain.models import QASample, StageRecord
+from app.reports.business_stages import build_business_stage_summary
 
 
 ALL_DIFFICULTY_LEVELS = [f"L{level}" for level in range(1, 9)]
@@ -17,7 +18,7 @@ ALL_LANGUAGE_STYLES = [
 
 
 class ReportBuilder:
-    def build(self, samples: list[QASample]) -> dict:
+    def build(self, samples: list[QASample], stages: list[StageRecord] | None = None, dispatch: dict | None = None) -> dict:
         query_types = Counter()
         structure_families = Counter()
         difficulties = Counter()
@@ -74,4 +75,5 @@ class ReportBuilder:
                 "style_distribution": dict(language_styles),
                 "is_complete": not missing_styles,
             },
+            **({"business_stages": build_business_stage_summary(stages or [], dispatch)} if stages is not None else {}),
         }

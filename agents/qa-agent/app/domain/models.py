@@ -112,7 +112,7 @@ class CanonicalSchemaSpec(BaseModel):
     primary_keys: Dict[str, str] = Field(default_factory=dict)
     constraints: List[str] = Field(default_factory=list)
     indexes: List[str] = Field(default_factory=list)
-    value_catalog: Dict[str, List[str]] = Field(default_factory=dict)
+    value_catalog: Dict[str, List[Any]] = Field(default_factory=dict)
     semantic_alias: Dict[str, List[str]] = Field(default_factory=dict)
     raw_schema: Dict[str, Any] = Field(default_factory=dict)
 
@@ -126,6 +126,30 @@ class CypherSkeleton(BaseModel):
     difficulty_floor: Literal["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8"] = "L1"
 
 
+class CoverageSpec(BaseModel):
+    spec_id: str = Field(default_factory=lambda: f"cov_{uuid4().hex[:12]}")
+    intent: str
+    operators: List[str] = Field(default_factory=list)
+    topology: str
+    answer_type: Literal["node", "relationship", "scalar", "table", "path", "boolean"] = "node"
+    target_difficulty: Literal["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8"]
+    template_id: str
+    query_type: str
+    structure_family: str
+    bindings: Dict[str, Any] = Field(default_factory=dict)
+
+
+class QueryPlan(BaseModel):
+    plan_id: str = Field(default_factory=lambda: f"plan_{uuid4().hex[:12]}")
+    query_type: str
+    structure_family: str
+    difficulty: Literal["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8"]
+    bindings: Dict[str, Any] = Field(default_factory=dict)
+    required_semantics: Dict[str, Any] = Field(default_factory=dict)
+    disallowed_constructs: List[str] = Field(default_factory=list)
+    rationale: str = ""
+
+
 class CypherCandidate(BaseModel):
     candidate_id: str = Field(default_factory=lambda: f"cand_{uuid4().hex[:12]}")
     skeleton_id: str
@@ -136,6 +160,7 @@ class CypherCandidate(BaseModel):
     bound_schema_items: Dict[str, List[str]] = Field(default_factory=dict)
     bound_values: Dict[str, Any] = Field(default_factory=dict)
     difficulty: Literal["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8"] = "L1"
+    query_plan: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ValidationResult(BaseModel):
@@ -147,6 +172,8 @@ class ValidationResult(BaseModel):
     runtime: bool = False
     result_sanity: bool = False
     difficulty_valid: bool = True
+    plan_valid: bool = True
+    plan_reasons: List[str] = Field(default_factory=list)
     roundtrip_check: Optional[bool] = None
 
     model_config = {"populate_by_name": True}
@@ -180,6 +207,7 @@ class QASample(BaseModel):
     question_canonical_zh: str
     question_variants_zh: List[str]
     question_variant_styles: List[str] = Field(default_factory=list)
+    query_plan: Dict[str, Any] = Field(default_factory=dict)
     cypher: str
     cypher_normalized: str
     query_types: List[str]

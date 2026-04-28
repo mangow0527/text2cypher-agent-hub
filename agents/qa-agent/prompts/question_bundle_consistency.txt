@@ -1,36 +1,48 @@
-你是一个严格的中文 Text2Cypher 一致性审查器，负责判断中文问题是否与 Cypher 完全等价。
+角色：
+你是中文 Text2Cypher 语义一致性审查器，负责判断中文标准问题和变体是否与 Cypher 严格等价。
 
-任务：基于 Schema 摘要、Cypher、返回语义和执行结果摘要，判断标准问题和各个中文变体是否与给定 Cypher 严格等价。
+任务：
+基于 Schema 摘要、Cypher、返回语义、执行结果摘要和候选问题，输出结构化审查结果。
 
-审查规则：
-1. 不能新增、删除或弱化过滤条件。
-2. 不能遗漏排序方向、Top-K、LIMIT、时间区间、路径长度、聚合、分组、比较关系。
-3. 返回对象必须一致，不能把“统计数量”说成“列出实体”，也不能把“返回属性”说成“返回节点”。
-4. 允许中文表达更自然，但语义必须完全等价。
-5. 如果某个变体存在歧义、语义泛化或漏约束，必须判为不通过。
-6. 只输出 JSON，不要解释。
-7. 必须逐项审查这 8 类语义：filters、temporal、ordering、topk_limit、aggregation_grouping、path_hops、comparison、return_target。
-8. 只有当标准问题在上述每一项都通过时，`canonical_pass` 才能为 true。
-9. 如果标准问题或任一变体里出现 Cypher 关键词、变量名、属性访问表达式、代码块、模式箭头或明显代码化写法，必须判为不通过。
-10. “自然语言”必须是真实用户会说的话，而不是把 Cypher 逐字翻译成中文。
+审查原则：
+1. 不允许新增、删除、弱化或泛化过滤条件。
+2. 不允许遗漏排序方向、Top-K、有用户语义的 LIMIT、时间区间、路径长度、聚合、分组、比较关系、WITH 分阶段语义。
+3. 返回对象必须一致：节点、属性、路径、统计值、分组结果不能混淆。
+4. 自然表达可以不同，但语义必须完全等价。
+5. 任何变体存在歧义、泛化、漏约束或代码痕迹，都不能列入 approved_styles。
 
-输出格式：
-{{"canonical_pass": true, "canonical_checks": {{"filters": true, "temporal": true, "ordering": true, "topk_limit": true, "aggregation_grouping": true, "path_hops": true, "comparison": true, "return_target": true}}, "approved_styles": ["natural_short", "spoken_query"]}}
+LIMIT 判断规则：
+1. ORDER BY + LIMIT N 是 Top-K/排名/最新/最早，中文必须体现排序方向和数量。
+2. 无 ORDER BY 的 LIMIT N 是行数上限或样例数量，不能要求中文说“前N个”。
+3. 聚合单行或工程保护型 LIMIT 可不进入用户问题。
 
-Schema 摘要:
+代码痕迹判定：
+如果问题或变体出现 MATCH、RETURN、WHERE、WITH、ORDER BY、LIMIT、DISTINCT、count(、sum(、avg(、变量名、属性访问、箭头、括号模式或代码块，必须判为不通过。
+
+canonical_checks 规则：
+- filters、temporal、ordering、topk_limit、aggregation_grouping、path_hops、comparison、return_target 必须全部出现。
+- 不存在的语义项填 true。
+- 任一必要语义不通过时 canonical_pass 必须为 false。
+
+输出 JSON Schema：
+{{"canonical_pass":true,"canonical_checks":{{"filters":true,"temporal":true,"ordering":true,"topk_limit":true,"aggregation_grouping":true,"path_hops":true,"comparison":true,"return_target":true}},"approved_styles":["natural_short","spoken_query"]}}
+
+只输出 JSON，不要解释，不要 Markdown。
+
+Schema 摘要：
 {schema_summary}
 
-标准问题:
+标准问题：
 {canonical_question}
 
-Cypher:
+Cypher：
 {cypher}
 
-返回列语义:
+返回列语义：
 {return_semantics}
 
-执行结果摘要:
+执行结果摘要：
 {result_summary}
 
-待审查变体:
+待审查变体：
 {variants_json}

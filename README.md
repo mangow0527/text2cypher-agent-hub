@@ -40,6 +40,8 @@ GitHub Actions 同步：
 ./sync/scripts/sync_cypher_generator.sh
 ./sync/scripts/sync_testing.sh
 ./sync/scripts/sync_repair.sh
+./sync/scripts/sync_knowledge.sh
+./sync/scripts/sync_qa.sh
 ./sync/scripts/sync_console.sh
 ./sync/scripts/sync_contracts.sh
 ```
@@ -56,7 +58,8 @@ GitHub Actions 同步：
 
 都来自本地 [NL2Cypher](/Users/mangowmac/Desktop/code/NL2Cypher) 仓库。
 
-`knowledge-agent` 和 `qa-agent` 目录作为外部服务代码展示区单独保留，不参与本仓同步脚本。
+- `knowledge-agent` 来自 `git@github.com:KG-AT-HOME/knowledge-agent.git`
+- `qa-agent` 来自 `git@github.com:KG-AT-HOME/qa-agent.git`
 
 ## 使用说明
 

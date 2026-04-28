@@ -24,7 +24,12 @@ class JobStore:
 
     def list(self) -> Iterable[JobRecord]:
         for path in sorted(self.root.glob("*.json")):
-            yield JobRecord.model_validate_json(path.read_text(encoding="utf-8"))
+            if path.name.startswith("."):
+                continue
+            try:
+                yield JobRecord.model_validate_json(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError):
+                continue
 
     def delete(self, job_id: str) -> None:
         path = self.path_for(job_id)

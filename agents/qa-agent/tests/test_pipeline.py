@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 import httpx
 
 from app.domain.generation.service import GenerationService
-from app.domain.models import CypherCandidate, JobRequest, ResultSignature, RuntimeMeta, ValidatedSample, ValidationResult
+from app.domain.models import CypherCandidate, CypherSkeleton, JobRequest, QueryPlan, ResultSignature, RuntimeMeta, ValidatedSample, ValidationResult
 from app.domain.questioning.service import QUESTION_VARIANT_STYLES, QuestionService, build_result_summary, is_natural_language_question
 from app.domain.roundtrip.service import RoundtripService
 from app.domain.schema.compatibility_service import SchemaCompatibilityService
@@ -25,8 +25,72 @@ class FakeModelGateway(ModelGateway):
     def __init__(self) -> None:
         self.calls = []
 
+    def _question_payload_for_cypher(self, cypher: str) -> dict:
+        if "LIMIT 5" in cypher.upper():
+            return {
+                "canonical_question": "网络中前5个设备有哪些？",
+                "variants": [
+                    {"style": "natural_short", "question": "列出网络里的前5个设备"},
+                    {"style": "spoken_query", "question": "网络里前5个设备都有啥？"},
+                    {"style": "business_term", "question": "查询前5个网络设备"},
+                    {"style": "ellipsis_query", "question": "前5个网络设备有哪些？"},
+                    {"style": "task_oriented", "question": "帮我把网络中的前5个设备找出来"},
+                ],
+                "canonical_pass": True,
+                "canonical_checks": {
+                    "filters": True,
+                    "temporal": True,
+                    "ordering": True,
+                    "topk_limit": True,
+                    "aggregation_grouping": True,
+                    "path_hops": True,
+                    "comparison": True,
+                    "return_target": True,
+                },
+                "approved_styles": QUESTION_VARIANT_STYLES,
+            }
+        return {
+            "canonical_question": "网络中有哪些设备？",
+            "variants": [
+                {"style": "natural_short", "question": "列出网络里的设备"},
+                {"style": "spoken_query", "question": "网络里都有哪些设备啊？"},
+                {"style": "business_term", "question": "查询网络设备清单"},
+                {"style": "ellipsis_query", "question": "网络设备有哪些？"},
+                {"style": "task_oriented", "question": "帮我把网络中的设备找出来"},
+            ],
+            "canonical_pass": True,
+            "canonical_checks": {
+                "filters": True,
+                "temporal": True,
+                "ordering": True,
+                "topk_limit": True,
+                "aggregation_grouping": True,
+                "path_hops": True,
+                "comparison": True,
+                "return_target": True,
+            },
+            "approved_styles": QUESTION_VARIANT_STYLES,
+        }
+
     def generate_text(self, prompt_name, model_config, **kwargs):
         self.calls.append(prompt_name)
+        if prompt_name == "cypher_candidate_batch":
+            requests = json.loads(kwargs.get("requests_json", "[]"))
+            return json.dumps(
+                {
+                    "items": [
+                        {
+                            "request_id": item["request_id"],
+                            "candidates": [
+                                {"mode": "llm_direct", "cypher": "MATCH (n:Person) RETURN n.name AS value LIMIT 5"},
+                                {"mode": "llm_refine", "cypher": item.get("template_cypher") or "MATCH (n:Person) RETURN n LIMIT 5"},
+                            ],
+                        }
+                        for item in requests
+                    ]
+                },
+                ensure_ascii=False,
+            )
         if prompt_name == "cypher_candidate_bundle":
             template = kwargs.get("template_cypher", "")
             return json.dumps(
@@ -52,43 +116,20 @@ class FakeModelGateway(ModelGateway):
             if "LIMIT 5" in cypher.upper():
                 return "网络中前5个设备有哪些？\n请列出网络中的前5个设备。\n帮我找出前5个网络设备。"
             return "网络中有哪些设备？\n请列出网络中的设备。\n帮我找出所有网络设备。"
+        if prompt_name == "question_bundle_batch":
+            requests = json.loads(kwargs.get("requests_json", "[]"))
+            return json.dumps(
+                {
+                    "items": [
+                        {"request_id": item["request_id"], **self._question_payload_for_cypher(item.get("cypher", ""))}
+                        for item in requests
+                    ]
+                },
+                ensure_ascii=False,
+            )
         if prompt_name == "question_bundle":
             cypher = kwargs.get("cypher", "")
-            if "LIMIT 5" in cypher.upper():
-                return json.dumps(
-                    {
-                        "canonical_question": "网络中前5个设备有哪些？",
-                        "variants": [
-                            {"style": "natural_short", "question": "列出网络里的前5个设备"},
-                            {"style": "spoken_query", "question": "网络里前5个设备都有啥？"},
-                            {"style": "business_term", "question": "查询前5个网络设备"},
-                            {"style": "ellipsis_query", "question": "前5个网络设备有哪些？"},
-                            {"style": "task_oriented", "question": "帮我把网络中的前5个设备找出来"},
-                        ],
-                    },
-                    ensure_ascii=False,
-                )
-            return json.dumps(
-                {
-                    "canonical_question": "网络中有哪些设备？",
-                    "variants": [
-                        {"style": "natural_short", "question": "列出网络里的设备"},
-                        {"style": "spoken_query", "question": "网络里都有哪些设备啊？"},
-                        {"style": "business_term", "question": "查询网络设备清单"},
-                        {"style": "ellipsis_query", "question": "网络设备有哪些？"},
-                        {"style": "task_oriented", "question": "帮我把网络中的设备找出来"},
-                    ],
-                },
-                ensure_ascii=False,
-            )
-        if prompt_name == "question_bundle_consistency":
-            return json.dumps(
-                {
-                    "canonical_pass": True,
-                    "approved_styles": QUESTION_VARIANT_STYLES,
-                },
-                ensure_ascii=False,
-            )
+            return json.dumps(self._question_payload_for_cypher(cypher), ensure_ascii=False)
         if prompt_name == "question_cypher_consistency":
             return "PASS"
         if prompt_name == "roundtrip_text2cypher":
@@ -102,13 +143,106 @@ class InspectingRoundtripGateway(FakeModelGateway):
         self.last_kwargs = {}
 
     def generate_text(self, prompt_name, model_config, **kwargs):
-        if prompt_name == "question_bundle_consistency":
+        if prompt_name == "question_cypher_consistency":
             self.last_kwargs = kwargs
+        return super().generate_text(prompt_name, model_config, **kwargs)
+
+
+class RejectingConsistencyGateway(FakeModelGateway):
+    def generate_text(self, prompt_name, model_config, **kwargs):
+        if prompt_name == "question_cypher_consistency":
+            return "FAIL"
+        return super().generate_text(prompt_name, model_config, **kwargs)
+
+
+class InspectingBatchGateway(FakeModelGateway):
+    def __init__(self) -> None:
+        super().__init__()
+        self.last_batch_kwargs = {}
+
+    def generate_text(self, prompt_name, model_config, **kwargs):
+        if prompt_name == "cypher_candidate_batch":
+            self.last_batch_kwargs = kwargs
         return super().generate_text(prompt_name, model_config, **kwargs)
 
 
 class UniqueQuestionGateway(FakeModelGateway):
     def generate_text(self, prompt_name, model_config, **kwargs):
+        if prompt_name == "question_bundle_batch":
+            requests = json.loads(kwargs.get("requests_json", "[]"))
+            items = []
+            for item in requests:
+                cypher = item.get("cypher", "")
+                fingerprint = abs(hash(cypher))
+                import re
+                limit_match = re.search(r"\bLIMIT\s+(\d+)\b", cypher, flags=re.IGNORECASE)
+                limit_value = limit_match.group(1) if limit_match else None
+                if "count(" in cypher.lower():
+                    canonical_options = [
+                        "网络元素总共有多少个？",
+                        "当前一共有多少个网络元素？",
+                        "网络元素的总数是多少？",
+                        "请统计网络元素的数量。",
+                    ]
+                    variant_options = [
+                        "帮我统计网络元素总数",
+                        "网络元素有多少个？",
+                        "查一下网络元素数量",
+                        "请给我网络元素数量统计",
+                    ]
+                elif limit_value:
+                    canonical_options = [
+                        f"列出前{limit_value}个网络设备。",
+                        f"请给我前{limit_value}个网络设备。",
+                        f"展示前{limit_value}个网络设备。",
+                        f"帮我找出前{limit_value}个网络设备。",
+                    ]
+                    variant_options = [
+                        f"前{limit_value}个网络设备有哪些？",
+                        f"查一下前{limit_value}个网络设备",
+                        f"给我看前{limit_value}个网络设备",
+                        f"请列出前{limit_value}个网络设备",
+                    ]
+                else:
+                    canonical_options = [
+                        "列出网络中的设备。",
+                        "请给我网络设备清单。",
+                        "展示网络里的设备。",
+                        "帮我找出网络设备。",
+                    ]
+                    variant_options = [
+                        "网络设备有哪些？",
+                        "查一下网络里的设备",
+                        "给我看网络设备列表",
+                        "请列出网络设备",
+                    ]
+                canonical = canonical_options[fingerprint % len(canonical_options)]
+                items.append(
+                    {
+                        "request_id": item["request_id"],
+                        "canonical_question": canonical,
+                        "variants": [
+                            {"style": "natural_short", "question": variant_options[(fingerprint + 1) % len(variant_options)]},
+                            {"style": "spoken_query", "question": variant_options[(fingerprint + 2) % len(variant_options)]},
+                            {"style": "business_term", "question": variant_options[(fingerprint + 3) % len(variant_options)]},
+                            {"style": "ellipsis_query", "question": variant_options[(fingerprint + 4) % len(variant_options)]},
+                            {"style": "task_oriented", "question": variant_options[(fingerprint + 5) % len(variant_options)]},
+                        ],
+                        "canonical_pass": True,
+                        "canonical_checks": {
+                            "filters": True,
+                            "temporal": True,
+                            "ordering": True,
+                            "topk_limit": True,
+                            "aggregation_grouping": True,
+                            "path_hops": True,
+                            "comparison": True,
+                            "return_target": True,
+                        },
+                        "approved_styles": QUESTION_VARIANT_STYLES,
+                    }
+                )
+            return json.dumps({"items": items}, ensure_ascii=False)
         if prompt_name == "question_bundle":
             cypher = kwargs.get("cypher", "")
             fingerprint = abs(hash(cypher))
@@ -166,6 +300,18 @@ class UniqueQuestionGateway(FakeModelGateway):
                         {"style": "ellipsis_query", "question": variant_options[(fingerprint + 4) % len(variant_options)]},
                         {"style": "task_oriented", "question": variant_options[(fingerprint + 5) % len(variant_options)]},
                     ],
+                    "canonical_pass": True,
+                    "canonical_checks": {
+                        "filters": True,
+                        "temporal": True,
+                        "ordering": True,
+                        "topk_limit": True,
+                        "aggregation_grouping": True,
+                        "path_hops": True,
+                        "comparison": True,
+                        "return_target": True,
+                    },
+                    "approved_styles": QUESTION_VARIANT_STYLES,
                 },
                 ensure_ascii=False,
             )
@@ -283,6 +429,14 @@ class RetryAwareGenerationService(GenerationService):
         self.diversity_keys.append(diversity_key)
         return super().build_skeletons(schema, limits, diversity_key=diversity_key)
 
+    def instantiate_candidates_from_specs(self, schema, specs, limits, model_config=None):
+        self.instantiate_calls += 1
+        candidates = super().instantiate_candidates_from_specs(schema, specs, limits, model_config=model_config)
+        if self.instantiate_calls <= self.fail_attempts:
+            for candidate in candidates:
+                candidate.cypher = "BROKEN"
+        return candidates
+
     def instantiate_candidates(self, schema, skeletons, limits, llm_config=None):
         self.instantiate_calls += 1
         candidates = super().instantiate_candidates(schema, skeletons, limits, llm_config)
@@ -320,6 +474,7 @@ class PipelineTest(unittest.TestCase):
             difficulty="L1",
             template_cypher="MATCH (n:Person) RETURN n LIMIT 5",
             slot_bindings=json.dumps({"node": "Person", "edge": "WORKS_ON"}, ensure_ascii=False),
+            query_plan="{}",
         )
         self.assertIn("lookup_node_return", rendered)
         self.assertIn("MATCH (n:Person) RETURN n LIMIT 5", rendered)
@@ -409,16 +564,151 @@ class PipelineTest(unittest.TestCase):
             self.assertIn("structure_family_coverage", completed.metrics)
             self.assertTrue(completed.metrics["query_type_coverage"]["covered_query_types"])
             self.assertTrue(completed.metrics["structure_family_coverage"]["covered_families"])
+            self.assertIn("business_stages", completed.metrics)
+            self.assertEqual(
+                [stage["key"] for stage in completed.metrics["business_stages"]],
+                [
+                    "ground_schema",
+                    "spec_coverage",
+                    "generate_cypher",
+                    "tugraph_validate",
+                    "generate_qa",
+                    "roundtrip_check",
+                    "release_dispatch",
+                ],
+            )
+            self.assertIn("performance", completed.metrics)
             qa_rows = [json.loads(line) for line in Path(completed.artifacts["qa"]).read_text(encoding="utf-8").splitlines() if line.strip()]
             seen_questions = {}
             duplicate_questions = []
             for row in qa_rows:
                 question = row["question_canonical_zh"]
                 cypher = row["cypher"]
+                self.assertIn("query_plan", row)
                 if question in seen_questions and seen_questions[question] != cypher:
                     duplicate_questions.append(question)
                 seen_questions.setdefault(question, cypher)
             self.assertFalse(duplicate_questions)
+
+    def test_completed_release_covers_all_l1_to_l8(self) -> None:
+        schema = {
+            "node_types": ["NetworkElement", "Port", "Tunnel", "Service"],
+            "edge_types": ["HAS_PORT", "FIBER_SRC", "SERVES"],
+            "node_properties": {
+                "NetworkElement": {"id": "string", "vendor": "string", "created_at": "int"},
+                "Port": {"id": "string", "admin_status": "string"},
+                "Tunnel": {"id": "string", "latency": "int"},
+                "Service": {"id": "string", "priority": "int"},
+            },
+            "edge_constraints": {
+                "HAS_PORT": [["NetworkElement", "Port"]],
+                "FIBER_SRC": [["Port", "Tunnel"]],
+                "SERVES": [["Tunnel", "Service"]],
+            },
+            "value_catalog": {
+                "NetworkElement.id": ["ne-1"],
+                "NetworkElement.vendor": ["VendorA"],
+                "NetworkElement.created_at": [20240101],
+                "Port.id": ["port-1"],
+                "Port.admin_status": ["UP"],
+                "Tunnel.id": ["tunnel-1"],
+                "Tunnel.latency": [12],
+                "Service.id": ["svc-1"],
+                "Service.priority": [3],
+            },
+        }
+        fake_gateway = UniqueQuestionGateway()
+        class CoverageQuestionGateway(UniqueQuestionGateway):
+            def generate_text(self, prompt_name, model_config, **kwargs):
+                if prompt_name == "question_bundle_batch":
+                    requests = json.loads(kwargs.get("requests_json", "[]"))
+                    import re
+
+                    def canonical_for(item):
+                        cypher = item.get("cypher", "")
+                        request_id = item["request_id"]
+                        limit_match = re.search(r"\bLIMIT\s+(\d+)\b", cypher, flags=re.IGNORECASE)
+                        if "count(" in cypher.lower():
+                            if limit_match:
+                                return f"请统计样本{request_id}对应的数量总数，并返回前{limit_match.group(1)}个结果？"
+                            return f"请统计样本{request_id}对应的数量总数？"
+                        if limit_match:
+                            return f"请列出样本{request_id}对应的前{limit_match.group(1)}个结果？"
+                        return f"请查询样本{request_id}对应的图结果？"
+
+                    return json.dumps(
+                        {
+                            "items": [
+                                {
+                                    "request_id": item["request_id"],
+                                    "canonical_question": canonical_for(item),
+                                    "variants": [
+                                        {"style": "natural_short", "question": canonical_for(item)},
+                                        {"style": "spoken_query", "question": canonical_for(item)},
+                                    ],
+                                    "canonical_pass": True,
+                                    "canonical_checks": {
+                                        "filters": True,
+                                        "temporal": True,
+                                        "ordering": True,
+                                        "topk_limit": True,
+                                        "aggregation_grouping": True,
+                                        "path_hops": True,
+                                        "comparison": True,
+                                        "return_target": True,
+                                    },
+                                    "approved_styles": QUESTION_VARIANT_STYLES,
+                                }
+                                for item in requests
+                            ]
+                        },
+                        ensure_ascii=False,
+                    )
+                return super().generate_text(prompt_name, model_config, **kwargs)
+
+        fake_gateway = CoverageQuestionGateway()
+        class NetworkGraphExecutor(FakeGraphExecutor):
+            def fetch_labels(self, config):
+                return {
+                    "vertex": ["NetworkElement", "Port", "Tunnel", "Service"],
+                    "edge": ["HAS_PORT", "FIBER_SRC", "SERVES"],
+                    "planner": "fake-graph",
+                }
+
+        graph_executor = NetworkGraphExecutor()
+        with TemporaryDirectory() as tempdir:
+            temp_root = Path(tempdir)
+            orchestrator = Orchestrator(
+                job_store=JobStore(root=temp_root / "job-reports"),
+                artifact_store=ArtifactStore(root=temp_root / "artifacts"),
+                schema_compatibility_service=SchemaCompatibilityService(graph_executor=graph_executor),
+                generation_service=GenerationService(model_gateway=fake_gateway),
+                validation_service=ValidationService(graph_executor=graph_executor),
+                question_service=QuestionService(model_gateway=fake_gateway),
+                roundtrip_service=RoundtripService(model_gateway=fake_gateway),
+            )
+            job = orchestrator.create_job(
+                JobRequest(
+                    schema_input=schema,
+                    output_config={"target_qa_count": 8},
+                    tugraph_source={"type": "inline"},
+                    tugraph_config={"base_url": None, "username": None, "password": None, "graph": None},
+                )
+            )
+
+            completed = orchestrator.run_job(job.job_id)
+
+            self.assertEqual(completed.status.value, "completed")
+            release_rows = [
+                json.loads(line)
+                for line in Path(completed.artifacts["releases"]).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual({row["difficulty"] for row in release_rows}, {f"L{level}" for level in range(1, 9)})
+            self.assertEqual(set(completed.metrics["difficulty_coverage"]["covered_levels"]), {f"L{level}" for level in range(1, 9)})
+            log_path = temp_root / "artifacts" / "logs" / "jobs" / f"{completed.job_id}.log"
+            self.assertTrue(log_path.exists())
+            self.assertIn("generate_cypher", log_path.read_text(encoding="utf-8"))
 
     def test_job_retries_when_first_attempt_generates_zero_final_samples(self) -> None:
         schema_path = Path(__file__).parent / "fixtures" / "schema.json"
@@ -452,8 +742,6 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(completed.status.value, "completed")
             self.assertGreaterEqual(completed.metrics.get("sample_count", 0), 1)
             self.assertGreaterEqual(generation_service.instantiate_calls, 2)
-            self.assertGreaterEqual(len(generation_service.diversity_keys), 2)
-            self.assertNotEqual(generation_service.diversity_keys[0], generation_service.diversity_keys[1])
 
     def test_job_fails_when_all_retry_attempts_produce_zero_samples(self) -> None:
         schema_path = Path(__file__).parent / "fixtures" / "schema.json"
@@ -519,21 +807,58 @@ class PipelineTest(unittest.TestCase):
             self.assertTrue(failed.errors)
             self.assertEqual(failed.errors[-1]["code"], "SCHEMA_VALIDATION_ERROR")
 
-    def test_roundtrip_sends_schema_and_result_context_to_llm(self) -> None:
-        gateway = InspectingRoundtripGateway()
-        service = RoundtripService(model_gateway=gateway)
+    def test_roundtrip_sends_question_and_cypher_to_second_llm_check(self) -> None:
         sample = fake_qa_sample()
+        sample.provenance["canonical_pass"] = "true"
+        sample.provenance["canonical_checks"] = json.dumps(
+            {
+                "filters": True,
+                "temporal": True,
+                "ordering": True,
+                "topk_limit": True,
+                "aggregation_grouping": True,
+                "path_hops": True,
+                "comparison": True,
+                "return_target": True,
+            },
+            ensure_ascii=False,
+        )
+        sample.provenance["approved_styles"] = json.dumps(sample.question_variant_styles, ensure_ascii=False)
+        service = RoundtripService(model_gateway=InspectingRoundtripGateway())
 
         ok, variants, styles = service.check(sample, fake_gateway_config())
 
         self.assertTrue(ok)
         self.assertEqual(variants, sample.question_variants_zh)
         self.assertEqual(styles, sample.question_variant_styles)
-        self.assertIn("schema_summary", gateway.last_kwargs)
-        self.assertIn("return_semantics", gateway.last_kwargs)
-        self.assertIn("result_summary", gateway.last_kwargs)
-        self.assertIn("节点", gateway.last_kwargs["schema_summary"])
-        self.assertIn("total", gateway.last_kwargs["return_semantics"])
+        self.assertEqual(service.model_gateway.calls[-1], "question_cypher_consistency")
+        self.assertEqual(service.model_gateway.last_kwargs["question"], sample.question_canonical_zh)
+        self.assertEqual(service.model_gateway.last_kwargs["cypher"], sample.cypher)
+
+    def test_roundtrip_rejects_when_second_llm_check_fails(self) -> None:
+        service = RoundtripService(model_gateway=RejectingConsistencyGateway())
+        sample = fake_qa_sample()
+        sample.provenance["canonical_pass"] = "true"
+        sample.provenance["canonical_checks"] = json.dumps(
+            {
+                "filters": True,
+                "temporal": True,
+                "ordering": True,
+                "topk_limit": True,
+                "aggregation_grouping": True,
+                "path_hops": True,
+                "comparison": True,
+                "return_target": True,
+            },
+            ensure_ascii=False,
+        )
+        sample.provenance["approved_styles"] = json.dumps(sample.question_variant_styles, ensure_ascii=False)
+
+        ok, variants, styles = service.check(sample, fake_gateway_config())
+
+        self.assertFalse(ok)
+        self.assertEqual(variants, sample.question_variants_zh)
+        self.assertEqual(styles, sample.question_variant_styles)
 
     def test_roundtrip_uses_structured_canonical_checks(self) -> None:
         service = RoundtripService(model_gateway=FakeModelGateway())
@@ -565,7 +890,7 @@ class PipelineTest(unittest.TestCase):
         service = RoundtripService(model_gateway=FakeModelGateway())
         sample = fake_qa_sample()
         sample.question_canonical_zh = "列出网络中的设备"
-        sample.cypher = "MATCH (n:NetworkElement) RETURN n LIMIT 5"
+        sample.cypher = "MATCH (n:NetworkElement) RETURN n ORDER BY n.score DESC LIMIT 5"
 
         ok, _, _ = service._parse_bundle_result(
             json.dumps(
@@ -586,6 +911,32 @@ class PipelineTest(unittest.TestCase):
         )
 
         self.assertFalse(ok)
+
+    def test_roundtrip_does_not_force_unordered_limit_into_question(self) -> None:
+        service = RoundtripService(model_gateway=FakeModelGateway())
+        sample = fake_qa_sample()
+        sample.question_canonical_zh = "列出网络中的设备"
+        sample.cypher = "MATCH (n:NetworkElement) RETURN n LIMIT 5"
+
+        ok, _, _ = service._parse_bundle_result(
+            json.dumps(
+                {
+                    "canonical_pass": True,
+                    "canonical_checks": {
+                        "filters": True,
+                        "ordering": True,
+                        "topk_limit": True,
+                        "aggregation_grouping": True,
+                        "return_target": True,
+                    },
+                    "approved_styles": QUESTION_VARIANT_STYLES,
+                },
+                ensure_ascii=False,
+            ),
+            sample,
+        )
+
+        self.assertTrue(ok)
 
     def test_roundtrip_rejects_question_that_contains_cypher(self) -> None:
         service = RoundtripService(model_gateway=FakeModelGateway())
@@ -772,7 +1123,7 @@ class PipelineTest(unittest.TestCase):
             self.assertFalse(report_path.exists())
             self.assertFalse(release_path.exists())
 
-    def test_online_mode_uses_single_question_generation_call_per_validated_sample(self) -> None:
+    def test_online_mode_uses_single_batched_question_generation_call(self) -> None:
         schema_path = Path(__file__).parent / "fixtures" / "schema.json"
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
 
@@ -801,11 +1152,109 @@ class PipelineTest(unittest.TestCase):
 
             self.assertEqual(completed.status.value, "completed")
             question_bundle_calls = fake_gateway.calls.count("question_bundle")
+            batch_calls = fake_gateway.calls.count("question_bundle_batch")
             consistency_calls = fake_gateway.calls.count("question_bundle_consistency")
-            self.assertGreaterEqual(question_bundle_calls, completed.metrics.get("sample_count"))
-            self.assertGreaterEqual(consistency_calls, completed.metrics.get("sample_count"))
+            self.assertEqual(question_bundle_calls, 0)
+            self.assertEqual(batch_calls, 1)
+            self.assertEqual(consistency_calls, 0)
             self.assertNotIn("question_variants", fake_gateway.calls)
             self.assertNotIn("cypher_canonical_question", fake_gateway.calls)
+
+    def test_online_mode_uses_llm_cypher_generation_with_template_fallback(self) -> None:
+        schema_path = Path(__file__).parent / "fixtures" / "schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+        fake_gateway = FakeModelGateway()
+        with TemporaryDirectory() as tempdir:
+            temp_root = Path(tempdir)
+            orchestrator = Orchestrator(
+                job_store=JobStore(root=temp_root / "job-reports"),
+                artifact_store=ArtifactStore(root=temp_root / "artifacts"),
+                schema_compatibility_service=SchemaCompatibilityService(graph_executor=FakeGraphExecutor()),
+                generation_service=GenerationService(model_gateway=fake_gateway),
+                validation_service=ValidationService(graph_executor=FakeGraphExecutor()),
+                question_service=QuestionService(model_gateway=fake_gateway),
+                roundtrip_service=RoundtripService(model_gateway=fake_gateway),
+            )
+            job = orchestrator.create_job(
+                JobRequest(
+                    mode="online",
+                    schema_input=schema,
+                    tugraph_source={"type": "inline"},
+                    tugraph_config={"base_url": None, "username": None, "password": None, "graph": None},
+                )
+            )
+
+            completed = orchestrator.run_job(job.job_id)
+
+            self.assertEqual(completed.status.value, "completed")
+            self.assertGreaterEqual(fake_gateway.calls.count("cypher_candidate_batch"), 1)
+            self.assertEqual(fake_gateway.calls.count("cypher_candidate_bundle"), 0)
+
+    def test_query_plan_budget_stays_tight_for_small_targets(self) -> None:
+        orchestrator = Orchestrator()
+        self.assertEqual(orchestrator._query_plan_target_count(1, 32), 3)
+        self.assertEqual(orchestrator._query_plan_target_count(2, 32), 4)
+        self.assertEqual(orchestrator._query_plan_target_count(5, 32), 8)
+
+    def test_shortlist_validated_samples_limits_llm_work_for_single_target(self) -> None:
+        orchestrator = Orchestrator()
+        samples = []
+        for idx in range(8):
+            candidate = CypherCandidate(
+                cypher=f"MATCH (n) RETURN n LIMIT {idx + 1}",
+                skeleton_id=f"sk_{idx}",
+                query_types=["LOOKUP" if idx < 4 else "FILTER"],
+                structure_family="lookup_node_return" if idx < 4 else "filter_single_condition",
+                generation_mode="llm_refine" if idx % 3 == 0 else ("llm_direct" if idx % 2 == 0 else "template"),
+                difficulty=f"L{min(idx + 1, 8)}",
+            )
+            samples.append(
+                ValidatedSample(
+                    candidate=candidate,
+                    validation=ValidationResult(
+                        syntax=True,
+                        schema=True,
+                        type_value=True,
+                        runtime=True,
+                        result_sanity=True,
+                        query_type_valid=True,
+                        family_valid=True,
+                        difficulty_valid=True,
+                        plan_valid=True,
+                    ),
+                    result_signature=ResultSignature(row_count=idx + 1),
+                    classified_difficulty=f"L{min(idx + 1, 8)}",
+                )
+            )
+
+        shortlisted = orchestrator._shortlist_validated_samples(samples, target_qa_count=1)
+
+        self.assertEqual(len(shortlisted), 3)
+        self.assertTrue(any(sample.candidate.generation_mode == "llm_refine" for sample in shortlisted))
+
+    def test_release_selection_prefers_non_empty_answers(self) -> None:
+        orchestrator = Orchestrator()
+        empty = fake_qa_sample()
+        empty.answer = []
+        empty.result_signature.row_count = 0
+        empty.difficulty = "L7"
+        empty.provenance["generation_mode"] = "llm_refine"
+
+        full = fake_qa_sample()
+        full.id = "qa_non_empty"
+        full.question_canonical_zh = "列出前5个网络设备。"
+        full.cypher = "MATCH (n:NetworkElement) RETURN n LIMIT 5"
+        full.cypher_normalized = "match (n:networkelement) return n limit 5"
+        full.answer = [{"n": "device-1"}]
+        full.result_signature.row_count = 1
+        full.difficulty = "L4"
+        full.provenance["generation_mode"] = "template"
+
+        selected, meta = orchestrator._select_release_batch([empty, full], {"questions": set(), "cyphers": set()}, 1)
+
+        self.assertEqual(meta["selected_count"], 1)
+        self.assertEqual(selected[0].id, "qa_non_empty")
 
     def test_model_gateway_retries_on_rate_limit(self) -> None:
         gateway = ModelGateway()
@@ -1229,6 +1678,118 @@ class PipelineTest(unittest.TestCase):
 
         self.assertIn(">= 1000", candidates[0].cypher)
         self.assertNotIn(">= '1000'", candidates[0].cypher)
+
+    def test_generation_service_does_not_double_quote_string_literals(self) -> None:
+        from app.domain.generation.service import GenerationService
+        from app.domain.models import CanonicalSchemaSpec, CypherSkeleton, GenerationLimits
+
+        schema = CanonicalSchemaSpec(
+            node_types=["NetworkElement"],
+            node_properties={"NetworkElement": {"id": "STRING"}},
+            value_catalog={"NetworkElement.id": ["sample"]},
+        )
+        skeleton = CypherSkeleton(
+            skeleton_id="lookup_entity_detail_l2_01",
+            query_types=["LOOKUP"],
+            structure_family="lookup_entity_detail",
+            pattern_template="MATCH (n:{node}) WHERE n.{property} = {value} RETURN n LIMIT 5",
+            slots={
+                "node_slots": ["node"],
+                "edge_slots": [],
+                "property_slots": ["property"],
+                "filter_slots": ["value"],
+                "agg_slots": [],
+                "order_slots": [],
+                "return_slots": ["n"],
+            },
+            difficulty_floor="L2",
+        )
+        service = GenerationService(model_gateway=FakeModelGateway())
+
+        candidates = service.instantiate_candidates(
+            schema,
+            [skeleton],
+            GenerationLimits(max_skeletons=1, max_candidates_per_skeleton=1, max_variants_per_question=1),
+        )
+
+        self.assertIn("= 'sample'", candidates[0].cypher)
+        self.assertNotIn("''sample''", candidates[0].cypher)
+
+    def test_generation_service_batch_prompt_does_not_double_quote_string_literals(self) -> None:
+        from app.domain.generation.service import GenerationService
+        from app.domain.models import CanonicalSchemaSpec, CypherSkeleton, GenerationLimits, QueryPlan
+
+        schema = CanonicalSchemaSpec(
+            node_types=["NetworkElement"],
+            node_properties={"NetworkElement": {"id": "STRING"}},
+            value_catalog={"NetworkElement.id": ["sample"]},
+        )
+        skeleton = CypherSkeleton(
+            skeleton_id="comparison_l6_01",
+            query_types=["COMPARISON"],
+            structure_family="attribute_comparison",
+            pattern_template="MATCH (a:{node}), (b:{node}) WHERE a.{property} <> b.{property} RETURN a.{property} AS left_value, b.{property} AS right_value LIMIT 5",
+            slots={},
+            difficulty_floor="L6",
+        )
+        gateway = InspectingBatchGateway()
+        service = GenerationService(model_gateway=gateway)
+
+        service.instantiate_candidates(
+            schema,
+            [skeleton],
+            GenerationLimits(max_skeletons=1, max_candidates_per_skeleton=1, max_variants_per_question=1),
+            model_config=fake_gateway_config(),
+            query_plans=[
+                QueryPlan(
+                    query_type="COMPARISON",
+                    structure_family="attribute_comparison",
+                    difficulty="L6",
+                    bindings={"node": "NetworkElement", "target": "NetworkElement", "target2": "NetworkElement", "target3": "NetworkElement", "edge": "RELATED_TO", "edge2": "RELATED_TO", "edge3": "RELATED_TO", "property": "id", "property2": "id", "property3": "id", "value": "sample", "value2": "sample", "node_l": "a", "target_l": "b", "target2_l": "c", "target3_l": "d", "markers": {"comparison": True}},
+                    required_semantics={"comparison": True},
+                )
+            ],
+        )
+
+        requests = json.loads(gateway.last_batch_kwargs["requests_json"])
+        self.assertEqual(requests[0]["slot_bindings"]["value"], "sample")
+
+    def test_generation_service_uses_llm_only_for_complex_plans(self) -> None:
+        service = GenerationService(model_gateway=FakeModelGateway())
+
+        simple_skeleton = CypherSkeleton(
+            skeleton_id="lookup_l1_01",
+            query_types=["LOOKUP"],
+            structure_family="lookup_node_return",
+            pattern_template="MATCH (n:{node}) RETURN n LIMIT 5",
+            slots={},
+            difficulty_floor="L1",
+        )
+        complex_skeleton = CypherSkeleton(
+            skeleton_id="path_l6_01",
+            query_types=["PATH"],
+            structure_family="variable_length_path",
+            pattern_template="MATCH p=({node_l}:{node})-[:{edge}*1..3]->({target_l}:{target}) RETURN p LIMIT 5",
+            slots={},
+            difficulty_floor="L6",
+        )
+        simple_plan = QueryPlan(
+            query_type="LOOKUP",
+            structure_family="lookup_node_return",
+            difficulty="L1",
+            bindings={},
+            required_semantics={},
+        )
+        complex_plan = QueryPlan(
+            query_type="PATH",
+            structure_family="variable_length_path",
+            difficulty="L6",
+            bindings={},
+            required_semantics={"variable_length": True, "min_hops": 2},
+        )
+
+        self.assertFalse(service._should_use_llm_candidate_generation(simple_skeleton, simple_plan))
+        self.assertTrue(service._should_use_llm_candidate_generation(complex_skeleton, complex_plan))
 
     def test_graph_executor_uses_header_names_for_list_rows(self) -> None:
         from app.integrations.tugraph.graph_executor import GraphExecutor

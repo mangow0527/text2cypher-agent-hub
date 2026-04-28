@@ -5,12 +5,14 @@ import {
   CreateJobPayload,
   deleteJob,
   getJob,
+  getQAStats,
   getImport,
   ImportRecord,
   importQa,
   JobRecord,
   listImports,
   listJobs,
+  QAStats,
   redispatchJob,
   resolveSchema,
   runJob,
@@ -21,7 +23,8 @@ import { ImportDetail } from "../components/ImportDetail";
 import { ImportList } from "../components/ImportList";
 import { JobComposer } from "../components/JobComposer";
 import { JobDetail } from "../components/JobDetail";
-import { JobList } from "../components/JobList";
+import { JobList, JobStatusFilter, jobStatusLabel } from "../components/JobList";
+import { QAStatsPanel } from "../components/QAStatsPanel";
 
 const ACTIVE_STATUSES = new Set([
   "created",
@@ -39,6 +42,7 @@ const JOBS_PER_PAGE = 8;
 export function App() {
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [imports, setImports] = useState<ImportRecord[]>([]);
+  const [qaStats, setQaStats] = useState<QAStats | undefined>();
   const [selectedJob, setSelectedJob] = useState<JobRecord | undefined>();
   const [selectedImport, setSelectedImport] = useState<ImportRecord | undefined>();
   const [detailOpen, setDetailOpen] = useState(false);
@@ -48,7 +52,7 @@ export function App() {
   const [importBusy, setImportBusy] = useState(false);
   const [jobPage, setJobPage] = useState(1);
   const [jobQuery, setJobQuery] = useState("");
-  const [jobStatusFilter, setJobStatusFilter] = useState<"all" | JobRecord["status"]>("all");
+  const [jobStatusFilter, setJobStatusFilter] = useState<JobStatusFilter>("all");
   const [jobMessage, setJobMessage] = useState("准备就绪");
   const [importMessage, setImportMessage] = useState("可随时导入现成 QA");
 
@@ -96,9 +100,14 @@ export function App() {
     }
   }
 
+  async function refreshQAStats() {
+    setQaStats(await getQAStats());
+  }
+
   useEffect(() => {
     void refreshJobs(false);
     void refreshImports(false);
+    void refreshQAStats();
   }, []);
 
   useEffect(() => {
@@ -107,6 +116,7 @@ export function App() {
     }
     const timer = window.setInterval(() => {
       void refreshJobs();
+      void refreshQAStats();
     }, 2000);
     return () => window.clearInterval(timer);
   }, [selectedJob?.job_id, selectedJob?.status]);
@@ -170,9 +180,10 @@ export function App() {
           setJobMessage(
             completed.status === "completed"
               ? `任务完成，已生成 ${Number((completed.metrics.selection as { final_count?: number } | undefined)?.final_count ?? completed.metrics.sample_count ?? 0)} 条 QA`
-              : `任务结束：${completed.status}`,
+              : `任务结束：${jobStatusLabel(completed.status)}`,
           );
           await refreshJobs(false);
+          await refreshQAStats();
         })
         .catch((error) => {
           setJobMessage(`任务运行失败：${error instanceof Error ? error.message : "未知错误"}`);
@@ -255,7 +266,7 @@ export function App() {
     setJobMessage(
       job.status === "completed"
         ? `任务完成，可直接下载结果`
-        : `任务当前处于 ${job.status}`,
+        : `任务当前处于${jobStatusLabel(job.status)}`,
     );
   }
 
@@ -299,6 +310,7 @@ export function App() {
       if (!nextJobs.length) {
         setSelectedJob(undefined);
       }
+      await refreshQAStats();
     } catch (error) {
       setJobMessage(`删除失败：${error instanceof Error ? error.message : "未知错误"}`);
     } finally {
@@ -325,6 +337,7 @@ export function App() {
       setImports((previous) => [record, ...previous.filter((item) => item.import_id !== record.import_id)]);
       setImportMessage(`导入完成，共 ${record.sample_count} 条 QA`);
       await refreshImports(false);
+      await refreshQAStats();
     } catch (error) {
       setImportMessage(`导入失败：${error instanceof Error ? error.message : "未知错误"}`);
     } finally {
@@ -348,11 +361,16 @@ export function App() {
   const completedCount = jobs.filter((job) => job.status === "completed").length;
   const failedCount = jobs.filter((job) => job.status === "failed").length;
   const filteredJobs = jobs.filter((job) => {
-    const matchesStatus = jobStatusFilter === "all" ? true : job.status === jobStatusFilter;
+    const matchesStatus =
+      jobStatusFilter === "all"
+        ? true
+        : jobStatusFilter === "running"
+          ? ACTIVE_STATUSES.has(job.status)
+          : job.status === jobStatusFilter;
     const finalCount = Number((job.metrics.selection as { final_count?: number } | undefined)?.final_count ?? job.metrics.sample_count ?? 0);
     const keyword = jobQuery.trim().toLowerCase();
     const matchesKeyword = keyword
-      ? [job.job_id, job.status, String(finalCount)].some((value) => value.toLowerCase().includes(keyword))
+      ? [job.job_id, jobStatusLabel(job.status), String(finalCount)].some((value) => value.toLowerCase().includes(keyword))
       : true;
     return matchesStatus && matchesKeyword;
   });
@@ -370,10 +388,10 @@ export function App() {
       <header className="workspace-header">
         <div>
           <div className="eyebrow">QA Agent</div>
-          <h1>Text2Cypher 工作台</h1>
-          <p>这里只展示每一批 QA 的结果、难度覆盖和下载入口。</p>
+          <h1>评测 QA 生成工作台</h1>
+          <p>查看 QA 对生成进度、难度覆盖和结果下载。</p>
         </div>
-        <button className="button secondary" onClick={() => { void refreshJobs(false); void refreshImports(false); }}>
+        <button className="button secondary" onClick={() => { void refreshJobs(false); void refreshImports(false); void refreshQAStats(); }}>
           刷新
         </button>
       </header>
@@ -397,6 +415,8 @@ export function App() {
         </div>
       </section>
 
+      <QAStatsPanel stats={qaStats} />
+
       <section className="current-run-banner">
         <div>
           <div className="eyebrow">当前批次</div>
@@ -412,7 +432,7 @@ export function App() {
             </button>
           ) : null}
           <span className={`status-pill status-${activeJob?.status ?? "created"}`}>
-            {activeJob?.status ?? "idle"}
+            {jobStatusLabel(activeJob?.status)}
           </span>
         </div>
       </section>

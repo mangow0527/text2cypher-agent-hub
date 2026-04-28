@@ -9,12 +9,6 @@
 [id: tunnel_owner_path]
 - “隧道所属网元”优先理解为 `(:NetworkElement)-[:FIBER_SRC]->(:Tunnel)` 路径上的上游设备。
 
-
-[id: add_business_term_mapping_guidance_and_a_few_sho]
-- Add business-term mapping guidance and a few-shot example that matches the failed question pattern.
-
-[id: add_business_term_mapping_guidance_and_a_few_sho]
-- Add business-term mapping guidance and a few-shot example that matches the failed question pattern.
 ## protocol_specification
 
 [id: protocol_version_mapping]

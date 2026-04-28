@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import inspect
 import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from app.domain.coverage.service import CoverageService
 from app.domain.generation.service import GenerationService
+from app.domain.query_plan.service import QueryPlanService
 from app.domain.models import JobRecord, JobRequest, JobStatus, QASample, StageRecord
 from app.domain.questioning.service import QuestionService, normalize_cypher, normalize_question
 from app.domain.roundtrip.service import RoundtripService
@@ -15,8 +18,11 @@ from app.domain.schema.service import SchemaService
 from app.domain.schema.source_resolver import SourceResolver
 from app.domain.validation.service import ValidationService
 from app.integrations.qa_dispatcher import QADispatcher
+from app.logging import ModuleLogStore
 from app.reports.builder import ReportBuilder
+from app.reports.business_stages import build_business_stage_summary
 from app.storage.artifact_store import ArtifactStore
+from app.storage.job_log_store import JobLogStore
 from app.storage.job_store import JobStore
 from app.storage.release_history_store import ReleaseHistoryStore
 
@@ -33,41 +39,67 @@ class Orchestrator:
         schema_service: SchemaService | None = None,
         source_resolver: SourceResolver | None = None,
         schema_compatibility_service: SchemaCompatibilityService | None = None,
+        coverage_service: CoverageService | None = None,
         generation_service: GenerationService | None = None,
+        query_plan_service: QueryPlanService | None = None,
         validation_service: ValidationService | None = None,
         question_service: QuestionService | None = None,
         roundtrip_service: RoundtripService | None = None,
         report_builder: ReportBuilder | None = None,
         qa_dispatcher: QADispatcher | None = None,
+        job_log_store: JobLogStore | None = None,
         release_history_store: ReleaseHistoryStore | None = None,
+        module_logs: ModuleLogStore | None = None,
     ) -> None:
         self.job_store = job_store or JobStore()
         self.artifact_store = artifact_store or ArtifactStore()
+        self.job_log_store = job_log_store or JobLogStore(root=(self.artifact_store.root / "logs"))
         self.schema_service = schema_service or SchemaService()
         self.source_resolver = source_resolver or SourceResolver()
         self.schema_compatibility_service = schema_compatibility_service or SchemaCompatibilityService()
+        self.coverage_service = coverage_service or CoverageService()
         self.generation_service = generation_service or GenerationService()
+        self.query_plan_service = query_plan_service or QueryPlanService()
         self.validation_service = validation_service or ValidationService()
         self.question_service = question_service or QuestionService()
         self.roundtrip_service = roundtrip_service or RoundtripService()
         self.report_builder = report_builder or ReportBuilder()
-        self.qa_dispatcher = qa_dispatcher or QADispatcher()
+        self.module_logs = module_logs or ModuleLogStore()
+        self.qa_dispatcher = qa_dispatcher or QADispatcher(module_logs=self.module_logs)
         self.release_history_store = release_history_store or ReleaseHistoryStore(
             root=(artifact_store.root / "releases") if artifact_store else None
         )
 
     def create_job(self, request: JobRequest) -> JobRecord:
         job = JobRecord(request=request)
+        job.metrics["business_stages"] = self._build_business_stage_summary(job)
         self.job_store.save(job)
+        self.module_logs.append(
+            module="api",
+            level="info",
+            operation="job_created",
+            trace_id=job.job_id,
+            status="success",
+            request_body={"mode": request.mode.value, "target_qa_count": request.output_config.target_qa_count},
+            response_body={"job_id": job.job_id},
+        )
         return job
 
     def create_and_run_job(self, request: JobRequest) -> JobRecord:
         job = self.create_job(request)
         return self.run_job(job.job_id)
 
+    def get_job_snapshot(self, job_id: str) -> JobRecord:
+        job = self.job_store.get(job_id)
+        return self._hydrate_job_metrics(job)
+
+    def list_job_snapshots(self) -> list[JobRecord]:
+        return [self._hydrate_job_metrics(job) for job in self.job_store.list()]
+
     def delete_job(self, job_id: str) -> None:
         job = self.job_store.get(job_id)
         self.artifact_store.delete_paths(job.artifacts.values())
+        self.job_log_store.delete(job_id)
         self.job_store.delete(job_id)
 
     def redispatch_job(self, job_id: str) -> JobRecord:
@@ -80,6 +112,14 @@ class Orchestrator:
             for line in Path(releases_path).read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
+        self.module_logs.append(
+            module="redispatch",
+            level="info",
+            operation="job_redispatch_requested",
+            trace_id=job_id,
+            status="started",
+            request_body={"job_id": job_id, "row_count": len(rows)},
+        )
         dispatch_result = self.qa_dispatcher.dispatch_release_rows(rows)
         history = list(job.metrics.get("dispatch_history", []))
         history.append(
@@ -94,6 +134,14 @@ class Orchestrator:
         job.metrics["dispatch_history"] = history
         job.updated_at = self._now()
         self.job_store.save(job)
+        self.module_logs.append(
+            module="redispatch",
+            level="info",
+            operation="job_redispatch_completed",
+            trace_id=job_id,
+            status=dispatch_result.get("status"),
+            response_body={"job_id": job_id, "dispatch": dispatch_result},
+        )
         return job
 
     def run_job(self, job_id: str) -> JobRecord:
@@ -101,8 +149,21 @@ class Orchestrator:
         paths = self.artifact_store.ensure_job_dirs(job_id)
         limits = self._effective_limits(job.request)
         llm_config = self._effective_llm_config(job.request)
+        llm_cypher_enabled = self._should_enable_llm_cypher_enrichment(
+            job.request.output_config.target_qa_count,
+            job.request.mode.value,
+        )
 
         try:
+            self.job_log_store.append(job.job_id, "system", "info", "job started", {"mode": job.request.mode.value})
+            self.module_logs.append(
+                module="generation",
+                level="info",
+                operation="job_started",
+                trace_id=job.job_id,
+                status="started",
+                request_body={"job_id": job.job_id, "mode": job.request.mode.value},
+            )
             resolved_schema_input = self._run_stage(
                 job,
                 JobStatus.SCHEMA_READY,
@@ -127,15 +188,17 @@ class Orchestrator:
             deduped = []
             for attempt in range(1, attempt_count + 1):
                 diversity_key = f"{job.job_id}:attempt:{attempt}"
+                coverage_specs = self.coverage_service.build_specs(
+                    schema=schema,
+                    limits=limits,
+                    target_qa_count=self._query_plan_target_count(job.request.output_config.target_qa_count, limits.max_skeletons),
+                    diversity_key=diversity_key,
+                )
                 skeletons = self._run_stage(
                     job,
                     JobStatus.SKELETON_READY,
-                    f"Built skeletons (attempt {attempt}/{attempt_count})",
-                    lambda attempt_key=diversity_key: self.generation_service.build_skeletons(
-                        schema,
-                        limits,
-                        diversity_key=attempt_key,
-                    ),
+                    f"Built coverage specs (attempt {attempt}/{attempt_count})",
+                    lambda current_coverage_specs=coverage_specs: current_coverage_specs,
                 )
                 aggregated_skeletons.extend(skeletons)
 
@@ -143,8 +206,13 @@ class Orchestrator:
                     job,
                     JobStatus.CYPHER_READY,
                     f"Instantiated candidates (attempt {attempt}/{attempt_count})",
-                    lambda current_skeletons=skeletons: self._dedupe_candidates(
-                        self.generation_service.instantiate_candidates(schema, current_skeletons, limits, llm_config)
+                    lambda current_coverage_specs=skeletons: self._dedupe_candidates(
+                        self._instantiate_candidates_from_specs(
+                            schema,
+                            limits,
+                            llm_config if llm_cypher_enabled else None,
+                            current_coverage_specs,
+                        )
                     ),
                 )
                 aggregated_candidates.extend(candidates)
@@ -175,6 +243,7 @@ class Orchestrator:
                             item.validation.query_type_valid,
                             item.validation.family_valid,
                             item.validation.difficulty_valid,
+                            item.validation.plan_valid,
                             item.validation.runtime,
                             item.validation.result_sanity,
                         ]
@@ -187,7 +256,10 @@ class Orchestrator:
                     job,
                     JobStatus.QUESTIONS_READY,
                     f"Generated QA samples (attempt {attempt}/{attempt_count})",
-                    lambda current_validated=list(aggregated_validated): self._select_best_by_question(
+                    lambda current_validated=self._shortlist_validated_samples(
+                        list(aggregated_validated),
+                        job.request.output_config.target_qa_count,
+                    ): self._select_best_by_question(
                         self._generate_questions(
                             current_validated,
                             schema,
@@ -224,7 +296,12 @@ class Orchestrator:
                         paths["releases"],
                     ),
                 )
-                if len(deduped) >= job.request.output_config.target_qa_count or deduped:
+                if job.request.mode.value == "online" and deduped:
+                    break
+                if (
+                    len(deduped) >= job.request.output_config.target_qa_count
+                    and int(selection_meta.get("fresh_candidate_count", 0)) >= job.request.output_config.target_qa_count
+                ):
                     break
 
             self.artifact_store.write_jsonl(paths["skeletons"], [item.model_dump() for item in aggregated_skeletons])
@@ -249,6 +326,7 @@ class Orchestrator:
                 JobStatus.PACKAGED,
                 "Packaged artifacts",
                 lambda: self._build_report_with_dispatch(
+                    job,
                     deduped,
                     target_qa_count=job.request.output_config.target_qa_count,
                     selection_meta=selection_meta,
@@ -261,12 +339,37 @@ class Orchestrator:
             job.status = JobStatus.COMPLETED
             job.updated_at = self._now()
             self.job_store.save(job)
+            self.job_log_store.append(job.job_id, "system", "info", "job completed", {"final_count": len(deduped)})
+            self.module_logs.append(
+                module="generation",
+                level="info",
+                operation="job_completed",
+                trace_id=job.job_id,
+                status="success",
+                response_body={"job_id": job.job_id, "final_count": len(deduped)},
+            )
             return job
         except Exception as exc:  # noqa: BLE001
             job.status = JobStatus.FAILED
             job.updated_at = self._now()
             job.errors.append({"code": getattr(exc, "code", "UNEXPECTED_ERROR"), "message": str(exc)})
+            job.metrics["business_stages"] = self._build_business_stage_summary(job)
             self.job_store.save(job)
+            self.job_log_store.append(
+                job.job_id,
+                "system",
+                "error",
+                "job failed",
+                {"code": getattr(exc, "code", "UNEXPECTED_ERROR"), "message": str(exc)},
+            )
+            self.module_logs.append(
+                module="generation",
+                level="error",
+                operation="job_failed",
+                trace_id=job.job_id,
+                status="failed",
+                response_body={"code": getattr(exc, "code", "UNEXPECTED_ERROR"), "message": str(exc)},
+            )
             return job
 
     def _apply_roundtrip(self, job: JobRecord, qa_samples: list[QASample], llm_config, mode: str) -> list[QASample]:
@@ -334,6 +437,7 @@ class Orchestrator:
             "template": 1,
         }.get(sample.provenance.get("generation_mode", "template"), 0)
         return (
+            1 if sample.answer else 0,
             generation_mode_score,
             1 if sample.validation.roundtrip_check else 0,
             len(sample.question_variants_zh),
@@ -343,6 +447,58 @@ class Orchestrator:
 
     def _sample_sort_key(self, sample: QASample) -> tuple:
         return self._sample_quality(sample)
+
+    def _validated_quality(self, sample) -> tuple:
+        generation_mode_score = {
+            "llm_refine": 3,
+            "llm_direct": 2,
+            "template": 1,
+        }.get(sample.candidate.generation_mode, 0)
+        difficulty = sample.classified_difficulty or sample.candidate.difficulty
+        return (
+            generation_mode_score,
+            sample.result_signature.row_count,
+            int(difficulty[1:]) if difficulty.startswith("L") else 0,
+        )
+
+    def _validated_shortlist_budget(self, target_qa_count: int, validated_count: int) -> int:
+        if validated_count <= target_qa_count:
+            return validated_count
+        if target_qa_count <= 1:
+            return min(validated_count, 3)
+        if target_qa_count <= 3:
+            return min(validated_count, target_qa_count + 2)
+        if target_qa_count <= 10:
+            return min(validated_count, target_qa_count + 3)
+        return min(validated_count, target_qa_count + 5)
+
+    def _shortlist_validated_samples(self, samples, target_qa_count: int):
+        budget = self._validated_shortlist_budget(target_qa_count, len(samples))
+        if budget >= len(samples):
+            return samples
+
+        remaining = sorted(samples, key=self._validated_quality, reverse=True)
+        selected = []
+        while remaining and len(selected) < budget:
+            best = max(remaining, key=lambda sample: self._validated_diversity_score(selected, sample))
+            selected.append(best)
+            remaining.remove(best)
+        return selected
+
+    def _validated_diversity_score(self, selected, sample) -> tuple:
+        selected_query_types = {item.candidate.query_types[0] for item in selected if item.candidate.query_types}
+        selected_families = {item.candidate.structure_family for item in selected}
+        selected_difficulties = {item.classified_difficulty or item.candidate.difficulty for item in selected}
+        selected_modes = {item.candidate.generation_mode for item in selected}
+        query_type = sample.candidate.query_types[0] if sample.candidate.query_types else ""
+        difficulty = sample.classified_difficulty or sample.candidate.difficulty
+        return (
+            1 if query_type not in selected_query_types else 0,
+            1 if sample.candidate.structure_family not in selected_families else 0,
+            1 if difficulty not in selected_difficulties else 0,
+            1 if sample.candidate.generation_mode not in selected_modes else 0,
+            self._validated_quality(sample),
+        )
 
     def _select_best_by_question(self, samples: list[QASample]) -> list[QASample]:
         by_question: dict[str, QASample] = {}
@@ -354,6 +510,8 @@ class Orchestrator:
         return list(by_question.values())
 
     def _select_release_batch(self, samples: list[QASample], history: dict[str, set[str]], target_qa_count: int) -> tuple[list[QASample], dict]:
+        if any(sample.answer for sample in samples):
+            samples = [sample for sample in samples if sample.answer]
         history_questions = history.get("questions", set())
         history_cyphers = history.get("cyphers", set())
         fresh_pool = []
@@ -416,6 +574,11 @@ class Orchestrator:
 
     def _effective_limits(self, request: JobRequest):
         limits = request.generation_limits.model_copy(deep=True)
+        target = request.output_config.target_qa_count
+        if target >= 10:
+            limits.max_candidates_per_skeleton = min(limits.max_candidates_per_skeleton, 2)
+        if target >= 20:
+            limits.max_variants_per_question = min(limits.max_variants_per_question, 1)
         if request.mode.value == "online":
             limits.max_skeletons = min(limits.max_skeletons, 8)
             limits.max_candidates_per_skeleton = 1
@@ -429,19 +592,22 @@ class Orchestrator:
         return llm_config
 
     def _generate_questions(self, validated, schema, llm_config, max_variants, mode: str):
-        with ThreadPoolExecutor(max_workers=self._parallelism(len(validated), mode)) as executor:
-            results = list(
-                executor.map(
-                    lambda item: self._safe_generate_question(
-                        item,
-                        schema,
-                        llm_config,
-                        max_variants,
-                    ),
-                    validated,
+        try:
+            return self.question_service.generate_batch(validated, schema, llm_config, max_variants)
+        except Exception:
+            with ThreadPoolExecutor(max_workers=self._parallelism(len(validated), mode)) as executor:
+                results = list(
+                    executor.map(
+                        lambda item: self._safe_generate_question(
+                            item,
+                            schema,
+                            llm_config,
+                            max_variants,
+                        ),
+                        validated,
+                    )
                 )
-            )
-        return [item for item in results if item is not None]
+            return [item for item in results if item is not None]
 
     def _safe_generate_question(self, validated_sample, schema, llm_config, max_variants):
         try:
@@ -457,8 +623,26 @@ class Orchestrator:
     def _parallelism(self, item_count: int, mode: str) -> int:
         if item_count <= 1:
             return 1
-        ceiling = 2
+        ceiling = 3 if mode == "online" else 6
         return min(ceiling, item_count)
+
+    def _query_plan_target_count(self, target_qa_count: int, max_skeletons: int) -> int:
+        if max_skeletons <= 8:
+            return max_skeletons
+        if target_qa_count <= 1:
+            return min(max_skeletons, 3)
+        if target_qa_count <= 3:
+            return min(max_skeletons, target_qa_count + 2)
+        if target_qa_count <= 5:
+            return min(max_skeletons, target_qa_count + 3)
+        if target_qa_count <= 10:
+            return min(max_skeletons, target_qa_count + 4)
+        return min(max_skeletons, target_qa_count + 8)
+
+    def _should_enable_llm_cypher_enrichment(self, target_qa_count: int, mode: str) -> bool:
+        if mode == "online":
+            return True
+        return target_qa_count < 20
 
     def _export_sample(self, sample: QASample) -> dict:
         return {
@@ -469,29 +653,186 @@ class Orchestrator:
             "difficulty": sample.difficulty,
         }
 
-    def _build_report_with_dispatch(self, samples: list[QASample], target_qa_count: int, selection_meta: dict) -> dict:
-        report = self.report_builder.build(samples)
+    def _build_report_with_dispatch(
+        self,
+        job: JobRecord,
+        samples: list[QASample],
+        target_qa_count: int,
+        selection_meta: dict,
+    ) -> dict:
+        dispatch_result = self.qa_dispatcher.dispatch_samples(samples)
+        report = self.report_builder.build(samples, stages=job.stages, dispatch=dispatch_result)
         report["selection"] = {
             **selection_meta,
             "requested_count": target_qa_count,
             "final_count": len(samples),
         }
-        report["dispatch"] = self.qa_dispatcher.dispatch_samples(samples)
+        report["dispatch"] = dispatch_result
+        report["performance"] = self._build_performance_summary(report.get("business_stages", []), len(samples))
         return report
 
     def _run_stage(self, job: JobRecord, status: JobStatus, summary: str, fn):
         previous = job.status
         record = StageRecord(from_status=previous, to_status=status, summary=summary)
         start = datetime.now(timezone.utc)
-        payload = fn()
-        end = datetime.now(timezone.utc)
-        record.finished_at = end.isoformat()
-        record.duration_ms = int((end - start).total_seconds() * 1000)
+        business_stage = self._internal_to_business_stage(status)
         job.status = status
         job.updated_at = self._now()
         job.stages.append(record)
+        job.metrics["business_stages"] = self._build_business_stage_summary(job)
         self.job_store.save(job)
+        self.job_log_store.append(job.job_id, business_stage, "info", f"started: {summary}", {"internal_status": status.value, "from_status": previous.value if previous else None})
+        self.module_logs.append(
+            module="generation",
+            level="info",
+            operation="stage_started",
+            trace_id=job.job_id,
+            status="started",
+            request_body={
+                "job_id": job.job_id,
+                "business_stage": business_stage,
+                "internal_status": status.value,
+                "summary": summary,
+            },
+        )
+        try:
+            payload = fn()
+        except Exception as exc:  # noqa: BLE001
+            end = datetime.now(timezone.utc)
+            record.finished_at = end.isoformat()
+            record.duration_ms = int((end - start).total_seconds() * 1000)
+            record.error_code = getattr(exc, "code", "UNEXPECTED_ERROR")
+            record.error_message = str(exc)
+            job.updated_at = self._now()
+            job.metrics["business_stages"] = self._build_business_stage_summary(job)
+            self.job_store.save(job)
+            self.job_log_store.append(job.job_id, business_stage, "error", f"failed: {summary}", {"internal_status": status.value, "error": str(exc)})
+            self.module_logs.append(
+                module="generation",
+                level="error",
+                operation="stage_failed",
+                trace_id=job.job_id,
+                status="failed",
+                request_body={
+                    "job_id": job.job_id,
+                    "business_stage": business_stage,
+                    "internal_status": status.value,
+                    "summary": summary,
+                },
+                response_body={"error": str(exc)},
+            )
+            raise
+        end = datetime.now(timezone.utc)
+        record.finished_at = end.isoformat()
+        record.duration_ms = int((end - start).total_seconds() * 1000)
+        job.updated_at = self._now()
+        job.metrics["business_stages"] = self._build_business_stage_summary(job)
+        self.job_store.save(job)
+        self.job_log_store.append(job.job_id, business_stage, "info", f"completed: {summary}", {"internal_status": status.value, "duration_ms": record.duration_ms})
+        self.module_logs.append(
+            module="generation",
+            level="info",
+            operation="stage_completed",
+            trace_id=job.job_id,
+            status="success",
+            request_body={
+                "job_id": job.job_id,
+                "business_stage": business_stage,
+                "internal_status": status.value,
+                "summary": summary,
+            },
+            response_body={"duration_ms": record.duration_ms},
+        )
         return payload
+
+    def _build_business_stage_summary(self, job: JobRecord) -> list[dict]:
+        return build_business_stage_summary(job.stages, job.metrics.get("dispatch"))
+
+    def _hydrate_job_metrics(self, job: JobRecord) -> JobRecord:
+        hydrated = job.model_copy(deep=True)
+        hydrated.metrics["business_stages"] = self._build_business_stage_summary(hydrated)
+        sample_count = int((hydrated.metrics.get("selection") or {}).get("final_count") or hydrated.metrics.get("sample_count") or 0)
+        hydrated.metrics["performance"] = self._build_performance_summary(
+            hydrated.metrics["business_stages"],
+            sample_count,
+        )
+        return hydrated
+
+    def _build_skeletons(self, schema, limits, diversity_key, query_plans):
+        parameters = inspect.signature(self.generation_service.build_skeletons).parameters
+        if "query_plans" in parameters:
+            return self.generation_service.build_skeletons(
+                schema,
+                limits,
+                diversity_key=diversity_key,
+                query_plans=query_plans,
+            )
+        return self.generation_service.build_skeletons(
+            schema,
+            limits,
+            diversity_key=diversity_key,
+        )
+
+    def _instantiate_candidates(self, schema, skeletons, limits, llm_config, query_plans):
+        parameters = inspect.signature(self.generation_service.instantiate_candidates).parameters
+        if "query_plans" in parameters:
+            return self.generation_service.instantiate_candidates(
+                schema,
+                skeletons,
+                limits,
+                llm_config,
+                query_plans=query_plans,
+            )
+        return self.generation_service.instantiate_candidates(
+            schema,
+            skeletons,
+            limits,
+            llm_config,
+        )
+
+    def _instantiate_candidates_from_specs(self, schema, limits, llm_config, coverage_specs):
+        parameters = inspect.signature(self.generation_service.instantiate_candidates_from_specs).parameters
+        if "model_config" in parameters:
+            return self.generation_service.instantiate_candidates_from_specs(
+                schema,
+                coverage_specs,
+                limits,
+                model_config=llm_config,
+            )
+        return self.generation_service.instantiate_candidates_from_specs(
+            schema,
+            coverage_specs,
+            limits,
+        )
+
+    def _internal_to_business_stage(self, status: JobStatus) -> str:
+        if status == JobStatus.SCHEMA_READY:
+            return "ground_schema"
+        if status == JobStatus.SKELETON_READY:
+            return "spec_coverage"
+        if status == JobStatus.CYPHER_READY:
+            return "generate_cypher"
+        if status == JobStatus.VALIDATED:
+            return "tugraph_validate"
+        if status == JobStatus.QUESTIONS_READY:
+            return "generate_qa"
+        if status == JobStatus.ROUNDTRIP_DONE:
+            return "roundtrip_check"
+        if status == JobStatus.PACKAGED:
+            return "release_dispatch"
+        if status == JobStatus.DEDUPED:
+            return "release_dispatch"
+        return "system"
+
+    def _build_performance_summary(self, business_stages: list[dict], qa_count: int) -> dict:
+        non_llm_keys = {"ground_schema", "spec_coverage", "generate_cypher", "tugraph_validate", "release_dispatch"}
+        non_llm_total_ms = sum(int(stage.get("duration_ms") or 0) for stage in business_stages if stage.get("key") in non_llm_keys)
+        return {
+            "non_llm_total_ms": non_llm_total_ms,
+            "non_llm_per_qa_ms": int(non_llm_total_ms / max(qa_count, 1)),
+            "qa_count": qa_count,
+            "target_non_llm_per_qa_ms": 10000,
+        }
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()

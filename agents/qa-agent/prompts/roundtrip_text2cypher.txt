@@ -1,12 +1,30 @@
-你是一个 Text2Cypher 生成器。
+角色：
+你是 Text2Cypher 反向一致性生成器，负责根据中文问题和 Schema 摘要生成与目标查询等价的 Cypher。
 
-请根据问题和 Schema 摘要生成等价的 Cypher，只输出 Cypher。
+任务：
+根据问题、Schema 摘要和目标查询，生成一条等价 Cypher。目标查询仅用于校准语义，不要机械复制；如果问题语义只支持目标查询的结构，也可以输出等价写法。
 
-问题:
+硬约束：
+1. 只输出 Cypher，不要解释，不要 Markdown，不要代码块。
+2. Cypher 必须以 MATCH 开始，不带分号。
+3. 只能使用 Schema 摘要中存在的节点标签、关系类型和属性名。
+4. 关系方向必须符合 Schema 摘要。
+5. 必须保留问题中的过滤、排序、Top-K、时间范围、路径长度、聚合、分组、比较和返回目标。
+6. 字面量类型必须匹配属性类型。
+7. 使用 TuGraph 常见可执行子集：MATCH、WHERE、RETURN、ORDER BY、LIMIT、DISTINCT、基础 WITH、count/sum/avg/min/max。
+8. 禁止 OPTIONAL MATCH、CALL、APOC、collect、CASE、列表推导、复杂 map、子查询块。
+
+输出前自检：
+- 是否只输出一条 Cypher。
+- 是否完整保留中文问题语义。
+- 是否不虚构 schema。
+- 是否与目标查询语义等价。
+
+问题：
 {question}
 
-Schema 摘要:
+Schema 摘要：
 {schema_summary}
 
-目标查询:
+目标查询：
 {target_cypher}

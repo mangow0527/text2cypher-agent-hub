@@ -32,9 +32,29 @@ jobs:
           token: ${{ secrets.SOURCE_REPO_TOKEN || github.token }}
           persist-credentials: false
 
+      - name: Checkout knowledge-agent repository
+        uses: actions/checkout@v4
+        with:
+          repository: KG-AT-HOME/knowledge-agent
+          path: _source/knowledge-agent
+          fetch-depth: 1
+          token: ${{ secrets.SOURCE_REPO_TOKEN || github.token }}
+          persist-credentials: false
+
+      - name: Checkout qa-agent repository
+        uses: actions/checkout@v4
+        with:
+          repository: KG-AT-HOME/qa-agent
+          path: _source/qa-agent
+          fetch-depth: 1
+          token: ${{ secrets.SOURCE_REPO_TOKEN || github.token }}
+          persist-credentials: false
+
       - name: Run sync scripts
         env:
           SOURCE_ROOT_NL2CYPHER: ${{ github.workspace }}/_source/NL2Cypher
+          SOURCE_KNOWLEDGE: ${{ github.workspace }}/_source/knowledge-agent
+          SOURCE_QA: ${{ github.workspace }}/_source/qa-agent
         run: ./sync/scripts/sync_all.sh
 
       - name: Commit and push changes
@@ -43,6 +63,8 @@ jobs:
             agents/cypher-generator-agent
             agents/testing-agent
             agents/repair-agent
+            agents/knowledge-agent
+            agents/qa-agent
             console/runtime-console
             contracts
             sync/manifests/latest-sync.json

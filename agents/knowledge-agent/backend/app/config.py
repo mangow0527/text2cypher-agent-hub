@@ -35,8 +35,10 @@ class Settings:
     openai_api_key: str = env_or_qa_agent("OPENAI_API_KEY", "")
     openai_base_url: str = env_or_qa_agent("OPENAI_BASE_URL", "https://open.bigmodel.cn/api/paas/v4")
     openai_model: str = env_or_qa_agent("OPENAI_MODEL", "glm-5")
+    qa_agent_base_url: str = os.getenv("QA_AGENT_BASE_URL", "http://127.0.0.1:8020")
     host: str = os.getenv("APP_HOST", "0.0.0.0")
     port: int = int(os.getenv("APP_PORT", "8010"))
+    slow_request_threshold_ms: int = int(os.getenv("SLOW_REQUEST_THRESHOLD_MS", "5000"))
 
 
 settings = Settings()

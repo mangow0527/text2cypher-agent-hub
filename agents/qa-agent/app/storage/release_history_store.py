@@ -17,13 +17,22 @@ class ReleaseHistoryStore:
         questions: set[str] = set()
         cyphers: set[str] = set()
         for path in sorted(self.root.glob("*.jsonl")):
+            if path.name.startswith("."):
+                continue
             resolved = path.resolve()
             if resolved in exclude:
                 continue
-            for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except UnicodeDecodeError:
+                continue
+            for line in lines:
                 if not line.strip():
                     continue
-                payload = json.loads(line)
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
                 question = str(payload.get("question", "")).strip()
                 cypher = str(payload.get("cypher", "")).strip()
                 if question:

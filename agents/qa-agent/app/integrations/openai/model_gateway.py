@@ -64,7 +64,9 @@ class ModelGateway:
                 time.sleep(2.0 * (attempt + 1))
             except httpx.HTTPError as exc:
                 last_exc = exc
-                break
+                if attempt == max_attempts - 1:
+                    break
+                time.sleep(2.0 * (attempt + 1))
         raise AppError("OPENAI_REQUEST_ERROR", str(last_exc)) from last_exc
 
     def judge_consistency(self, prompt_name: str, model_config: ModelConfig, **kwargs: Any) -> bool:

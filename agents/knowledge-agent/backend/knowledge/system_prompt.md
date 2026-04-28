@@ -9,12 +9,6 @@
 [id: generation_rule_2]
 - 不得虚构不存在的 schema 元素或业务含义。
 
-
-[id: system_prompt]
-- 连通性测试：建议优化 system prompt
-
-[id: test]
-- test
 ## knowledge_update
 
 [id: system_probing_directive]
@@ -34,8 +28,3 @@ If the user's initial input is vague, ambiguous, or lacks clear intent, initiate
 
 [id: actor_movie_relationship_description]
 演员(Actor)与电影(Movie)之间为参演关系：一个演员可参演多部电影，一部电影也可由多名演员参演，构成多对多关系。在查询时，若问题为“某演员出演过哪些电影”，请沿演员节点的 outgoing 边匹配电影节点；若问题为“某电影有哪些演员参演”，请沿电影节点的 incoming 边反向匹配演员节点。请在生成查询语句时注意边的方向，以避免连通性检索失败。
-
-## instructions
-
-[id: output_format_constraint]
-IMPORTANT: You must only output valid Cypher statements. Do not include any natural language explanations, introductions, or markdown formatting in your response.

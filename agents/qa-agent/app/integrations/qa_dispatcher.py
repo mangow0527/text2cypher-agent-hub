@@ -10,14 +10,21 @@ import httpx
 
 from app.config import settings
 from app.domain.models import QASample
+from app.logging import ModuleLogStore
 
 
 class QADispatcher:
-    def __init__(self, client: httpx.Client | None = None, log_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        client: httpx.Client | None = None,
+        log_root: Path | None = None,
+        module_logs: ModuleLogStore | None = None,
+    ) -> None:
         self._client = client or httpx.Client(timeout=10)
         self._log_root = log_root or (settings.artifacts_dir / "logs")
         self._log_root.mkdir(parents=True, exist_ok=True)
         self._log_path = self._log_root / "dispatch.log"
+        self._module_logs = module_logs or ModuleLogStore(root=self._log_root / "modules")
 
     def dispatch_samples(self, samples: list[QASample]) -> dict[str, Any]:
         host = settings.test_agent_host.strip()
@@ -142,9 +149,18 @@ class QADispatcher:
         }
 
     def _post_with_retry(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
+        trace_id = str(payload.get("id", ""))
         last_error = ""
         last_status_code: int | None = None
         last_response_body: str | None = None
+        self._module_logs.append(
+            module="dispatch",
+            level="info",
+            operation="dispatch_request_started",
+            trace_id=trace_id or None,
+            status="started",
+            request_body={"url": url, "payload": payload},
+        )
         for attempt in range(1, 4):
             try:
                 response = self._client.post(url, json=payload)
@@ -160,6 +176,15 @@ class QADispatcher:
                         "response_body": response_body,
                     }
                     self._write_log(url, payload, result)
+                    self._module_logs.append(
+                        module="dispatch",
+                        level="info",
+                        operation="dispatch_request_completed",
+                        trace_id=trace_id or None,
+                        status="success",
+                        request_body={"url": url, "payload": payload},
+                        response_body=result,
+                    )
                     return result
                 last_error = f"HTTP {response.status_code}"
             except Exception as exc:  # noqa: BLE001
@@ -176,6 +201,15 @@ class QADispatcher:
             "response_body": last_response_body,
         }
         self._write_log(url, payload, result)
+        self._module_logs.append(
+            module="dispatch",
+            level="error",
+            operation="dispatch_request_completed",
+            trace_id=trace_id or None,
+            status="failed",
+            request_body={"url": url, "payload": payload},
+            response_body=result,
+        )
         return result
 
     def _base_url(self, host: str) -> str:

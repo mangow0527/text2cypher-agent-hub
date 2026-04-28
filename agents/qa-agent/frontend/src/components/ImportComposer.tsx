@@ -21,7 +21,7 @@ export function ImportComposer({
   }
 
   return (
-    <section className="surface">
+    <section className="surface import-surface">
       <div className="panel-heading-row">
         <div>
           <div className="eyebrow">导入资产</div>

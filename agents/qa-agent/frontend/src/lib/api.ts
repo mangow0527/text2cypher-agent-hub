@@ -1,4 +1,12 @@
-const API_BASE = "http://127.0.0.1:8000";
+function resolveApiBase(): string {
+  const configured = import.meta.env.VITE_API_BASE as string | undefined;
+  if (configured && configured.trim()) {
+    return configured.trim().replace(/\/+$/, "");
+  }
+  return "";
+}
+
+const API_BASE = resolveApiBase();
 
 async function parseJsonOrThrow(response: Response) {
   const text = await response.text();
@@ -52,6 +60,26 @@ export interface ImportRecord {
   artifacts: Record<string, string>;
   report: Record<string, unknown>;
   errors?: Array<{ code: string; message: string }>;
+}
+
+export interface QADifficultyDefinition {
+  level: string;
+  paper_band: string;
+  title: string;
+  definition: string;
+}
+
+export interface QAStats {
+  total_qa_pairs: number;
+  generated_qa_pairs: number;
+  imported_qa_pairs: number;
+  unknown_source_qa_pairs: number;
+  difficulty_distribution: Record<string, number>;
+  difficulty_percentages: Record<string, number>;
+  difficulty_definitions: QADifficultyDefinition[];
+  files_processed: number;
+  invalid_rows: number;
+  latest_updated_at?: string | null;
 }
 
 export async function listJobs(): Promise<JobRecord[]> {
@@ -211,6 +239,11 @@ export async function importQa(payload: {
 
 export async function listImports(): Promise<ImportRecord[]> {
   const response = await fetch(`${API_BASE}/qa/imports`);
+  return parseJsonOrThrow(response);
+}
+
+export async function getQAStats(): Promise<QAStats> {
+  const response = await fetch(`${API_BASE}/qa/stats`);
   return parseJsonOrThrow(response);
 }
 

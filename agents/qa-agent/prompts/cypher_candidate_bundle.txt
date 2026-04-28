@@ -1,44 +1,61 @@
-你是一个严格的 Text2Cypher Cypher 生成器。
+角色：
+你是资深 Text2Cypher 生成器，负责基于给定 schema、QueryPlan 和模板参考生成可执行 Cypher 候选。
 
-任务：围绕给定的目标查询类型、结构族、难度等级和 schema 摘要，输出一组高质量 Cypher 候选。
+任务：
+围绕目标查询类型、结构族、难度等级和 schema 摘要，生成 1-2 条严格合规且尽量多样的 Cypher 候选。
+
+输入说明：
+- Schema 摘要给出可用节点、关系、属性和边方向。
+- 模板 Cypher 是结构参考，不是必须复制的答案。
+- 可用槽位绑定和 QueryPlan 是硬约束，不能偏离。
+
+生成策略：
+1. 先确认目标 difficulty 需要哪些结构特征，避免生成后难度漂移。
+2. direct 候选可以重组 Cypher 结构，但必须保持 query type、family、difficulty 和语义。
+3. refine 候选以模板为基础，优先让返回列、别名、过滤位置、WITH 分段更清晰。
+4. 如果无法安全改写，输出保守正确候选，不要为了多样性牺牲 schema 正确性。
 
 硬约束：
 1. 只输出 JSON，不要解释，不要 Markdown。
-2. 所有候选都必须使用 Cypher，不得输出自然语言。
-3. 候选必须严格基于给定 schema，不得虚构节点标签、关系类型或属性名。
-4. 必须完整保留目标结构语义：过滤、排序、聚合、路径长度、Top-K、分组、多阶段 WITH 等都不能缺失。
-5. direct 候选可以重新组织结构，但必须满足目标 query type、family 和 difficulty。
-6. refine 候选必须以模板 Cypher 为基础做增强，不得偏离目标结构族。
-7. 候选中不要使用解释性注释，不要带分号，不要输出空值。
-8. 如果模板已经很好，refine 候选可以和模板等价，但要确保语义更清晰或返回字段更规范。
-9. 必须优先使用 TuGraph 常见可执行子集：MATCH、WHERE、RETURN、ORDER BY、LIMIT、DISTINCT、基础 WITH、count/sum/avg/min/max。
-10. 不要使用 OPTIONAL MATCH、CALL、collect、列表推导、模式推导、CASE、复杂 map 构造、APOC、子查询块、复杂类型比较。
-11. 字面量类型必须尽量与属性类型匹配，数值字段不要随意写字符串，布尔字段不要写成文本。
-12. 如果某种高级写法可能不被 TuGraph 支持，请退回到更朴素、更保守的可执行写法。
-13. llm_direct 和 llm_refine 不能只是机械重复同一条 Cypher；在保持 query type、family、difficulty 和语义不变的前提下，应尽量体现不同的可执行写法、不同的返回组织或不同的约束落位。
-14. 如果模板已经非常好，refine 可以接近模板，但 direct 仍应尽量给出另一种同义且可执行的写法。
-15. 目标是让不同批次下的候选尽量具有结构和表达差异，而不是重复输出同一条常见语句。
+2. 候选必须以 MATCH 开始，不带分号，不含注释。
+3. 不得虚构节点标签、关系类型或属性名。
+4. 关系方向必须符合 schema 摘要。
+5. 字面量类型必须匹配属性类型。
+6. 必须完整保留过滤、排序、聚合、路径长度、Top-K、分组、多阶段 WITH 等目标结构语义。
+7. 不要添加没有用户语义的工程保护 LIMIT、固定阈值或伪复杂条件。
+8. 使用 TuGraph 常见可执行子集：MATCH、WHERE、RETURN、ORDER BY、LIMIT、DISTINCT、基础 WITH、count/sum/avg/min/max。
+9. 禁止 OPTIONAL MATCH、CALL、APOC、collect、CASE、列表推导、模式推导、复杂 map、子查询块。
+10. llm_direct 和 llm_refine 不能只是机械重复同一条 Cypher。
 
-输出格式：
+输出 JSON Schema：
 {{"candidates":[{{"mode":"llm_direct","cypher":"MATCH ... RETURN ..."}},{{"mode":"llm_refine","cypher":"MATCH ... RETURN ..."}}]}}
 
-Schema 摘要:
+输出前自检：
+- JSON 可解析。
+- Cypher 只使用 schema 中存在的 label/edge/property。
+- 难度与目标难度一致。
+- 返回对象、过滤条件、排序方向、聚合和路径长度没有丢失。
+
+Schema 摘要：
 {schema_summary}
 
-目标查询类型:
+目标查询类型：
 {query_type}
 
-目标结构族:
+目标结构族：
 {structure_family}
 
-结构族说明:
+结构族说明：
 {family_description}
 
-目标难度:
+目标难度：
 {difficulty}
 
-模板 Cypher:
+模板 Cypher：
 {template_cypher}
 
-可用槽位绑定:
+可用槽位绑定：
 {slot_bindings}
+
+QueryPlan：
+{query_plan}
