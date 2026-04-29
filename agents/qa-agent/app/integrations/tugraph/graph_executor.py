@@ -17,7 +17,13 @@ class GraphExecutor:
             latency_ms = int((time.perf_counter() - start) * 1000)
             return (
                 RuntimeMeta(latency_ms=latency_ms, warnings=["TuGraph not configured"], planner="mock"),
-                ResultSignature(columns=["result"], column_types=["string"], row_count=1, result_preview=[{"result": "mock"}]),
+                ResultSignature(
+                    columns=["result"],
+                    column_types=["string"],
+                    row_count=1,
+                    result_preview=[{"result": "mock"}],
+                    result_rows=[{"result": "mock"}],
+                ),
                 True,
             )
 
@@ -31,7 +37,13 @@ class GraphExecutor:
             latency_ms = int((time.perf_counter() - start) * 1000)
             return (
                 RuntimeMeta(latency_ms=latency_ms, planner="tugraph-http-legacy"),
-                ResultSignature(columns=columns, column_types=column_types, row_count=len(rows), result_preview=rows[:5]),
+                ResultSignature(
+                    columns=columns,
+                    column_types=column_types,
+                    row_count=len(rows),
+                    result_preview=rows[:5],
+                    result_rows=rows,
+                ),
                 True,
             )
         except Exception as exc:  # noqa: BLE001

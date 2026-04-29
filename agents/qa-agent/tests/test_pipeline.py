@@ -9,13 +9,14 @@ from tempfile import TemporaryDirectory
 import httpx
 
 from app.domain.generation.service import GenerationService
-from app.domain.models import CypherCandidate, CypherSkeleton, JobRequest, QueryPlan, ResultSignature, RuntimeMeta, ValidatedSample, ValidationResult
+from app.domain.models import CypherCandidate, CypherSkeleton, JobRequest, QueryPlan, ResultSignature, RuntimeMeta, TuGraphConfig, ValidatedSample, ValidationResult
 from app.domain.questioning.service import QUESTION_VARIANT_STYLES, QuestionService, build_result_summary, is_natural_language_question
 from app.domain.roundtrip.service import RoundtripService
 from app.domain.schema.compatibility_service import SchemaCompatibilityService
 from app.domain.validation.service import ValidationService
 from app.integrations.openai.model_gateway import ModelGateway
 from app.integrations.qa_dispatcher import QADispatcher
+from app.integrations.tugraph.graph_executor import GraphExecutor
 from app.orchestrator.service import Orchestrator
 from app.storage.artifact_store import ArtifactStore
 from app.storage.job_store import JobStore
@@ -521,6 +522,63 @@ class PipelineTest(unittest.TestCase):
         with self.assertRaises(Exception):
             service.generate(validated_sample, schema, fake_gateway_config(), 3)
 
+    def test_question_service_uses_complete_result_rows_as_answer(self) -> None:
+        full_rows = [{"name": f"service_{index}"} for index in range(8)]
+        validated_sample = ValidatedSample(
+            candidate=CypherCandidate(
+                skeleton_id="lookup_full",
+                cypher="MATCH (n:Service) RETURN n.name AS name",
+                query_types=["LOOKUP"],
+                structure_family="lookup_node_return",
+                bound_schema_items={"nodes": ["Service"], "edges": [], "properties": ["name"]},
+                difficulty="L1",
+            ),
+            validation=ValidationResult(
+                syntax=True,
+                schema=True,
+                type_value=True,
+                query_type_valid=True,
+                family_valid=True,
+                runtime=True,
+                result_sanity=True,
+                difficulty_valid=True,
+            ),
+            runtime_meta=RuntimeMeta(latency_ms=3, planner="fake-graph"),
+            result_signature=ResultSignature(
+                columns=["name"],
+                column_types=["string"],
+                row_count=len(full_rows),
+                result_preview=full_rows[:5],
+                result_rows=full_rows,
+            ),
+        )
+        from app.domain.models import CanonicalSchemaSpec
+
+        schema = CanonicalSchemaSpec(node_types=["Service"], node_properties={"Service": {"name": "STRING"}})
+
+        sample = QuestionService(model_gateway=FakeModelGateway()).generate(validated_sample, schema, fake_gateway_config(), 3)
+
+        self.assertEqual(sample.answer, full_rows)
+        self.assertEqual(len(sample.result_signature.result_preview), 5)
+
+    def test_graph_executor_keeps_full_rows_separate_from_preview(self) -> None:
+        class FakeClient:
+            def call_cypher(self, cypher):
+                return {
+                    "header": [{"name": "name", "type": "string"}],
+                    "result": [[f"service_{index}"] for index in range(8)],
+                }
+
+        executor = GraphExecutor()
+        executor._get_client = lambda config: FakeClient()
+
+        _, signature, ok = executor.execute("MATCH (n:Service) RETURN n.name AS name", TuGraphConfig(base_url="http://fake"))
+
+        self.assertTrue(ok)
+        self.assertEqual(signature.row_count, 8)
+        self.assertEqual(len(signature.result_preview), 5)
+        self.assertEqual(len(signature.result_rows), 8)
+
     def test_job_runs_to_completion(self) -> None:
         schema_path = Path(__file__).parent / "fixtures" / "schema.json"
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
@@ -775,6 +833,42 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(failed.status.value, "failed")
             self.assertTrue(failed.errors)
             self.assertEqual(failed.errors[-1]["code"], "NO_VALID_QA_GENERATED")
+
+    def test_failed_job_can_be_rerun_cleanly(self) -> None:
+        schema_path = Path(__file__).parent / "fixtures" / "schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+        gateway = UniqueQuestionGateway()
+        generation_service = RetryAwareGenerationService(fail_attempts=10, model_gateway=gateway)
+        with TemporaryDirectory() as tempdir:
+            temp_root = Path(tempdir)
+            orchestrator = Orchestrator(
+                job_store=JobStore(root=temp_root / "job-reports"),
+                artifact_store=ArtifactStore(root=temp_root / "artifacts"),
+                schema_compatibility_service=SchemaCompatibilityService(graph_executor=FakeGraphExecutor()),
+                generation_service=generation_service,
+                validation_service=ValidationService(graph_executor=FakeGraphExecutor()),
+                question_service=QuestionService(model_gateway=gateway),
+                roundtrip_service=RoundtripService(model_gateway=gateway),
+            )
+            job = orchestrator.create_job(
+                JobRequest(
+                    mode="online",
+                    schema_input=schema,
+                    output_config={"target_qa_count": 1},
+                    tugraph_source={"type": "inline"},
+                    tugraph_config={"base_url": None, "username": None, "password": None, "graph": None},
+                )
+            )
+
+            failed = orchestrator.run_job(job.job_id)
+            generation_service.fail_attempts = 0
+            completed = orchestrator.run_job(failed.job_id)
+
+            self.assertEqual(completed.status.value, "completed")
+            self.assertEqual(completed.errors, [])
+            self.assertTrue(completed.artifacts["releases"])
+            self.assertGreaterEqual(completed.metrics.get("sample_count", 0), 1)
 
     def test_job_fails_fast_when_schema_does_not_match_tugraph_labels(self) -> None:
         schema_path = Path(__file__).parent / "fixtures" / "schema.json"

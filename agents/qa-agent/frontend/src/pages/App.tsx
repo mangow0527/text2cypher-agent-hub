@@ -48,6 +48,7 @@ export function App() {
   const [detailOpen, setDetailOpen] = useState(false);
   const [focus, setFocus] = useState<"jobs" | "imports">("jobs");
   const [jobBusy, setJobBusy] = useState(false);
+  const [regenerateBusy, setRegenerateBusy] = useState(false);
   const [dispatchBusy, setDispatchBusy] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
   const [jobPage, setJobPage] = useState(1);
@@ -295,6 +296,29 @@ export function App() {
     }
   }
 
+  async function handleRegenerate(jobId: string) {
+    setRegenerateBusy(true);
+    setJobMessage(`正在重新生成 ${jobId.slice(0, 12)}...`);
+    try {
+      const updated = await runJob(jobId);
+      setSelectedJob(updated);
+      setDetailOpen(true);
+      setFocus("jobs");
+      setJobMessage(
+        updated.status === "completed"
+          ? `重新生成完成，已生成 ${Number((updated.metrics.selection as { final_count?: number } | undefined)?.final_count ?? updated.metrics.sample_count ?? 0)} 条 QA`
+          : `重新生成结束：${jobStatusLabel(updated.status)}`,
+      );
+      await refreshJobs(false);
+      await refreshQAStats();
+    } catch (error) {
+      setJobMessage(`重新生成失败：${error instanceof Error ? error.message : "未知错误"}`);
+      await refreshJobs(false);
+    } finally {
+      setRegenerateBusy(false);
+    }
+  }
+
   async function handleDeleteJob(jobId: string) {
     if (!window.confirm(`确定删除批次 ${jobId} 吗？`)) {
       return;
@@ -483,9 +507,11 @@ export function App() {
             {focus === "jobs" ? (
               <JobDetail
                 job={selectedJob}
+                onRegenerate={handleRegenerate}
                 onRedispatch={handleRedispatch}
                 onDelete={handleDeleteJob}
                 onClose={() => setDetailOpen(false)}
+                regenerateBusy={regenerateBusy}
                 dispatchBusy={dispatchBusy}
               />
             ) : (

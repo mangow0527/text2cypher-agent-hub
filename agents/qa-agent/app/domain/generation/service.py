@@ -918,7 +918,36 @@ class GenerationService:
         if "MATCH " in stripped.upper() and not stripped.upper().startswith("MATCH "):
             match_start = stripped.upper().find("MATCH ")
             stripped = stripped[match_start:].strip()
-        return stripped.rstrip(";")
+        stripped = stripped.rstrip(";")
+        return self._rewrite_order_by_return_alias(stripped)
+
+    def _rewrite_order_by_return_alias(self, cypher: str) -> str:
+        return_match = re.search(
+            r"\bRETURN\b(?P<return_items>.*?)\bORDER\s+BY\s+(?P<order_key>[A-Za-z_][A-Za-z0-9_]*)\b",
+            cypher,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        if not return_match:
+            return cypher
+        order_key = return_match.group("order_key")
+        aliases = {
+            match.group("source"): match.group("alias")
+            for match in re.finditer(
+                r"\b(?P<source>[A-Za-z_][A-Za-z0-9_]*)\s+AS\s+(?P<alias>[A-Za-z_][A-Za-z0-9_]*)\b",
+                return_match.group("return_items"),
+                flags=re.IGNORECASE,
+            )
+        }
+        alias = aliases.get(order_key)
+        if not alias or alias == order_key:
+            return cypher
+        return re.sub(
+            rf"(\bORDER\s+BY\s+){re.escape(order_key)}\b",
+            rf"\1{alias}",
+            cypher,
+            count=1,
+            flags=re.IGNORECASE,
+        )
 
     def _build_schema_summary(self, schema: CanonicalSchemaSpec, bindings: Dict[str, str]) -> str:
         lines: list[str] = []

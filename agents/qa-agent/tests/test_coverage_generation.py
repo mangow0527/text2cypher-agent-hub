@@ -7,7 +7,7 @@ import json
 from app.domain.coverage.service import CoverageService
 from app.domain.difficulty.service import DifficultyService
 from app.domain.generation.service import GenerationService
-from app.domain.models import CanonicalSchemaSpec, CypherCandidate, GenerationLimits, ModelConfig, QASample, ValidationConfig
+from app.domain.models import CanonicalSchemaSpec, CypherCandidate, GenerationLimits, JobRecord, JobRequest, ModelConfig, QASample, ValidationConfig
 from app.domain.validation.service import ValidationService
 from app.orchestrator.service import Orchestrator
 
@@ -35,6 +35,14 @@ class CoverageLLMGateway:
             },
             ensure_ascii=False,
         )
+
+
+class RejectDifficultyRoundtrip:
+    def __init__(self, rejected_difficulty: str) -> None:
+        self.rejected_difficulty = rejected_difficulty
+
+    def check(self, sample: QASample, model_config: ModelConfig):
+        return sample.difficulty != self.rejected_difficulty, sample.question_variants_zh, sample.question_variant_styles
 
 
 class CoverageGenerationTests(unittest.TestCase):
@@ -146,6 +154,33 @@ class CoverageGenerationTests(unittest.TestCase):
         self.assertEqual(meta["difficulty_shortfalls"], {})
         self.assertEqual({sample.difficulty for sample in selected}, {"L1", "L2"})
 
+    def test_targeted_roundtrip_keeps_structurally_valid_missing_difficulty(self) -> None:
+        l1 = self._qa_sample("qa_l1", "L1")
+        l8 = self._qa_sample("qa_l8", "L8")
+        l8.question_canonical_zh = "统计每个服务关联的隧道源网元数量，返回前3个服务。"
+        l8.cypher = (
+            "MATCH (a:Service)-[:SERVICE_USES_TUNNEL]->(:Tunnel)-[:TUNNEL_SRC]->(c:NetworkElement) "
+            "WITH a, count(c) AS first_total "
+            "MATCH (a)-[:SERVICE_USES_TUNNEL]->(:Tunnel)-[:TUNNEL_SRC]->(c2:NetworkElement) "
+            "RETURN a.name AS key, first_total, count(c2) AS total ORDER BY first_total ASC LIMIT 3"
+        )
+        for sample in (l1, l8):
+            sample.provenance["canonical_pass"] = "true"
+            sample.provenance["canonical_checks"] = json.dumps({"return_target": True, "topk_limit": True}, ensure_ascii=False)
+            sample.provenance["approved_styles"] = json.dumps(sample.question_variant_styles, ensure_ascii=False)
+        job = JobRecord(
+            request=JobRequest(
+                output_config={"target_qa_count": 2, "difficulty_targets": {"L1": 1, "L8": 1}},
+                validation_config={"roundtrip_required": True},
+            )
+        )
+        orchestrator = Orchestrator(roundtrip_service=RejectDifficultyRoundtrip("L8"))
+
+        selected = orchestrator._apply_roundtrip(job, [l1, l8], ModelConfig(), "online")
+
+        self.assertEqual({sample.difficulty for sample in selected}, {"L1", "L8"})
+        self.assertFalse(next(sample for sample in selected if sample.difficulty == "L8").validation.roundtrip_check)
+
     def _qa_sample(self, sample_id: str, difficulty: str) -> QASample:
         return QASample.model_validate(
             {
@@ -241,6 +276,20 @@ class CoverageGenerationTests(unittest.TestCase):
         merged = service._merge_llm_with_template_fallback(llm_candidates, template_candidates, max_count=4)
 
         self.assertEqual({candidate.difficulty for candidate in merged}, {"L1", "L2", "L7", "L8"})
+
+    def test_sanitize_rewrites_order_by_to_return_alias(self) -> None:
+        cypher = (
+            "MATCH (a:Service)-[:SERVICE_USES_TUNNEL]->(:Tunnel)-[:TUNNEL_SRC]->(c:NetworkElement) "
+            "WITH a, count(c) AS total_elements "
+            "MATCH (a)-[:SERVICE_USES_TUNNEL]->(:Tunnel)-[:TUNNEL_SRC]->(c2:NetworkElement) "
+            "RETURN a.name AS key, total_elements AS first_total, count(c2) AS total "
+            "ORDER BY total_elements ASC LIMIT 3"
+        )
+
+        sanitized = GenerationService()._sanitize_cypher(cypher)
+
+        self.assertIn("ORDER BY first_total ASC", sanitized)
+        self.assertNotIn("ORDER BY total_elements", sanitized)
 
     def test_coverage_candidates_classify_to_declared_difficulty(self) -> None:
         specs = CoverageService().build_specs(

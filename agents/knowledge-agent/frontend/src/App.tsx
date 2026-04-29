@@ -4,18 +4,33 @@ import type { FormEvent } from "react";
 import { DiffViewer } from "./components/DiffViewer";
 import {
   applyRepair,
-  fetchKnowledgeDocument,
+  createKnowledgeTreeNode,
+  deleteKnowledgeTreeNode,
+  fetchKnowledgeTree,
+  fetchKnowledgeTreeNode,
   fetchPromptPackage,
-  listKnowledgeDocuments,
-  saveKnowledgeDocument,
+  updateKnowledgeTreeNode,
 } from "./lib/api";
-import type { KnowledgeDocumentDetail, KnowledgeDocumentSummary, KnowledgeDocumentType, KnowledgeType, RepairChange } from "./lib/api";
+import type {
+  KnowledgeTreeNode,
+  KnowledgeTreeNodeDetail,
+  KnowledgeTreeNodeKind,
+  KnowledgeType,
+  RepairChange,
+} from "./lib/api";
 
 const KNOWLEDGE_TYPE_OPTIONS: Array<{ value: KnowledgeType; label: string; note: string }> = [
   { value: "cypher_syntax", label: "Cypher Syntax", note: "TuGraph 方言限制和改写规则" },
   { value: "few_shot", label: "Few-shot", note: "高质量问句与 Cypher 示例" },
   { value: "system_prompt", label: "System Prompt", note: "生成策略和输出约束" },
   { value: "business_knowledge", label: "Business Knowledge", note: "术语别名与业务语义映射" },
+];
+
+const CREATABLE_NODE_KINDS: Array<{ value: KnowledgeTreeNodeKind; label: string }> = [
+  { value: "business_semantic", label: "业务语义" },
+  { value: "relation_path", label: "关系路径" },
+  { value: "few_shot", label: "Few-shot" },
+  { value: "rule", label: "通用规则" },
 ];
 
 export default function App() {
@@ -32,77 +47,93 @@ export default function App() {
   const [repairError, setRepairError] = useState("");
   const [changes, setChanges] = useState<RepairChange[]>([]);
 
-  const [documents, setDocuments] = useState<KnowledgeDocumentSummary[]>([]);
-  const [selectedDocType, setSelectedDocType] = useState<KnowledgeDocumentType>("business_knowledge");
-  const [documentDetail, setDocumentDetail] = useState<KnowledgeDocumentDetail | null>(null);
-  const [documentContent, setDocumentContent] = useState("");
-  const [documentBusy, setDocumentBusy] = useState(false);
-  const [documentSaveBusy, setDocumentSaveBusy] = useState(false);
-  const [documentError, setDocumentError] = useState("");
-  const [documentStatus, setDocumentStatus] = useState("");
+  const [tree, setTree] = useState<KnowledgeTreeNode[]>([]);
+  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(
+    () => new Set(["group:business_objects", "group:rules", "concept:NetworkElement"]),
+  );
+  const [selectedNodeId, setSelectedNodeId] = useState("");
+  const [selectedNode, setSelectedNode] = useState<KnowledgeTreeNodeDetail | null>(null);
+  const [treeContent, setTreeContent] = useState("");
+  const [treeBusy, setTreeBusy] = useState(false);
+  const [treeSaveBusy, setTreeSaveBusy] = useState(false);
+  const [treeError, setTreeError] = useState("");
+  const [treeStatus, setTreeStatus] = useState("");
+  const [treeSearch, setTreeSearch] = useState("");
+  const [newNodeTitle, setNewNodeTitle] = useState("");
+  const [newNodeKind, setNewNodeKind] = useState<KnowledgeTreeNodeKind>("business_semantic");
+  const [newNodeContent, setNewNodeContent] = useState("");
 
   useEffect(() => {
     let active = true;
 
-    async function loadDocuments() {
-      setDocumentError("");
+    async function loadTree() {
+      setTreeBusy(true);
+      setTreeError("");
       try {
-        const response = await listKnowledgeDocuments();
+        const response = await fetchKnowledgeTree();
         if (!active) {
           return;
         }
-        setDocuments(response.documents);
-        if (!response.documents.some((item) => item.doc_type === selectedDocType)) {
-          const preferred = response.documents.find((item) => item.editable) ?? response.documents[0];
-          if (preferred) {
-            setSelectedDocType(preferred.doc_type);
-          }
+        setTree(response.tree);
+        const preferred =
+          findFirstNode(response.tree, (node) => node.id === "concept:NetworkElement") ??
+          findFirstNode(response.tree, (node) => node.kind === "concept") ??
+          findFirstNode(response.tree, () => true);
+        if (preferred) {
+          setSelectedNodeId((current) => current || preferred.id);
         }
       } catch (error) {
         if (active) {
-          setDocumentError(error instanceof Error ? error.message : "获取知识文档失败");
-        }
-      }
-    }
-
-    loadDocuments();
-    return () => {
-      active = false;
-    };
-  }, [selectedDocType]);
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadDocument() {
-      setDocumentBusy(true);
-      setDocumentError("");
-      setDocumentStatus("");
-      try {
-        const response = await fetchKnowledgeDocument(selectedDocType);
-        if (!active) {
-          return;
-        }
-        setDocumentDetail(response);
-        setDocumentContent(response.content);
-      } catch (error) {
-        if (active) {
-          setDocumentError(error instanceof Error ? error.message : "读取知识文档失败");
-          setDocumentDetail(null);
-          setDocumentContent("");
+          setTreeError(error instanceof Error ? error.message : "获取知识树失败");
         }
       } finally {
         if (active) {
-          setDocumentBusy(false);
+          setTreeBusy(false);
         }
       }
     }
 
-    loadDocument();
+    loadTree();
     return () => {
       active = false;
     };
-  }, [selectedDocType]);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedNodeId) {
+      return;
+    }
+    let active = true;
+
+    async function loadNode() {
+      setTreeBusy(true);
+      setTreeError("");
+      setTreeStatus("");
+      try {
+        const response = await fetchKnowledgeTreeNode(selectedNodeId);
+        if (!active) {
+          return;
+        }
+        setSelectedNode(response.node);
+        setTreeContent(response.node.content);
+      } catch (error) {
+        if (active) {
+          setTreeError(error instanceof Error ? error.message : "读取知识节点失败");
+          setSelectedNode(null);
+          setTreeContent("");
+        }
+      } finally {
+        if (active) {
+          setTreeBusy(false);
+        }
+      }
+    }
+
+    loadNode();
+    return () => {
+      active = false;
+    };
+  }, [selectedNodeId]);
 
   async function handlePromptSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -142,54 +173,104 @@ export default function App() {
     );
   }
 
-  async function handleDocumentSave() {
-    if (!documentDetail?.editable) {
+  function toggleExpanded(nodeId: string) {
+    setExpandedNodeIds((current) => {
+      const next = new Set(current);
+      if (next.has(nodeId)) {
+        next.delete(nodeId);
+      } else {
+        next.add(nodeId);
+      }
+      return next;
+    });
+  }
+
+  async function handleTreeSave() {
+    if (!selectedNode?.editable) {
       return;
     }
-    setDocumentSaveBusy(true);
-    setDocumentError("");
-    setDocumentStatus("");
+    setTreeSaveBusy(true);
+    setTreeError("");
+    setTreeStatus("");
     try {
-      const response = await saveKnowledgeDocument(selectedDocType, documentContent);
-      setDocumentDetail(response.document);
-      setDocumentContent(response.document.content);
-      setDocuments((current) =>
-        current.map((item) => (item.doc_type === response.document.doc_type ? response.document : item)),
-      );
-      setDocumentStatus(`已保存 ${formatDateTime(response.document.updated_at)}`);
+      const response = await updateKnowledgeTreeNode(selectedNode.id, treeContent);
+      setTree(response.tree);
+      setSelectedNode(response.node);
+      setSelectedNodeId(response.node.id);
+      setTreeContent(response.node.content);
+      setTreeStatus("节点已保存");
     } catch (error) {
-      setDocumentError(error instanceof Error ? error.message : "保存知识文档失败");
+      setTreeError(error instanceof Error ? error.message : "保存知识节点失败");
     } finally {
-      setDocumentSaveBusy(false);
+      setTreeSaveBusy(false);
     }
   }
 
-  const documentDirty = Boolean(documentDetail && documentContent !== documentDetail.content);
+  async function handleTreeCreate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedNode || !newNodeTitle.trim()) {
+      return;
+    }
+    setTreeSaveBusy(true);
+    setTreeError("");
+    setTreeStatus("");
+    try {
+      const response = await createKnowledgeTreeNode({
+        parent_id: selectedNode.id,
+        title: newNodeTitle,
+        kind: newNodeKind,
+        content: newNodeContent || "- 新知识节点\n",
+      });
+      setTree(response.tree);
+      setSelectedNode(response.node);
+      setSelectedNodeId(response.node.id);
+      setTreeContent(response.node.content);
+      setExpandedNodeIds((current) => new Set([...current, selectedNode.id]));
+      setNewNodeTitle("");
+      setNewNodeContent("");
+      setTreeStatus("节点已新增");
+    } catch (error) {
+      setTreeError(error instanceof Error ? error.message : "新增知识节点失败");
+    } finally {
+      setTreeSaveBusy(false);
+    }
+  }
+
+  async function handleTreeDelete() {
+    if (!selectedNode?.editable) {
+      return;
+    }
+    setTreeSaveBusy(true);
+    setTreeError("");
+    setTreeStatus("");
+    try {
+      await deleteKnowledgeTreeNode(selectedNode.id);
+      const response = await fetchKnowledgeTree();
+      setTree(response.tree);
+      const nextNode = findFirstNode(response.tree, (node) => node.editable) ?? findFirstNode(response.tree, () => true);
+      setSelectedNodeId(nextNode?.id ?? "");
+      setTreeStatus("节点已删除");
+    } catch (error) {
+      setTreeError(error instanceof Error ? error.message : "删除知识节点失败");
+    } finally {
+      setTreeSaveBusy(false);
+    }
+  }
+
+  const visibleTree = filterTree(tree, treeSearch);
+  const treeDirty = Boolean(selectedNode && treeContent !== selectedNode.content);
+  const selectedNodeWritable = Boolean(selectedNode?.editable && selectedNode.source_file && selectedNode.section_id);
 
   return (
     <div className="app-shell">
-      <div className="ambient ambient-left" />
-      <div className="ambient ambient-right" />
-
       <header className="hero">
         <div className="hero-copy">
           <p className="eyebrow">Knowledge Agent Console</p>
-          <h1>让 Text2Cypher 的知识获取和修复回写都落在一个可见界面里。</h1>
+          <h1>管理 Text2Cypher 生成所需的语义知识、修复建议和 Prompt 上下文。</h1>
           <p className="hero-text">
-            左侧直接生成给 Cypher agent 使用的知识提示词，右侧把修复建议写回知识文档，并用接近 git diff 的方式检查实际变更。
+            以业务对象为中心维护知识树，保留 schema 只读边界，并把每次编辑写回可审计的知识文件。
           </p>
         </div>
-
-        <aside className="hero-aside">
-          <div className="signal">
-            <span className="signal-label">Knowledge Sources</span>
-            <strong>Schema + Syntax + Prompt + Few-shot + Business</strong>
-          </div>
-          <div className="signal">
-            <span className="signal-label">Repair Output</span>
-            <strong>Document / Section / Before / After</strong>
-          </div>
-        </aside>
       </header>
 
       <main className="workspace">
@@ -261,7 +342,7 @@ export default function App() {
                   );
                 })}
               </div>
-              <p className="field-hint">`schema` 不会出现在这里，因为它是只读来源，不允许被界面改写。</p>
+              <p className="field-hint">schema 是只读来源，不会被 repair 直接改写。</p>
             </div>
 
             <label className="field">
@@ -301,78 +382,130 @@ export default function App() {
           </div>
         </section>
 
-        <section className="surface surface-editor">
-          <div className="surface-header editor-header">
+        <section className="knowledge-console">
+          <div className="console-toolbar">
             <div>
-              <p className="surface-kicker">03 · 知识展示与编辑</p>
-              <h2>查看全部知识文档，直接修改可编辑知识</h2>
+              <p className="surface-kicker">03 · 知识树管理</p>
+              <h2>按业务对象维护知识关系</h2>
             </div>
             <div className="editor-status">
-              {documentBusy ? "读取中" : documentDirty ? "有未保存修改" : documentDetail?.editable ? "已同步" : "只读"}
+              {treeBusy ? "读取中" : treeDirty ? "有未保存修改" : selectedNode?.editable ? "已同步" : "只读"}
             </div>
           </div>
 
-          <div className="knowledge-editor-layout">
-            <nav className="document-list" aria-label="Knowledge documents">
-              {documents.map((document) => {
-                const active = document.doc_type === selectedDocType;
-                return (
-                  <button
-                    key={document.doc_type}
-                    type="button"
-                    className={`document-tab ${active ? "document-tab-active" : ""}`}
-                    onClick={() => setSelectedDocType(document.doc_type)}
-                  >
-                    <span>
-                      <strong>{document.title}</strong>
-                      <small>{document.filename}</small>
-                    </span>
-                    <em>{document.editable ? "可编辑" : "只读"}</em>
-                  </button>
-                );
-              })}
-            </nav>
+          <div className="tree-manager">
+            <aside className="tree-panel">
+              <div className="tree-search-row">
+                <input
+                  value={treeSearch}
+                  onChange={(event) => setTreeSearch(event.target.value)}
+                  placeholder="搜索对象、路径、示例"
+                />
+              </div>
+              <div className="tree-list">
+                {visibleTree.map((node) => (
+                  <TreeNodeView
+                    key={node.id}
+                    node={node}
+                    depth={0}
+                    expandedNodeIds={expandedNodeIds}
+                    selectedNodeId={selectedNodeId}
+                    onToggle={toggleExpanded}
+                    onSelect={setSelectedNodeId}
+                  />
+                ))}
+              </div>
+            </aside>
 
-            <div className="document-editor">
-              <div className="document-toolbar">
+            <section className="node-detail">
+              <div className="node-detail-header">
                 <div>
-                  <span className="document-title">{documentDetail?.title ?? "Knowledge Document"}</span>
-                  <span className="document-meta">
-                    {documentDetail
-                      ? `${documentDetail.filename} · ${documentDetail.size} bytes · ${formatDateTime(documentDetail.updated_at)}`
-                      : "等待选择文档"}
-                  </span>
+                  <span className="node-kind">{selectedNode?.kind ?? "knowledge"}</span>
+                  <h3>{selectedNode?.title ?? "选择一个知识节点"}</h3>
+                  <p>
+                    {selectedNode
+                      ? `${selectedNode.source_file ?? "logical tree"}${
+                          selectedNode.section_id ? ` · ${selectedNode.section_id}` : ""
+                        }`
+                      : "从左侧知识树选择对象、路径或示例。"}
+                  </p>
                 </div>
-                {documentDetail?.editable ? (
-                  <button
-                    className="primary-action document-save"
-                    type="button"
-                    disabled={!documentDirty || documentSaveBusy}
-                    onClick={handleDocumentSave}
-                  >
-                    {documentSaveBusy ? "保存中..." : "保存知识"}
-                  </button>
-                ) : (
-                  <span className="readonly-badge">Schema 只读</span>
-                )}
+                {selectedNode ? (
+                  <span className={`node-state ${selectedNodeWritable ? "node-state-editable" : "node-state-readonly"}`}>
+                    {selectedNodeWritable ? "可编辑" : selectedNode.kind === "concept" ? "容器" : "只读"}
+                  </span>
+                ) : null}
               </div>
 
-              {documentError ? <p className="error-banner">{documentError}</p> : null}
-              {documentStatus ? <p className="success-banner">{documentStatus}</p> : null}
+              {treeError ? <p className="error-banner">{treeError}</p> : null}
+              {treeStatus ? <p className="success-banner">{treeStatus}</p> : null}
 
-              {documentDetail?.editable ? (
+              {selectedNode ? (
+                <div className="node-meta-grid">
+                  <span>对象：{selectedNode.concept ?? "无"}</span>
+                  <span>类型：{selectedNode.kind}</span>
+                  <span>来源：{selectedNode.source_file ?? "派生节点"}</span>
+                  <span>写回：{selectedNode.section_id ?? "不写回"}</span>
+                </div>
+              ) : null}
+
+              {selectedNodeWritable ? (
                 <textarea
-                  className="knowledge-document-textarea"
-                  value={documentContent}
-                  onChange={(event) => setDocumentContent(event.target.value)}
+                  className="node-editor"
+                  value={treeContent}
+                  onChange={(event) => setTreeContent(event.target.value)}
                   spellCheck={false}
                 />
               ) : (
-                <pre className="knowledge-document-viewer">
-                  {documentContent || (documentBusy ? "正在读取知识文档..." : "选择 schema 可查看只读内容。")}
-                </pre>
+                <pre className="node-viewer">{treeContent || "只读节点内容会显示在这里。"}</pre>
               )}
-            </div>
+
+              <form className="node-create" onSubmit={handleTreeCreate}>
+                <div className="node-create-fields">
+                  <input
+                    value={newNodeTitle}
+                    onChange={(event) => setNewNodeTitle(event.target.value)}
+                    placeholder="新增子节点标题"
+                    disabled={!selectedNode}
+                  />
+                  <select
+                    value={newNodeKind}
+                    onChange={(event) => setNewNodeKind(event.target.value as KnowledgeTreeNodeKind)}
+                    disabled={!selectedNode}
+                  >
+                    {CREATABLE_NODE_KINDS.map((kind) => (
+                      <option key={kind.value} value={kind.value}>
+                        {kind.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <textarea
+                  value={newNodeContent}
+                  onChange={(event) => setNewNodeContent(event.target.value)}
+                  placeholder="新增节点内容，保存后写回对应知识文件"
+                  disabled={!selectedNode}
+                  rows={3}
+                />
+                <button type="submit" className="secondary-action" disabled={!selectedNode || !newNodeTitle.trim() || treeSaveBusy}>
+                  新增子节点
+                </button>
+              </form>
+
+              <div className="node-actions">
+                <button type="button" className="secondary-action" disabled={!selectedNodeWritable || treeSaveBusy} onClick={handleTreeDelete}>
+                  删除节点
+                </button>
+                <button
+                  type="button"
+                  className="primary-action document-save"
+                  disabled={!selectedNodeWritable || !treeDirty || treeSaveBusy}
+                  onClick={handleTreeSave}
+                >
+                  {treeSaveBusy ? "保存中..." : "保存节点"}
+                </button>
+              </div>
+            </section>
           </div>
         </section>
       </main>
@@ -380,9 +513,88 @@ export default function App() {
   );
 }
 
-function formatDateTime(value: string): string {
-  if (!value) {
-    return "未知时间";
+function TreeNodeView({
+  node,
+  depth,
+  expandedNodeIds,
+  selectedNodeId,
+  onToggle,
+  onSelect,
+}: {
+  node: KnowledgeTreeNode;
+  depth: number;
+  expandedNodeIds: Set<string>;
+  selectedNodeId: string;
+  onToggle: (nodeId: string) => void;
+  onSelect: (nodeId: string) => void;
+}) {
+  const expanded = expandedNodeIds.has(node.id);
+  const hasChildren = node.children.length > 0;
+  return (
+    <div>
+      <div
+        className={`tree-row ${selectedNodeId === node.id ? "tree-row-active" : ""}`}
+        style={{ paddingLeft: `${12 + depth * 18}px` }}
+      >
+        <button
+          type="button"
+          className="tree-expander"
+          onClick={() => (hasChildren ? onToggle(node.id) : onSelect(node.id))}
+          aria-label={hasChildren ? "Toggle node" : "Select node"}
+        >
+          {hasChildren ? (expanded ? "▾" : "▸") : "•"}
+        </button>
+        <button type="button" className="tree-label" onClick={() => onSelect(node.id)}>
+          <span>{node.title}</span>
+          <small>{node.editable ? "编辑" : "只读"}</small>
+        </button>
+      </div>
+      {hasChildren && expanded
+        ? node.children.map((child) => (
+            <TreeNodeView
+              key={child.id}
+              node={child}
+              depth={depth + 1}
+              expandedNodeIds={expandedNodeIds}
+              selectedNodeId={selectedNodeId}
+              onToggle={onToggle}
+              onSelect={onSelect}
+            />
+          ))
+        : null}
+    </div>
+  );
+}
+
+function findFirstNode(
+  nodes: KnowledgeTreeNode[],
+  predicate: (node: KnowledgeTreeNode) => boolean,
+): KnowledgeTreeNode | null {
+  for (const node of nodes) {
+    if (predicate(node)) {
+      return node;
+    }
+    const child = findFirstNode(node.children, predicate);
+    if (child) {
+      return child;
+    }
   }
-  return new Date(value).toLocaleString();
+  return null;
+}
+
+function filterTree(nodes: KnowledgeTreeNode[], search: string): KnowledgeTreeNode[] {
+  const keyword = search.trim().toLowerCase();
+  if (!keyword) {
+    return nodes;
+  }
+  return nodes
+    .map((node) => {
+      const children = filterTree(node.children, search);
+      const matches =
+        node.title.toLowerCase().includes(keyword) ||
+        node.content_preview.toLowerCase().includes(keyword) ||
+        (node.concept ?? "").toLowerCase().includes(keyword);
+      return matches || children.length ? { ...node, children } : null;
+    })
+    .filter((node): node is KnowledgeTreeNode => Boolean(node));
 }

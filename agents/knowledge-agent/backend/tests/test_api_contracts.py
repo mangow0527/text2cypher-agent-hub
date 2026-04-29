@@ -135,3 +135,96 @@ class ApiContractTest(unittest.TestCase):
             self.assertEqual(response.status_code, 500)
             self.assertEqual(response.json()["status"], "error")
             self.assertEqual(response.json()["code"], "KNOWLEDGE_DOCUMENT_READ_ONLY")
+
+    def test_knowledge_tree_contracts(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            store = KnowledgeStore(Path(tmp_dir))
+            store.bootstrap_defaults()
+            with patch("app.entrypoints.api.main.knowledge_store", store):
+                from app.domain.knowledge.tree_service import KnowledgeTreeService
+
+                with patch("app.entrypoints.api.main.knowledge_tree_service", KnowledgeTreeService(store)):
+                    tree_response = self.client.get("/api/knowledge/tree")
+                    detail_response = self.client.get("/api/knowledge/tree/nodes/schema_label:NetworkElement")
+                    create_response = self.client.post(
+                        "/api/knowledge/tree/nodes",
+                        json={
+                            "parent_id": "concept:NetworkElement",
+                            "title": "network element alias",
+                            "kind": "business_semantic",
+                            "content": "- “设备”可以指网元。\n",
+                        },
+                    )
+                    created_id = create_response.json()["node"]["id"]
+                    created_section_id = create_response.json()["node"]["section_id"]
+                    update_response = self.client.put(
+                        f"/api/knowledge/tree/nodes/{created_id}",
+                        json={
+                            "content": f"[id: {created_section_id}]\n[concept: NetworkElement]\n[kind: business_semantic]\n- updated\n"
+                        },
+                    )
+                    delete_response = self.client.delete(f"/api/knowledge/tree/nodes/{created_id}")
+
+            self.assertEqual(tree_response.status_code, 200)
+            self.assertEqual(tree_response.json()["status"], "ok")
+            self.assertTrue(tree_response.json()["tree"])
+            self.assertEqual(detail_response.status_code, 200)
+            self.assertFalse(detail_response.json()["node"]["editable"])
+            self.assertEqual(create_response.status_code, 200)
+            self.assertEqual(create_response.json()["node"]["kind"], "business_semantic")
+            self.assertEqual(update_response.status_code, 200)
+            self.assertIn("updated", update_response.json()["node"]["content"])
+            self.assertEqual(delete_response.status_code, 200)
+            self.assertEqual(delete_response.json()["status"], "ok")
+
+    def test_knowledge_tree_rejects_schema_edit_contract(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            store = KnowledgeStore(Path(tmp_dir))
+            store.bootstrap_defaults()
+            with patch("app.entrypoints.api.main.knowledge_store", store):
+                from app.domain.knowledge.tree_service import KnowledgeTreeService
+
+                with patch("app.entrypoints.api.main.knowledge_tree_service", KnowledgeTreeService(store)):
+                    response = self.client.put(
+                        "/api/knowledge/tree/nodes/schema_label:NetworkElement",
+                        json={"content": "not allowed"},
+                    )
+
+            self.assertEqual(response.status_code, 500)
+            self.assertEqual(response.json()["status"], "error")
+            self.assertEqual(response.json()["code"], "KNOWLEDGE_TREE_NODE_READ_ONLY")
+
+    def test_knowledge_tree_rejects_duplicate_node_contract(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            store = KnowledgeStore(Path(tmp_dir))
+            store.bootstrap_defaults()
+            store.write_versioned(
+                "business_knowledge.md",
+                store.read_text("business_knowledge.md"),
+                """## Terminology Mapping
+
+[id: network_element_alias]
+[concept: NetworkElement]
+[kind: business_semantic]
+- “网元”对应 `NetworkElement`。
+""",
+                "seed duplicate node",
+                "business_knowledge",
+            )
+            with patch("app.entrypoints.api.main.knowledge_store", store):
+                from app.domain.knowledge.tree_service import KnowledgeTreeService
+
+                with patch("app.entrypoints.api.main.knowledge_tree_service", KnowledgeTreeService(store)):
+                    response = self.client.post(
+                        "/api/knowledge/tree/nodes",
+                        json={
+                            "parent_id": "concept:NetworkElement",
+                            "title": "duplicate network element alias",
+                            "kind": "business_semantic",
+                            "content": "- “网元”对应 `NetworkElement`。\n",
+                        },
+                    )
+
+            self.assertEqual(response.status_code, 500)
+            self.assertEqual(response.json()["status"], "error")
+            self.assertEqual(response.json()["code"], "KNOWLEDGE_TREE_DUPLICATE_NODE")

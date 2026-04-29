@@ -256,7 +256,7 @@ class QuestionService:
             cypher_normalized=normalize_cypher(sample.candidate.cypher),
             query_types=sample.candidate.query_types,
             difficulty=sample.classified_difficulty or sample.candidate.difficulty,
-            answer=sample.result_signature.result_preview,
+            answer=sample.result_signature.result_rows or sample.result_signature.result_preview,
             validation=sample.validation,
             result_signature=sample.result_signature,
             split="silver",

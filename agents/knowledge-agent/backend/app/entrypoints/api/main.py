@@ -12,13 +12,20 @@ from app.config import settings
 from app.domain.knowledge.prompt_service import PromptService
 from app.domain.knowledge.repair_workflow_service import RepairWorkflowService
 from app.domain.knowledge.repair_service import RepairService
+from app.domain.knowledge.tree_service import KnowledgeTreeService
 from app.domain.models import (
     ApplyRepairRequest,
     ApplyRepairResponse,
+    CreateKnowledgeTreeNodeRequest,
     KnowledgeDocumentDetailResponse,
     KnowledgeDocumentsResponse,
+    KnowledgeTreeMutationResponse,
+    KnowledgeTreeNodeDetailResponse,
+    KnowledgeTreeResponse,
     PromptPackageRequest,
     PromptPackageResponse,
+    StatusResponse,
+    UpdateKnowledgeTreeNodeRequest,
     UpdateKnowledgeDocumentRequest,
     UpdateKnowledgeDocumentResponse,
 )
@@ -42,6 +49,7 @@ app.add_middleware(
 
 knowledge_store = KnowledgeStore()
 knowledge_store.bootstrap_defaults()
+knowledge_tree_service = KnowledgeTreeService(knowledge_store)
 prompt_service = PromptService(knowledge_store)
 repair_service = RepairService(knowledge_store, ModelGateway(), module_logs=module_logs)
 qa_redispatch_gateway = QARedispatchGateway(module_logs=module_logs)
@@ -275,3 +283,38 @@ def update_knowledge_document(doc_type: str, request: UpdateKnowledgeDocumentReq
         code = "KNOWLEDGE_DOCUMENT_READ_ONLY" if "read-only" in message else "KNOWLEDGE_DOCUMENT_NOT_FOUND"
         raise AppError(code, message) from exc
     return UpdateKnowledgeDocumentResponse(status="ok", document=document)
+
+
+@app.get("/api/knowledge/tree", response_model=KnowledgeTreeResponse)
+def get_knowledge_tree() -> KnowledgeTreeResponse:
+    return KnowledgeTreeResponse(status="ok", tree=knowledge_tree_service.get_tree())
+
+
+@app.get("/api/knowledge/tree/nodes/{node_id:path}", response_model=KnowledgeTreeNodeDetailResponse)
+def get_knowledge_tree_node(node_id: str) -> KnowledgeTreeNodeDetailResponse:
+    node = knowledge_tree_service.get_node_detail(node_id)
+    return KnowledgeTreeNodeDetailResponse(status="ok", node=node)
+
+
+@app.put("/api/knowledge/tree/nodes/{node_id:path}", response_model=KnowledgeTreeMutationResponse)
+def update_knowledge_tree_node(node_id: str, request: UpdateKnowledgeTreeNodeRequest) -> KnowledgeTreeMutationResponse:
+    node = knowledge_tree_service.update_node(node_id, request.content)
+    return KnowledgeTreeMutationResponse(status="ok", node=node, tree=knowledge_tree_service.get_tree())
+
+
+@app.post("/api/knowledge/tree/nodes", response_model=KnowledgeTreeMutationResponse)
+def create_knowledge_tree_node(request: CreateKnowledgeTreeNodeRequest) -> KnowledgeTreeMutationResponse:
+    node = knowledge_tree_service.create_node(
+        parent_id=request.parent_id,
+        title=request.title,
+        kind=request.kind,
+        content=request.content,
+        concept=request.concept,
+    )
+    return KnowledgeTreeMutationResponse(status="ok", node=node, tree=knowledge_tree_service.get_tree())
+
+
+@app.delete("/api/knowledge/tree/nodes/{node_id:path}", response_model=StatusResponse)
+def delete_knowledge_tree_node(node_id: str) -> StatusResponse:
+    knowledge_tree_service.delete_node(node_id)
+    return StatusResponse(status="ok")

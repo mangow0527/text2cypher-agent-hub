@@ -65,6 +65,33 @@ export interface KnowledgeDocumentDetail extends KnowledgeDocumentSummary {
   content: string;
 }
 
+export type KnowledgeTreeNodeKind =
+  | "group"
+  | "concept"
+  | "schema_label"
+  | "business_semantic"
+  | "relation_path"
+  | "few_shot"
+  | "rule";
+
+export interface KnowledgeTreeNode {
+  id: string;
+  parent_id: string | null;
+  title: string;
+  kind: KnowledgeTreeNodeKind;
+  concept: string | null;
+  source_file: string | null;
+  section_id: string | null;
+  editable: boolean;
+  content_preview: string;
+  children: KnowledgeTreeNode[];
+}
+
+export interface KnowledgeTreeNodeDetail extends KnowledgeTreeNode {
+  content: string;
+  warning: string | null;
+}
+
 export interface KnowledgeDocumentsResponse {
   status: "ok";
   documents: KnowledgeDocumentSummary[];
@@ -73,6 +100,22 @@ export interface KnowledgeDocumentsResponse {
 export interface UpdateKnowledgeDocumentResponse {
   status: "ok";
   document: KnowledgeDocumentDetail;
+}
+
+export interface KnowledgeTreeResponse {
+  status: "ok";
+  tree: KnowledgeTreeNode[];
+}
+
+export interface KnowledgeTreeNodeDetailResponse {
+  status: "ok";
+  node: KnowledgeTreeNodeDetail;
+}
+
+export interface KnowledgeTreeMutationResponse {
+  status: "ok";
+  node: KnowledgeTreeNodeDetail;
+  tree: KnowledgeTreeNode[];
 }
 
 export async function fetchPromptPackage(payload: {
@@ -118,6 +161,50 @@ export async function saveKnowledgeDocument(
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content }),
+  });
+  return parseJsonOrThrow(response);
+}
+
+export async function fetchKnowledgeTree(): Promise<KnowledgeTreeResponse> {
+  const response = await fetch(`${API_BASE}/api/knowledge/tree`);
+  return parseJsonOrThrow(response);
+}
+
+export async function fetchKnowledgeTreeNode(nodeId: string): Promise<KnowledgeTreeNodeDetailResponse> {
+  const response = await fetch(`${API_BASE}/api/knowledge/tree/nodes/${encodeURIComponent(nodeId)}`);
+  return parseJsonOrThrow(response);
+}
+
+export async function updateKnowledgeTreeNode(
+  nodeId: string,
+  content: string,
+): Promise<KnowledgeTreeMutationResponse> {
+  const response = await fetch(`${API_BASE}/api/knowledge/tree/nodes/${encodeURIComponent(nodeId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
+  });
+  return parseJsonOrThrow(response);
+}
+
+export async function createKnowledgeTreeNode(payload: {
+  parent_id: string;
+  title: string;
+  kind: KnowledgeTreeNodeKind;
+  content: string;
+  concept?: string | null;
+}): Promise<KnowledgeTreeMutationResponse> {
+  const response = await fetch(`${API_BASE}/api/knowledge/tree/nodes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return parseJsonOrThrow(response);
+}
+
+export async function deleteKnowledgeTreeNode(nodeId: string): Promise<{ status: "ok" }> {
+  const response = await fetch(`${API_BASE}/api/knowledge/tree/nodes/${encodeURIComponent(nodeId)}`, {
+    method: "DELETE",
   });
   return parseJsonOrThrow(response);
 }

@@ -80,15 +80,19 @@ const userProgressLabel: Record<string, string> = {
 
 export function JobDetail({
   job,
+  onRegenerate,
   onRedispatch,
   onDelete,
   onClose,
+  regenerateBusy,
   dispatchBusy,
 }: {
   job?: JobRecord;
+  onRegenerate: (jobId: string) => Promise<void>;
   onRedispatch: (jobId: string) => Promise<void>;
   onDelete: (jobId: string) => Promise<void>;
   onClose: () => void;
+  regenerateBusy: boolean;
   dispatchBusy: boolean;
 }) {
   if (!job) {
@@ -109,6 +113,7 @@ export function JobDetail({
   const finalCount = Number(selection?.final_count ?? job.metrics.sample_count ?? 0);
   const hasReleases = Boolean(job.artifacts.releases);
   const hasReport = Boolean(job.artifacts.report);
+  const canRegenerate = job.status === "failed";
   const coveredLevels = new Set(coverage?.covered_levels || []);
   const allLevels = coverage?.all_levels?.length ? coverage.all_levels : Array.from({ length: 8 }, (_, index) => `L${index + 1}`);
   const coveragePercent = Math.round((coveredLevels.size / Math.max(allLevels.length, 1)) * 100);
@@ -196,9 +201,14 @@ export function JobDetail({
       <div className="result-block">
         <div className="result-block-head">
           <h4>批次操作</h4>
-          <p>下载最终结果，或重新发送这一批 QA。</p>
+          <p>{canRegenerate ? "重新生成失败任务，或查看已有产物。" : "下载最终结果，或重新发送这一批 QA。"}</p>
         </div>
         <div className="result-action-row">
+          {canRegenerate ? (
+            <button className="button primary" type="button" disabled={regenerateBusy} onClick={() => void onRegenerate(job.job_id)}>
+              {regenerateBusy ? "重新生成中..." : "重新生成"}
+            </button>
+          ) : null}
           {hasReleases ? (
             <a className="button secondary" href={artifactUrl(job.job_id, "releases")} target="_blank" rel="noreferrer">
               下载 QA 结果
@@ -217,9 +227,11 @@ export function JobDetail({
               下载报告
             </button>
           )}
-          <button className="button primary" type="button" disabled={dispatchBusy} onClick={() => void onRedispatch(job.job_id)}>
-            {dispatchBusy ? "重新发送中..." : "重新发送本批 QA"}
-          </button>
+          {hasReleases ? (
+            <button className="button primary" type="button" disabled={dispatchBusy} onClick={() => void onRedispatch(job.job_id)}>
+              {dispatchBusy ? "重新发送中..." : "重新发送本批 QA"}
+            </button>
+          ) : null}
           <button className="button tertiary danger" type="button" onClick={() => void onDelete(job.job_id)}>
             删除本批次
           </button>

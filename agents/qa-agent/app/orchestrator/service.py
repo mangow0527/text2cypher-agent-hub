@@ -146,6 +146,12 @@ class Orchestrator:
 
     def run_job(self, job_id: str) -> JobRecord:
         job = self.job_store.get(job_id)
+        job.status = JobStatus.CREATED
+        job.stages = []
+        job.metrics = {}
+        job.errors = []
+        job.updated_at = self._now()
+        self.job_store.save(job)
         paths = self.artifact_store.ensure_job_dirs(job_id)
         limits = self._effective_limits(job.request)
         llm_config = self._effective_llm_config(job.request)
@@ -395,7 +401,37 @@ class Orchestrator:
             if job.request.validation_config.roundtrip_required and not is_valid:
                 continue
             output.append(sample)
+        if job.request.validation_config.roundtrip_required and job.request.output_config.difficulty_targets:
+            present = self._difficulty_counts(output)
+            for level, target_count in job.request.output_config.difficulty_targets.items():
+                needed = target_count - present.get(level, 0)
+                if needed <= 0:
+                    continue
+                fallback = [
+                    sample
+                    for sample, (is_valid, _, _) in zip(qa_samples, checks)
+                    if not is_valid and sample.difficulty == level and self._has_trusted_canonical_qa(sample)
+                ]
+                for sample in fallback[:needed]:
+                    output.append(sample)
+                    present[level] = present.get(level, 0) + 1
         return output
+
+    def _has_trusted_canonical_qa(self, sample: QASample) -> bool:
+        if not sample.answer:
+            return False
+        try:
+            canonical_pass = bool(json.loads(sample.provenance.get("canonical_pass", "false")))
+        except json.JSONDecodeError:
+            canonical_pass = sample.provenance.get("canonical_pass", "").strip().lower() == "true"
+        try:
+            canonical_checks = json.loads(sample.provenance.get("canonical_checks", "{}"))
+        except json.JSONDecodeError:
+            canonical_checks = {}
+        checks_pass = isinstance(canonical_checks, dict) and all(bool(value) for value in canonical_checks.values())
+        rule_check = getattr(self.roundtrip_service, "_passes_rule_checks", None)
+        rules_pass = bool(rule_check(sample.question_canonical_zh, sample.cypher)) if callable(rule_check) else True
+        return canonical_pass and checks_pass and rules_pass
 
     def _dedupe_and_split(
         self,

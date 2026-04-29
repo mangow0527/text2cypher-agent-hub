@@ -217,6 +217,7 @@ class ResultSignature(BaseModel):
     column_types: List[str] = Field(default_factory=list)
     row_count: int = 0
     result_preview: List[Dict[str, Any]] = Field(default_factory=list)
+    result_rows: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class ValidatedSample(BaseModel):
