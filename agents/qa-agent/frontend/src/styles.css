@@ -594,6 +594,107 @@ input {
   color: var(--muted);
 }
 
+.difficulty-targets-box {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+
+.difficulty-targets-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.difficulty-targets-head div {
+  display: grid;
+  gap: 4px;
+}
+
+.difficulty-targets-head span,
+.difficulty-target-field span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.difficulty-target-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.difficulty-target-grid.disabled {
+  opacity: 0.72;
+}
+
+.difficulty-target-field {
+  display: grid;
+  gap: 6px;
+}
+
+.difficulty-target-input {
+  display: grid;
+  grid-template-columns: minmax(46px, 1fr) 28px auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.difficulty-target-input .compact-input {
+  min-width: 46px;
+  padding: 8px 6px;
+  text-align: center;
+  font-weight: 700;
+}
+
+.quantity-stepper {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 2px;
+  height: 42px;
+}
+
+.quantity-stepper button {
+  display: grid;
+  place-items: center;
+  min-width: 28px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.quantity-stepper button:hover:not(:disabled) {
+  border-color: #aecbfa;
+  color: var(--blue);
+}
+
+.quantity-stepper button:disabled {
+  color: #b6c0ce;
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.difficulty-target-input em {
+  color: var(--muted);
+  font-size: 13px;
+  font-style: normal;
+}
+
+.field-error {
+  color: var(--red);
+  font-size: 13px;
+}
+
 .meta-row,
 .form-footer,
 .detail-grid,
@@ -1279,6 +1380,10 @@ input {
 
   .difficulty-row {
     grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .difficulty-target-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .difficulty-count {

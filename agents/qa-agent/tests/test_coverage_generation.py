@@ -7,8 +7,9 @@ import json
 from app.domain.coverage.service import CoverageService
 from app.domain.difficulty.service import DifficultyService
 from app.domain.generation.service import GenerationService
-from app.domain.models import CanonicalSchemaSpec, CypherCandidate, GenerationLimits, ModelConfig, ValidationConfig
+from app.domain.models import CanonicalSchemaSpec, CypherCandidate, GenerationLimits, ModelConfig, QASample, ValidationConfig
 from app.domain.validation.service import ValidationService
+from app.orchestrator.service import Orchestrator
 
 
 class CoverageLLMGateway:
@@ -74,6 +75,90 @@ class CoverageGenerationTests(unittest.TestCase):
         self.assertTrue(all(spec.intent for spec in specs))
         self.assertTrue(all(spec.answer_type for spec in specs))
         self.assertTrue(all(spec.bindings.get("node") for spec in specs))
+
+    def test_coverage_specs_follow_requested_difficulty_targets(self) -> None:
+        specs = CoverageService().build_specs(
+            schema=self.schema,
+            limits=GenerationLimits(max_skeletons=16, max_candidates_per_skeleton=1, max_variants_per_question=1),
+            target_qa_count=8,
+            difficulty_targets={"L1": 2, "L4": 3, "L8": 1},
+            diversity_key="job_targeted_difficulty",
+        )
+
+        self.assertEqual([spec.target_difficulty for spec in specs], ["L1", "L1", "L4", "L4", "L4", "L8"])
+        self.assertEqual(len({spec.template_id for spec in specs if spec.target_difficulty == "L4"}), 2)
+
+    def test_output_config_uses_difficulty_target_sum_as_target_count(self) -> None:
+        from app.domain.models import JobRequest
+
+        request = JobRequest(output_config={"target_qa_count": 10, "difficulty_targets": {"L2": 2, "L7": 3, "L8": 0}})
+
+        self.assertEqual(request.output_config.target_qa_count, 5)
+        self.assertEqual(request.output_config.difficulty_targets, {"L2": 2, "L7": 3})
+
+    def test_release_selection_follows_requested_difficulty_targets(self) -> None:
+        samples = [
+            self._qa_sample("qa_l1_a", "L1"),
+            self._qa_sample("qa_l1_b", "L1"),
+            self._qa_sample("qa_l2_a", "L2"),
+            self._qa_sample("qa_l8_a", "L8"),
+            self._qa_sample("qa_l8_b", "L8"),
+            self._qa_sample("qa_l4_extra", "L4"),
+        ]
+
+        selected, meta = Orchestrator()._select_release_batch(
+            samples,
+            {"questions": set(), "cyphers": set()},
+            target_qa_count=5,
+            difficulty_targets={"L1": 2, "L2": 1, "L8": 2},
+        )
+
+        self.assertEqual(meta["selected_count"], 5)
+        self.assertEqual(meta["difficulty_shortfalls"], {})
+        self.assertEqual(
+            {level: sum(1 for sample in selected if sample.difficulty == level) for level in {"L1", "L2", "L8"}},
+            {"L1": 2, "L2": 1, "L8": 2},
+        )
+
+    def test_release_selection_reports_difficulty_shortfalls(self) -> None:
+        selected, meta = Orchestrator()._select_release_batch(
+            [self._qa_sample("qa_l1_a", "L1"), self._qa_sample("qa_l8_a", "L8")],
+            {"questions": set(), "cyphers": set()},
+            target_qa_count=3,
+            difficulty_targets={"L1": 2, "L8": 1},
+        )
+
+        self.assertEqual(len(selected), 2)
+        self.assertEqual(meta["difficulty_shortfalls"], {"L1": 1})
+
+    def _qa_sample(self, sample_id: str, difficulty: str) -> QASample:
+        return QASample.model_validate(
+            {
+                "id": sample_id,
+                "question_canonical_zh": f"{difficulty} 样例问题 {sample_id}？",
+                "question_variants_zh": [f"{difficulty} 样例问题 {sample_id}？"],
+                "question_variant_styles": ["natural_short"],
+                "cypher": f"MATCH (n) RETURN '{sample_id}' AS id",
+                "cypher_normalized": f"match (n) return '{sample_id}' as id",
+                "query_types": ["LOOKUP"],
+                "difficulty": difficulty,
+                "answer": [{"id": sample_id}],
+                "validation": {
+                    "syntax": True,
+                    "schema": True,
+                    "type_value": True,
+                    "query_type_valid": True,
+                    "family_valid": True,
+                    "runtime": True,
+                    "result_sanity": True,
+                    "difficulty_valid": True,
+                    "roundtrip_check": True,
+                },
+                "result_signature": {"row_count": 1, "result_preview": [{"id": sample_id}]},
+                "split": "silver",
+                "provenance": {"structure_family": "lookup_node_return", "generation_mode": "template"},
+            }
+        )
 
     def test_generation_builds_candidates_directly_from_coverage_specs(self) -> None:
         service = GenerationService()

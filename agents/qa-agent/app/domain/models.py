@@ -5,7 +5,7 @@ from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 def utc_now() -> str:
@@ -87,6 +87,32 @@ class OutputConfig(BaseModel):
     split_seed_limit: int = 10
     split_gold_limit: int = 20
     target_qa_count: int = Field(default=10, ge=1, le=50)
+    difficulty_targets: Dict[str, int] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def normalize_difficulty_targets(self) -> "OutputConfig":
+        if not self.difficulty_targets:
+            return self
+        allowed_levels = {f"L{level}" for level in range(1, 9)}
+        normalized: Dict[str, int] = {}
+        for raw_level, raw_count in self.difficulty_targets.items():
+            level = str(raw_level).upper()
+            if level not in allowed_levels:
+                raise ValueError(f"Unsupported difficulty level: {raw_level}")
+            count = int(raw_count)
+            if count < 0:
+                raise ValueError(f"Difficulty target for {level} must be >= 0")
+            if count > 0:
+                normalized[level] = count
+        total = sum(normalized.values())
+        if total <= 0:
+            self.difficulty_targets = {}
+            return self
+        if total > 50:
+            raise ValueError("Total difficulty target count must be <= 50")
+        self.difficulty_targets = normalized
+        self.target_qa_count = total
+        return self
 
 
 class JobRequest(BaseModel):

@@ -133,6 +133,7 @@ export function App() {
     tugraphPassword: string;
     tugraphGraph: string;
     targetQaCount: number;
+    difficultyTargets: Record<string, number>;
   }) {
     setJobBusy(true);
     setJobMessage("正在创建任务...");
@@ -153,6 +154,7 @@ export function App() {
         },
         output_config: {
           target_qa_count: payload.targetQaCount,
+          difficulty_targets: payload.difficultyTargets,
         },
       };
 
@@ -211,6 +213,7 @@ export function App() {
     tugraphPassword: string;
     tugraphGraph: string;
     targetQaCount: number;
+    difficultyTargets: Record<string, number>;
   }) {
     const schemaPayload: {
       schema_input?: unknown;

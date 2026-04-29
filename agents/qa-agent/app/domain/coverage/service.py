@@ -104,6 +104,7 @@ class CoverageService:
         schema: CanonicalSchemaSpec,
         limits: GenerationLimits,
         target_qa_count: int,
+        difficulty_targets: dict[str, int] | None = None,
         diversity_key: str | None = None,
     ) -> list[CoverageSpec]:
         if not schema.node_types:
@@ -111,6 +112,8 @@ class CoverageService:
 
         requested = min(max(target_qa_count, 1), limits.max_skeletons)
         blueprints = self._rotated_blueprints(diversity_key)
+        if difficulty_targets:
+            return self._build_targeted_specs(schema, limits, difficulty_targets, blueprints, diversity_key)
         specs: list[CoverageSpec] = []
         index = 0
         while len(specs) < requested:
@@ -135,11 +138,55 @@ class CoverageService:
             index += 1
         return specs
 
+    def _build_targeted_specs(
+        self,
+        schema: CanonicalSchemaSpec,
+        limits: GenerationLimits,
+        difficulty_targets: dict[str, int],
+        blueprints: list[dict[str, Any]],
+        diversity_key: str | None,
+    ) -> list[CoverageSpec]:
+        blueprints_by_level = {blueprint["difficulty"]: blueprint for blueprint in blueprints}
+        specs: list[CoverageSpec] = []
+        global_index = 0
+        diversity_offset = self._diversity_offset(
+            f"{diversity_key or ''}|{''.join(f'{level}:{count};' for level, count in sorted(difficulty_targets.items()))}"
+        )
+        for level in sorted(difficulty_targets, key=lambda item: int(item[1:])):
+            blueprint = blueprints_by_level.get(level)
+            if not blueprint:
+                continue
+            for level_index in range(difficulty_targets[level]):
+                if len(specs) >= limits.max_skeletons:
+                    return specs
+                template_ids = blueprint.get("template_ids") or [blueprint["template_id"]]
+                template_id = template_ids[(diversity_offset + level_index) % len(template_ids)]
+                bindings = self._build_bindings(schema, diversity_offset + global_index)
+                specs.append(
+                    CoverageSpec(
+                        intent=blueprint["intent"],
+                        operators=list(blueprint["operators"]),
+                        topology=blueprint["topology"],
+                        answer_type=blueprint["answer_type"],
+                        target_difficulty=blueprint["difficulty"],
+                        template_id=template_id,
+                        query_type=blueprint["query_type"],
+                        structure_family=blueprint["structure_family"],
+                        bindings=bindings,
+                    )
+                )
+                global_index += 1
+        return specs
+
+    def _diversity_offset(self, diversity_key: str | None) -> int:
+        if not diversity_key:
+            return 0
+        return int(hashlib.sha256(diversity_key.encode("utf-8")).hexdigest()[:8], 16)
+
     def _rotated_blueprints(self, diversity_key: str | None) -> list[dict[str, Any]]:
         if not diversity_key:
             return list(LEVEL_BLUEPRINTS)
-        digest = hashlib.sha256(diversity_key.encode("utf-8")).hexdigest()
-        start = int(digest[:8], 16) % len(LEVEL_BLUEPRINTS)
+        start = self._diversity_offset(diversity_key) % len(LEVEL_BLUEPRINTS)
         rotated = LEVEL_BLUEPRINTS[start:] + LEVEL_BLUEPRINTS[:start]
         if len(rotated) >= 8:
             first_cycle = sorted(rotated[:8], key=lambda item: int(item["difficulty"][1:]))

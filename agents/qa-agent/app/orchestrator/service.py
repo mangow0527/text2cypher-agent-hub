@@ -192,6 +192,7 @@ class Orchestrator:
                     schema=schema,
                     limits=limits,
                     target_qa_count=self._query_plan_target_count(job.request.output_config.target_qa_count, limits.max_skeletons),
+                    difficulty_targets=job.request.output_config.difficulty_targets,
                     diversity_key=diversity_key,
                 )
                 skeletons = self._run_stage(
@@ -259,6 +260,7 @@ class Orchestrator:
                     lambda current_validated=self._shortlist_validated_samples(
                         list(aggregated_validated),
                         job.request.output_config.target_qa_count,
+                        job.request.output_config.difficulty_targets,
                     ): self._select_best_by_question(
                         self._generate_questions(
                             current_validated,
@@ -294,6 +296,7 @@ class Orchestrator:
                         job.request.output_config.split_seed_limit,
                         job.request.output_config.split_gold_limit,
                         paths["releases"],
+                        job.request.output_config.difficulty_targets,
                     ),
                 )
                 if job.request.mode.value == "online" and deduped:
@@ -316,6 +319,14 @@ class Orchestrator:
             if not deduped:
                 raise NoValidQAGeneratedError(
                     f"Unable to generate any valid QA after {attempt_count} attempts for job {job_id}."
+                )
+            if job.request.output_config.difficulty_targets and not self._difficulty_targets_satisfied(
+                deduped,
+                job.request.output_config.difficulty_targets,
+            ):
+                raise NoValidQAGeneratedError(
+                    "Unable to satisfy requested difficulty distribution after "
+                    f"{attempt_count} attempts: {selection_meta.get('difficulty_shortfalls', {})}"
                 )
 
             self.artifact_store.write_jsonl(paths["releases"], [self._export_sample(item) for item in deduped])
@@ -393,10 +404,11 @@ class Orchestrator:
         seed_limit: int,
         gold_limit: int,
         release_path,
+        difficulty_targets: dict[str, int] | None = None,
     ) -> tuple[list[QASample], dict]:
         deduped = self._select_best_by_question(samples)
         history = self.release_history_store.load_signatures(exclude_paths={release_path})
-        selected, selection_meta = self._select_release_batch(deduped, history, target_qa_count)
+        selected, selection_meta = self._select_release_batch(deduped, history, target_qa_count, difficulty_targets)
         output = sorted(selected, key=self._sample_sort_key, reverse=True)
 
         for idx, sample in enumerate(output):
@@ -472,7 +484,23 @@ class Orchestrator:
             return min(validated_count, target_qa_count + 3)
         return min(validated_count, target_qa_count + 5)
 
-    def _shortlist_validated_samples(self, samples, target_qa_count: int):
+    def _shortlist_validated_samples(self, samples, target_qa_count: int, difficulty_targets: dict[str, int] | None = None):
+        if difficulty_targets:
+            selected = []
+            selected_keys = set()
+            for difficulty, count in sorted(difficulty_targets.items(), key=lambda item: int(item[0][1:])):
+                pool = [
+                    sample
+                    for sample in samples
+                    if (sample.classified_difficulty or sample.candidate.difficulty) == difficulty
+                ]
+                for sample in self._shortlist_validated_samples(pool, count + 2):
+                    key = normalize_cypher(sample.candidate.cypher)
+                    if key not in selected_keys:
+                        selected.append(sample)
+                        selected_keys.add(key)
+            return selected
+
         budget = self._validated_shortlist_budget(target_qa_count, len(samples))
         if budget >= len(samples):
             return samples
@@ -509,7 +537,13 @@ class Orchestrator:
                 by_question[key] = sample
         return list(by_question.values())
 
-    def _select_release_batch(self, samples: list[QASample], history: dict[str, set[str]], target_qa_count: int) -> tuple[list[QASample], dict]:
+    def _select_release_batch(
+        self,
+        samples: list[QASample],
+        history: dict[str, set[str]],
+        target_qa_count: int,
+        difficulty_targets: dict[str, int] | None = None,
+    ) -> tuple[list[QASample], dict]:
         if any(sample.answer for sample in samples):
             samples = [sample for sample in samples if sample.answer]
         history_questions = history.get("questions", set())
@@ -523,6 +557,37 @@ class Orchestrator:
                 repeated_pool.append(sample)
             else:
                 fresh_pool.append(sample)
+
+        if difficulty_targets:
+            selected = self._select_release_batch_by_difficulty(fresh_pool, difficulty_targets)
+            if len(selected) < target_qa_count:
+                selected_keys = {
+                    (normalize_question(sample.question_canonical_zh), normalize_cypher(sample.cypher))
+                    for sample in selected
+                }
+                fallback = [
+                    sample
+                    for sample in repeated_pool
+                    if (normalize_question(sample.question_canonical_zh), normalize_cypher(sample.cypher)) not in selected_keys
+                ]
+                selected.extend(self._select_release_batch_by_difficulty(fallback, difficulty_targets, selected))
+            selected = selected[:target_qa_count]
+            selected_counts = self._difficulty_counts(selected)
+            difficulty_shortfalls = {
+                level: count - selected_counts.get(level, 0)
+                for level, count in difficulty_targets.items()
+                if selected_counts.get(level, 0) < count
+            }
+            return selected, {
+                "requested_count": target_qa_count,
+                "candidate_count": len(samples),
+                "history_skipped_count": len(repeated_pool),
+                "fresh_candidate_count": len(fresh_pool),
+                "selected_count": len(selected),
+                "difficulty_targets": dict(difficulty_targets),
+                "selected_difficulty_counts": selected_counts,
+                "difficulty_shortfalls": difficulty_shortfalls,
+            }
 
         selected = self._greedy_diverse_pick(fresh_pool, target_qa_count)
         if len(selected) < target_qa_count:
@@ -544,6 +609,33 @@ class Orchestrator:
             "fresh_candidate_count": len(fresh_pool),
             "selected_count": min(len(selected), target_qa_count),
         }
+
+    def _select_release_batch_by_difficulty(
+        self,
+        pool: list[QASample],
+        difficulty_targets: dict[str, int],
+        seed: list[QASample] | None = None,
+    ) -> list[QASample]:
+        selected = list(seed or [])
+        output: list[QASample] = []
+        for difficulty, target_count in sorted(difficulty_targets.items(), key=lambda item: int(item[0][1:])):
+            already_selected = sum(1 for sample in selected + output if sample.difficulty == difficulty)
+            needed = max(0, target_count - already_selected)
+            if needed <= 0:
+                continue
+            candidates = [sample for sample in pool if sample.difficulty == difficulty]
+            output.extend(self._greedy_diverse_pick(candidates, needed, selected + output))
+        return output
+
+    def _difficulty_counts(self, samples: list[QASample]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for sample in samples:
+            counts[sample.difficulty] = counts.get(sample.difficulty, 0) + 1
+        return counts
+
+    def _difficulty_targets_satisfied(self, samples: list[QASample], difficulty_targets: dict[str, int]) -> bool:
+        counts = self._difficulty_counts(samples)
+        return all(counts.get(level, 0) >= count for level, count in difficulty_targets.items())
 
     def _greedy_diverse_pick(self, pool: list[QASample], target_count: int, seed: list[QASample] | None = None) -> list[QASample]:
         remaining = list(pool)

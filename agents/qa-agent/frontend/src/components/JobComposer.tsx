@@ -1,5 +1,7 @@
 import { FormEvent, useState } from "react";
 
+const DIFFICULTY_LEVELS = Array.from({ length: 8 }, (_, index) => `L${index + 1}`);
+
 const defaultSchemaPath =
   (import.meta.env.VITE_DEFAULT_SCHEMA_PATH as string | undefined)?.trim() ||
   "/root/multi-agent/qa-agent/schema.json";
@@ -39,6 +41,7 @@ export function JobComposer({
     tugraphPassword: string;
     tugraphGraph: string;
     targetQaCount: number;
+    difficultyTargets: Record<string, number>;
   }) => Promise<void>;
   onPreflight: (payload: {
     schemaSourceType: "inline" | "file" | "url";
@@ -51,6 +54,7 @@ export function JobComposer({
     tugraphPassword: string;
     tugraphGraph: string;
     targetQaCount: number;
+    difficultyTargets: Record<string, number>;
   }) => Promise<string>;
   busy: boolean;
   message: string;
@@ -66,7 +70,52 @@ export function JobComposer({
   const [tugraphPassword, setTugraphPassword] = useState("");
   const [tugraphGraph, setTugraphGraph] = useState("");
   const [targetQaCount, setTargetQaCount] = useState(10);
+  const [useDifficultyTargets, setUseDifficultyTargets] = useState(false);
+  const [difficultyTargets, setDifficultyTargets] = useState<Record<string, number>>({});
   const [preflightMessage, setPreflightMessage] = useState("");
+
+  const targetedTotal = DIFFICULTY_LEVELS.reduce((sum, level) => sum + (difficultyTargets[level] || 0), 0);
+  const difficultyTargetError =
+    useDifficultyTargets && (targetedTotal <= 0 || targetedTotal > 50)
+      ? targetedTotal <= 0
+        ? "至少配置 1 条难度数量"
+        : "难度数量合计不能超过 50 条"
+      : "";
+  const effectiveTargetQaCount = useDifficultyTargets ? targetedTotal : targetQaCount;
+  const activeDifficultyTargets = useDifficultyTargets
+    ? Object.fromEntries(Object.entries(difficultyTargets).filter(([, count]) => count > 0))
+    : {};
+
+  function updateDifficultyTarget(level: string, value: number) {
+    setDifficultyTargets((current) => ({
+      ...current,
+      [level]: Math.max(0, Math.min(50, value || 0)),
+    }));
+  }
+
+  function stepDifficultyTarget(level: string, delta: number) {
+    updateDifficultyTarget(level, (difficultyTargets[level] || 0) + delta);
+  }
+
+  function allocateDifficultyTargets(total: number) {
+    const base = Math.floor(total / DIFFICULTY_LEVELS.length);
+    const remainder = total % DIFFICULTY_LEVELS.length;
+    const next: Record<string, number> = {};
+    DIFFICULTY_LEVELS.forEach((level, index) => {
+      next[level] = base + (index < remainder ? 1 : 0);
+    });
+    return next;
+  }
+
+  function toggleDifficultyTargets() {
+    setUseDifficultyTargets((current) => {
+      const next = !current;
+      if (next && targetedTotal <= 0) {
+        setDifficultyTargets(allocateDifficultyTargets(targetQaCount));
+      }
+      return next;
+    });
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -81,7 +130,8 @@ export function JobComposer({
       tugraphUser,
       tugraphPassword,
       tugraphGraph,
-      targetQaCount,
+      targetQaCount: effectiveTargetQaCount,
+      difficultyTargets: activeDifficultyTargets,
     });
   }
 
@@ -97,7 +147,8 @@ export function JobComposer({
         tugraphUser,
         tugraphPassword,
         tugraphGraph,
-        targetQaCount,
+        targetQaCount: effectiveTargetQaCount,
+        difficultyTargets: activeDifficultyTargets,
       });
       setPreflightMessage(message);
     } catch (error) {
@@ -159,10 +210,64 @@ export function JobComposer({
               type="number"
               min={1}
               max={50}
-              value={targetQaCount}
+              value={useDifficultyTargets ? targetedTotal : effectiveTargetQaCount}
+              disabled={useDifficultyTargets}
               onChange={(event) => setTargetQaCount(Math.max(1, Math.min(50, Number(event.target.value) || 1)))}
             />
           </label>
+        </div>
+        <div className="difficulty-targets-box">
+          <div className="difficulty-targets-head">
+            <div>
+              <strong>按难度指定 QA 对数量</strong>
+              <span>{useDifficultyTargets ? `当前合计 ${targetedTotal} 条` : "开启后可直接填写每个难度的 QA 对数量"}</span>
+            </div>
+            <button
+              type="button"
+              className={useDifficultyTargets ? "segment active" : "segment"}
+              onClick={toggleDifficultyTargets}
+            >
+              {useDifficultyTargets ? "已开启" : "开启"}
+            </button>
+          </div>
+          <div className={useDifficultyTargets ? "difficulty-target-grid" : "difficulty-target-grid disabled"}>
+            {DIFFICULTY_LEVELS.map((level) => (
+              <label key={level} className="difficulty-target-field">
+                <span>{level}</span>
+                <div className="difficulty-target-input">
+                  <input
+                    className="text-input compact-input"
+                    type="number"
+                    min={0}
+                    max={50}
+                    value={difficultyTargets[level] || 0}
+                    disabled={!useDifficultyTargets}
+                    onChange={(event) => updateDifficultyTarget(level, Number(event.target.value))}
+                  />
+                  <div className="quantity-stepper" aria-label={`${level} 数量调整`}>
+                    <button
+                      type="button"
+                      aria-label={`${level} 增加 1 条`}
+                      disabled={!useDifficultyTargets || (difficultyTargets[level] || 0) >= 50}
+                      onClick={() => stepDifficultyTarget(level, 1)}
+                    >
+                      ▲
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`${level} 减少 1 条`}
+                      disabled={!useDifficultyTargets || (difficultyTargets[level] || 0) <= 0}
+                      onClick={() => stepDifficultyTarget(level, -1)}
+                    >
+                      ▼
+                    </button>
+                  </div>
+                  <em>条</em>
+                </div>
+              </label>
+            ))}
+          </div>
+          {difficultyTargetError ? <div className="field-error">{difficultyTargetError}</div> : null}
         </div>
         <div className="subsection-head">
           <p>TuGraph 连接</p>
@@ -190,17 +295,17 @@ export function JobComposer({
         </div>
         <div className="meta-row">
           <span>本批目标</span>
-          <strong>{targetQaCount} 条 QA</strong>
+          <strong>{effectiveTargetQaCount} 条 QA</strong>
         </div>
         <div className="notice">{message}</div>
         {preflightMessage ? <div className="signal-box">{preflightMessage}</div> : null}
         <div className="form-footer">
           <p>结果面板展示生成进度、难度覆盖和下载入口。</p>
           <div className="action-row">
-            <button className="button secondary" type="button" disabled={busy} onClick={() => void handlePreflight()}>
+            <button className="button secondary" type="button" disabled={busy || Boolean(difficultyTargetError)} onClick={() => void handlePreflight()}>
             预检
             </button>
-            <button className="button primary" type="submit" disabled={busy}>
+            <button className="button primary" type="submit" disabled={busy || Boolean(difficultyTargetError)}>
             {busy ? "任务运行中..." : "创建并运行"}
             </button>
           </div>

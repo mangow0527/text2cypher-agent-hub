@@ -121,6 +121,7 @@ export interface CreateJobPayload {
   };
   output_config?: {
     target_qa_count?: number;
+    difficulty_targets?: Record<string, number>;
   };
 }
 
