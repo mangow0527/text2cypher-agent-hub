@@ -51,6 +51,9 @@ class PromptServiceTest(unittest.TestCase):
 
         self.assertIn("你是一个严格的 TuGraph Text2Cypher 生成器。", prompt)
         self.assertIn("【Schema】", prompt)
+        self.assertIn("primary: id", prompt)
+        self.assertIn("id: STRING", prompt)
+        self.assertIn("optional=false", prompt)
         self.assertIn("【术语映射】", prompt)
         self.assertIn("【关键路径与过滤约束】", prompt)
         self.assertIn("【正例示例】", prompt)

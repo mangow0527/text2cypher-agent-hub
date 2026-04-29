@@ -32,6 +32,8 @@ export type KnowledgeType =
   | "system_prompt"
   | "business_knowledge";
 
+export type KnowledgeDocumentType = KnowledgeType | "schema";
+
 export interface PromptPackageResponse {
   status: "ok";
   id: string;
@@ -48,6 +50,29 @@ export interface RepairChange {
 export interface ApplyRepairResponse {
   status: "ok";
   changes: RepairChange[];
+}
+
+export interface KnowledgeDocumentSummary {
+  doc_type: KnowledgeDocumentType;
+  title: string;
+  filename: string;
+  editable: boolean;
+  size: number;
+  updated_at: string;
+}
+
+export interface KnowledgeDocumentDetail extends KnowledgeDocumentSummary {
+  content: string;
+}
+
+export interface KnowledgeDocumentsResponse {
+  status: "ok";
+  documents: KnowledgeDocumentSummary[];
+}
+
+export interface UpdateKnowledgeDocumentResponse {
+  status: "ok";
+  document: KnowledgeDocumentDetail;
 }
 
 export async function fetchPromptPackage(payload: {
@@ -71,6 +96,28 @@ export async function applyRepair(payload: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+  });
+  return parseJsonOrThrow(response);
+}
+
+export async function listKnowledgeDocuments(): Promise<KnowledgeDocumentsResponse> {
+  const response = await fetch(`${API_BASE}/api/knowledge/documents`);
+  return parseJsonOrThrow(response);
+}
+
+export async function fetchKnowledgeDocument(docType: KnowledgeDocumentType): Promise<KnowledgeDocumentDetail> {
+  const response = await fetch(`${API_BASE}/api/knowledge/documents/${docType}`);
+  return parseJsonOrThrow(response);
+}
+
+export async function saveKnowledgeDocument(
+  docType: KnowledgeDocumentType,
+  content: string,
+): Promise<UpdateKnowledgeDocumentResponse> {
+  const response = await fetch(`${API_BASE}/api/knowledge/documents/${docType}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
   });
   return parseJsonOrThrow(response);
 }

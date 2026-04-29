@@ -1,9 +1,15 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
 import { DiffViewer } from "./components/DiffViewer";
-import { applyRepair, fetchPromptPackage } from "./lib/api";
-import type { KnowledgeType, RepairChange } from "./lib/api";
+import {
+  applyRepair,
+  fetchKnowledgeDocument,
+  fetchPromptPackage,
+  listKnowledgeDocuments,
+  saveKnowledgeDocument,
+} from "./lib/api";
+import type { KnowledgeDocumentDetail, KnowledgeDocumentSummary, KnowledgeDocumentType, KnowledgeType, RepairChange } from "./lib/api";
 
 const KNOWLEDGE_TYPE_OPTIONS: Array<{ value: KnowledgeType; label: string; note: string }> = [
   { value: "cypher_syntax", label: "Cypher Syntax", note: "TuGraph 方言限制和改写规则" },
@@ -25,6 +31,78 @@ export default function App() {
   const [repairBusy, setRepairBusy] = useState(false);
   const [repairError, setRepairError] = useState("");
   const [changes, setChanges] = useState<RepairChange[]>([]);
+
+  const [documents, setDocuments] = useState<KnowledgeDocumentSummary[]>([]);
+  const [selectedDocType, setSelectedDocType] = useState<KnowledgeDocumentType>("business_knowledge");
+  const [documentDetail, setDocumentDetail] = useState<KnowledgeDocumentDetail | null>(null);
+  const [documentContent, setDocumentContent] = useState("");
+  const [documentBusy, setDocumentBusy] = useState(false);
+  const [documentSaveBusy, setDocumentSaveBusy] = useState(false);
+  const [documentError, setDocumentError] = useState("");
+  const [documentStatus, setDocumentStatus] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadDocuments() {
+      setDocumentError("");
+      try {
+        const response = await listKnowledgeDocuments();
+        if (!active) {
+          return;
+        }
+        setDocuments(response.documents);
+        if (!response.documents.some((item) => item.doc_type === selectedDocType)) {
+          const preferred = response.documents.find((item) => item.editable) ?? response.documents[0];
+          if (preferred) {
+            setSelectedDocType(preferred.doc_type);
+          }
+        }
+      } catch (error) {
+        if (active) {
+          setDocumentError(error instanceof Error ? error.message : "获取知识文档失败");
+        }
+      }
+    }
+
+    loadDocuments();
+    return () => {
+      active = false;
+    };
+  }, [selectedDocType]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadDocument() {
+      setDocumentBusy(true);
+      setDocumentError("");
+      setDocumentStatus("");
+      try {
+        const response = await fetchKnowledgeDocument(selectedDocType);
+        if (!active) {
+          return;
+        }
+        setDocumentDetail(response);
+        setDocumentContent(response.content);
+      } catch (error) {
+        if (active) {
+          setDocumentError(error instanceof Error ? error.message : "读取知识文档失败");
+          setDocumentDetail(null);
+          setDocumentContent("");
+        }
+      } finally {
+        if (active) {
+          setDocumentBusy(false);
+        }
+      }
+    }
+
+    loadDocument();
+    return () => {
+      active = false;
+    };
+  }, [selectedDocType]);
 
   async function handlePromptSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -63,6 +141,30 @@ export default function App() {
       current.includes(type) ? current.filter((item) => item !== type) : [...current, type],
     );
   }
+
+  async function handleDocumentSave() {
+    if (!documentDetail?.editable) {
+      return;
+    }
+    setDocumentSaveBusy(true);
+    setDocumentError("");
+    setDocumentStatus("");
+    try {
+      const response = await saveKnowledgeDocument(selectedDocType, documentContent);
+      setDocumentDetail(response.document);
+      setDocumentContent(response.document.content);
+      setDocuments((current) =>
+        current.map((item) => (item.doc_type === response.document.doc_type ? response.document : item)),
+      );
+      setDocumentStatus(`已保存 ${formatDateTime(response.document.updated_at)}`);
+    } catch (error) {
+      setDocumentError(error instanceof Error ? error.message : "保存知识文档失败");
+    } finally {
+      setDocumentSaveBusy(false);
+    }
+  }
+
+  const documentDirty = Boolean(documentDetail && documentContent !== documentDetail.content);
 
   return (
     <div className="app-shell">
@@ -198,7 +300,89 @@ export default function App() {
             )}
           </div>
         </section>
+
+        <section className="surface surface-editor">
+          <div className="surface-header editor-header">
+            <div>
+              <p className="surface-kicker">03 · 知识展示与编辑</p>
+              <h2>查看全部知识文档，直接修改可编辑知识</h2>
+            </div>
+            <div className="editor-status">
+              {documentBusy ? "读取中" : documentDirty ? "有未保存修改" : documentDetail?.editable ? "已同步" : "只读"}
+            </div>
+          </div>
+
+          <div className="knowledge-editor-layout">
+            <nav className="document-list" aria-label="Knowledge documents">
+              {documents.map((document) => {
+                const active = document.doc_type === selectedDocType;
+                return (
+                  <button
+                    key={document.doc_type}
+                    type="button"
+                    className={`document-tab ${active ? "document-tab-active" : ""}`}
+                    onClick={() => setSelectedDocType(document.doc_type)}
+                  >
+                    <span>
+                      <strong>{document.title}</strong>
+                      <small>{document.filename}</small>
+                    </span>
+                    <em>{document.editable ? "可编辑" : "只读"}</em>
+                  </button>
+                );
+              })}
+            </nav>
+
+            <div className="document-editor">
+              <div className="document-toolbar">
+                <div>
+                  <span className="document-title">{documentDetail?.title ?? "Knowledge Document"}</span>
+                  <span className="document-meta">
+                    {documentDetail
+                      ? `${documentDetail.filename} · ${documentDetail.size} bytes · ${formatDateTime(documentDetail.updated_at)}`
+                      : "等待选择文档"}
+                  </span>
+                </div>
+                {documentDetail?.editable ? (
+                  <button
+                    className="primary-action document-save"
+                    type="button"
+                    disabled={!documentDirty || documentSaveBusy}
+                    onClick={handleDocumentSave}
+                  >
+                    {documentSaveBusy ? "保存中..." : "保存知识"}
+                  </button>
+                ) : (
+                  <span className="readonly-badge">Schema 只读</span>
+                )}
+              </div>
+
+              {documentError ? <p className="error-banner">{documentError}</p> : null}
+              {documentStatus ? <p className="success-banner">{documentStatus}</p> : null}
+
+              {documentDetail?.editable ? (
+                <textarea
+                  className="knowledge-document-textarea"
+                  value={documentContent}
+                  onChange={(event) => setDocumentContent(event.target.value)}
+                  spellCheck={false}
+                />
+              ) : (
+                <pre className="knowledge-document-viewer">
+                  {documentContent || (documentBusy ? "正在读取知识文档..." : "选择 schema 可查看只读内容。")}
+                </pre>
+              )}
+            </div>
+          </div>
+        </section>
       </main>
     </div>
   );
+}
+
+function formatDateTime(value: string): string {
+  if (!value) {
+    return "未知时间";
+  }
+  return new Date(value).toLocaleString();
 }

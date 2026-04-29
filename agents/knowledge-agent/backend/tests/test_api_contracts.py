@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Optional
 from unittest.mock import patch
 
@@ -6,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from app.errors import AppError
 from app.entrypoints.api.main import app
+from app.storage.knowledge_store import KnowledgeStore
 
 
 class FakeRepairService:
@@ -93,3 +96,42 @@ class ApiContractTest(unittest.TestCase):
         self.assertEqual(response.json()["status"], "error")
         self.assertEqual(response.json()["code"], "REPAIR_PATCH_INVALID")
         self.assertIn("repair patch output was not valid", response.json()["message"])
+
+    def test_knowledge_document_list_read_and_update_contract(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            store = KnowledgeStore(Path(tmp_dir))
+            store.bootstrap_defaults()
+            with patch("app.entrypoints.api.main.knowledge_store", store):
+                list_response = self.client.get("/api/knowledge/documents")
+                read_response = self.client.get("/api/knowledge/documents/business_knowledge")
+                update_response = self.client.put(
+                    "/api/knowledge/documents/business_knowledge",
+                    json={"content": "## Terminology Mapping\n\n[id: edited]\n- edited\n"},
+                )
+
+            self.assertEqual(list_response.status_code, 200)
+            self.assertEqual(list_response.json()["status"], "ok")
+            schema_doc = next(item for item in list_response.json()["documents"] if item["doc_type"] == "schema")
+            self.assertFalse(schema_doc["editable"])
+            self.assertEqual(read_response.status_code, 200)
+            self.assertEqual(read_response.json()["doc_type"], "business_knowledge")
+            self.assertTrue(read_response.json()["editable"])
+            self.assertIn("Terminology Mapping", read_response.json()["content"])
+            self.assertEqual(update_response.status_code, 200)
+            self.assertEqual(update_response.json()["status"], "ok")
+            self.assertEqual(update_response.json()["document"]["doc_type"], "business_knowledge")
+            self.assertIn("[id: edited]", update_response.json()["document"]["content"])
+
+    def test_knowledge_document_update_rejects_schema_contract(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            store = KnowledgeStore(Path(tmp_dir))
+            store.bootstrap_defaults()
+            with patch("app.entrypoints.api.main.knowledge_store", store):
+                response = self.client.put(
+                    "/api/knowledge/documents/schema",
+                    json={"content": "{}"},
+                )
+
+            self.assertEqual(response.status_code, 500)
+            self.assertEqual(response.json()["status"], "error")
+            self.assertEqual(response.json()["code"], "KNOWLEDGE_DOCUMENT_READ_ONLY")

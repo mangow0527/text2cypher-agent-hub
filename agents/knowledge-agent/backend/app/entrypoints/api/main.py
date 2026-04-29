@@ -12,7 +12,16 @@ from app.config import settings
 from app.domain.knowledge.prompt_service import PromptService
 from app.domain.knowledge.repair_workflow_service import RepairWorkflowService
 from app.domain.knowledge.repair_service import RepairService
-from app.domain.models import ApplyRepairRequest, ApplyRepairResponse, PromptPackageRequest, PromptPackageResponse, StatusResponse
+from app.domain.models import (
+    ApplyRepairRequest,
+    ApplyRepairResponse,
+    KnowledgeDocumentDetailResponse,
+    KnowledgeDocumentsResponse,
+    PromptPackageRequest,
+    PromptPackageResponse,
+    UpdateKnowledgeDocumentRequest,
+    UpdateKnowledgeDocumentResponse,
+)
 from app.errors import AppError
 from app.integrations.qa_agent.redispatch_gateway import QARedispatchGateway
 from app.integrations.openai.model_gateway import ModelGateway
@@ -241,3 +250,28 @@ def apply_repair(request: ApplyRepairRequest) -> ApplyRepairResponse:
             response_body={"duration_ms": duration_ms, "threshold_ms": settings.slow_request_threshold_ms},
         )
     return ApplyRepairResponse(status="ok", changes=result["changes"], redispatch=result["redispatch"])
+
+
+@app.get("/api/knowledge/documents", response_model=KnowledgeDocumentsResponse)
+def list_knowledge_documents() -> KnowledgeDocumentsResponse:
+    return KnowledgeDocumentsResponse(status="ok", documents=knowledge_store.list_documents())
+
+
+@app.get("/api/knowledge/documents/{doc_type}", response_model=KnowledgeDocumentDetailResponse)
+def read_knowledge_document(doc_type: str) -> KnowledgeDocumentDetailResponse:
+    try:
+        document = knowledge_store.read_document(doc_type)
+    except ValueError as exc:
+        raise AppError("KNOWLEDGE_DOCUMENT_NOT_FOUND", str(exc)) from exc
+    return KnowledgeDocumentDetailResponse(status="ok", **document)
+
+
+@app.put("/api/knowledge/documents/{doc_type}", response_model=UpdateKnowledgeDocumentResponse)
+def update_knowledge_document(doc_type: str, request: UpdateKnowledgeDocumentRequest) -> UpdateKnowledgeDocumentResponse:
+    try:
+        document = knowledge_store.save_document(doc_type, request.content)
+    except ValueError as exc:
+        message = str(exc)
+        code = "KNOWLEDGE_DOCUMENT_READ_ONLY" if "read-only" in message else "KNOWLEDGE_DOCUMENT_NOT_FOUND"
+        raise AppError(code, message) from exc
+    return UpdateKnowledgeDocumentResponse(status="ok", document=document)

@@ -150,6 +150,25 @@ button {
   line-height: 1.28;
 }
 
+.surface-editor {
+  grid-column: 1 / -1;
+}
+
+.editor-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.editor-status {
+  padding: 8px 10px;
+  border: 1px solid rgba(246, 244, 239, 0.1);
+  color: rgba(246, 244, 239, 0.72);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .stack-form {
   display: grid;
   gap: 18px;
@@ -248,6 +267,14 @@ button {
   color: #ffd2ca;
 }
 
+.success-banner {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border-left: 3px solid #7de19e;
+  background: rgba(125, 225, 158, 0.1);
+  color: #c8f4d5;
+}
+
 .result-shell,
 .diff-section {
   margin-top: 24px;
@@ -283,6 +310,117 @@ button {
   font-size: 0.88rem;
   line-height: 1.7;
   white-space: pre-wrap;
+}
+
+.knowledge-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.32fr) minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 22px;
+}
+
+.document-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.document-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid rgba(246, 244, 239, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+  color: #ebe6db;
+  text-align: left;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.document-tab:hover,
+.document-tab-active {
+  border-color: rgba(240, 168, 110, 0.7);
+  background: rgba(240, 168, 110, 0.1);
+}
+
+.document-tab span {
+  display: grid;
+  gap: 4px;
+}
+
+.document-tab small,
+.document-meta {
+  color: rgba(246, 244, 239, 0.55);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.document-tab em,
+.readonly-badge {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border: 1px solid rgba(246, 244, 239, 0.1);
+  color: rgba(246, 244, 239, 0.62);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.document-editor {
+  min-width: 0;
+}
+
+.document-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 46px;
+  margin-bottom: 14px;
+}
+
+.document-toolbar > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.document-title {
+  color: rgba(246, 244, 239, 0.92);
+  font-weight: 800;
+}
+
+.document-save {
+  min-width: 128px;
+  padding: 11px 16px;
+}
+
+.knowledge-document-textarea,
+.knowledge-document-viewer {
+  width: 100%;
+  min-height: 520px;
+  max-height: 720px;
+  margin: 0;
+  padding: 18px;
+  overflow: auto;
+  border: 1px solid rgba(246, 244, 239, 0.08);
+  background: rgba(3, 7, 13, 0.68);
+  color: #d5e0ff;
+  font-family: "SFMono-Regular", "Menlo", "Consolas", monospace;
+  font-size: 0.86rem;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.knowledge-document-textarea {
+  resize: vertical;
+  outline: none;
+}
+
+.knowledge-document-textarea:focus {
+  border-color: rgba(240, 168, 110, 0.9);
 }
 
 .empty-state {
@@ -389,8 +527,14 @@ button {
   .hero,
   .workspace,
   .diff-grid,
-  .knowledge-type-grid {
+  .knowledge-type-grid,
+  .knowledge-editor-layout {
     grid-template-columns: 1fr;
+  }
+
+  .editor-header,
+  .document-toolbar {
+    display: grid;
   }
 
   .app-shell {

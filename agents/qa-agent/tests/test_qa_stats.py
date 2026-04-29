@@ -35,6 +35,11 @@ class QAStatsServiceTests(unittest.TestCase):
         self.assertEqual(stats["difficulty_distribution"]["L4"], 2)
         self.assertEqual(set(stats["difficulty_distribution"].keys()), set(DIFFICULTY_LEVELS))
         self.assertEqual(len(stats["difficulty_definitions"]), 8)
+        for definition in stats["difficulty_definitions"]:
+            self.assertGreaterEqual(len(definition["cypher_examples"]), 1)
+            for example in definition["cypher_examples"]:
+                self.assertEqual(example["difficulty"], definition["level"])
+                self.assertTrue(example["cypher"].startswith("MATCH "))
 
     def test_qa_stats_endpoint_returns_service_payload(self) -> None:
         with TemporaryDirectory() as tempdir:

@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 
 KnowledgeType = Literal["cypher_syntax", "few_shot", "system_prompt", "business_knowledge"]
+KnowledgeDocumentType = Literal["schema", "cypher_syntax", "few_shot", "system_prompt", "business_knowledge"]
 
 
 class PromptPackageRequest(BaseModel):
@@ -34,6 +35,35 @@ class RepairChange(BaseModel):
 
 class StatusResponse(BaseModel):
     status: Literal["ok"]
+
+
+class KnowledgeDocumentSummary(BaseModel):
+    doc_type: KnowledgeDocumentType
+    title: str
+    filename: str
+    editable: bool
+    size: int
+    updated_at: str
+
+
+class KnowledgeDocumentDetail(KnowledgeDocumentSummary):
+    content: str
+
+
+class KnowledgeDocumentsResponse(StatusResponse):
+    documents: list[KnowledgeDocumentSummary]
+
+
+class KnowledgeDocumentDetailResponse(KnowledgeDocumentDetail):
+    status: Literal["ok"]
+
+
+class UpdateKnowledgeDocumentResponse(StatusResponse):
+    document: KnowledgeDocumentDetail
+
+
+class UpdateKnowledgeDocumentRequest(BaseModel):
+    content: str
 
 
 class RedispatchResult(BaseModel):

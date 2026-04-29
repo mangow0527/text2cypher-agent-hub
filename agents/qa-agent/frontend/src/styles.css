@@ -248,6 +248,23 @@ input {
   align-items: center;
 }
 
+.difficulty-row-button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 2px 0;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  border-radius: 8px;
+}
+
+.difficulty-row-button:hover,
+.difficulty-row-button:focus-visible {
+  background: #f6f9fe;
+  outline: none;
+}
+
 .difficulty-level {
   font-weight: 700;
   color: var(--ink);
@@ -285,6 +302,18 @@ input {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease;
+}
+
+.difficulty-definition:hover,
+.difficulty-definition:focus-visible {
+  border-color: #aecbfa;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+  outline: none;
+  transform: translateY(-1px);
 }
 
 .difficulty-definition-head {
@@ -309,6 +338,104 @@ input {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.difficulty-modal {
+  width: min(760px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow: auto;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.22);
+}
+
+.difficulty-modal-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.difficulty-modal-head h3 {
+  margin: 4px 0 8px;
+  font-size: 24px;
+  line-height: 1.25;
+}
+
+.difficulty-modal-head p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.modal-close-button {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.modal-close-button:hover,
+.modal-close-button:focus-visible {
+  border-color: #aecbfa;
+  outline: none;
+}
+
+.cypher-example-list {
+  display: grid;
+  gap: 12px;
+  padding: 18px 24px 24px;
+}
+
+.cypher-example {
+  display: grid;
+  gap: 10px;
+}
+
+.cypher-example-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.cypher-example-label span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.cypher-example pre {
+  margin: 0;
+  overflow: auto;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: #101827;
+  color: #e8eefc;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.cypher-example code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
 .panel-heading-row {
@@ -1157,6 +1284,18 @@ input {
   .difficulty-count {
     grid-column: 2 / 3;
     text-align: left;
+  }
+
+  .modal-backdrop {
+    padding: 14px;
+  }
+
+  .difficulty-modal-head {
+    padding: 18px 18px 14px;
+  }
+
+  .cypher-example-list {
+    padding: 16px 18px 18px;
   }
 
   .list-toolbar {

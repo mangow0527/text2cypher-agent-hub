@@ -67,6 +67,11 @@ export interface QADifficultyDefinition {
   paper_band: string;
   title: string;
   definition: string;
+  cypher_examples: Array<{
+    difficulty: string;
+    label: string;
+    cypher: string;
+  }>;
 }
 
 export interface QAStats {

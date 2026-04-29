@@ -7,6 +7,14 @@ from uuid import uuid4
 
 from app.config import settings
 
+DOCUMENTS = {
+    "schema": {"filename": "schema.json", "editable": False, "title": "Schema"},
+    "system_prompt": {"filename": "system_prompt.md", "editable": True, "title": "System Prompt"},
+    "cypher_syntax": {"filename": "cypher_syntax.md", "editable": True, "title": "Cypher Syntax"},
+    "business_knowledge": {"filename": "business_knowledge.md", "editable": True, "title": "Business Knowledge"},
+    "few_shot": {"filename": "few_shot.md", "editable": True, "title": "Few-shot"},
+}
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -85,6 +93,25 @@ class KnowledgeStore:
     def read_schema(self) -> dict:
         return json.loads((self.root / "schema.json").read_text(encoding="utf-8"))
 
+    def list_documents(self) -> list[dict[str, object]]:
+        return [self._document_summary(doc_type) for doc_type in DOCUMENTS]
+
+    def read_document(self, doc_type: str) -> dict[str, object]:
+        self._assert_known_document(doc_type)
+        info = DOCUMENTS[doc_type]
+        content = self.read_text(str(info["filename"]))
+        return {**self._document_summary(doc_type), "content": content}
+
+    def save_document(self, doc_type: str, content: str) -> dict[str, object]:
+        self._assert_known_document(doc_type)
+        info = DOCUMENTS[doc_type]
+        if not info["editable"]:
+            raise ValueError(f"Knowledge document {doc_type} is read-only.")
+        filename = str(info["filename"])
+        before = self.read_text(filename)
+        self.write_versioned(filename, before, content, "manual knowledge editor update", doc_type)
+        return self.read_document(doc_type)
+
     def write_versioned(self, filename: str, before: str, after: str, suggestion: str, target_type: str) -> None:
         history_dir = self.root / "_history"
         history_dir.mkdir(parents=True, exist_ok=True)
@@ -102,3 +129,21 @@ class KnowledgeStore:
             json.dumps(snapshot, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    def _document_summary(self, doc_type: str) -> dict[str, object]:
+        self._assert_known_document(doc_type)
+        info = DOCUMENTS[doc_type]
+        path = self.root / str(info["filename"])
+        stat = path.stat()
+        return {
+            "doc_type": doc_type,
+            "title": info["title"],
+            "filename": info["filename"],
+            "editable": info["editable"],
+            "size": stat.st_size,
+            "updated_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+        }
+
+    def _assert_known_document(self, doc_type: str) -> None:
+        if doc_type not in DOCUMENTS:
+            raise ValueError(f"Unknown knowledge document: {doc_type}")
