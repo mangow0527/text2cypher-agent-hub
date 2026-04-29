@@ -131,6 +131,21 @@ class CoverageGenerationTests(unittest.TestCase):
         self.assertEqual(len(selected), 2)
         self.assertEqual(meta["difficulty_shortfalls"], {"L1": 1})
 
+    def test_release_selection_keeps_requested_difficulty_even_when_answer_is_empty(self) -> None:
+        l1 = self._qa_sample("qa_l1_a", "L1")
+        l2 = self._qa_sample("qa_l2_empty", "L2")
+        l2.answer = []
+
+        selected, meta = Orchestrator()._select_release_batch(
+            [l1, l2],
+            {"questions": set(), "cyphers": set()},
+            target_qa_count=2,
+            difficulty_targets={"L1": 1, "L2": 1},
+        )
+
+        self.assertEqual(meta["difficulty_shortfalls"], {})
+        self.assertEqual({sample.difficulty for sample in selected}, {"L1", "L2"})
+
     def _qa_sample(self, sample_id: str, difficulty: str) -> QASample:
         return QASample.model_validate(
             {
@@ -160,6 +175,22 @@ class CoverageGenerationTests(unittest.TestCase):
             }
         )
 
+    def _cypher_candidate(
+        self,
+        skeleton_id: str,
+        difficulty: str,
+        cypher: str,
+        generation_mode: str = "template",
+    ) -> CypherCandidate:
+        return CypherCandidate(
+            skeleton_id=skeleton_id,
+            cypher=cypher,
+            query_types=["LOOKUP"],
+            structure_family="lookup_node_return",
+            generation_mode=generation_mode,
+            difficulty=difficulty,
+        )
+
     def test_generation_builds_candidates_directly_from_coverage_specs(self) -> None:
         service = GenerationService()
         specs = CoverageService().build_specs(
@@ -176,6 +207,40 @@ class CoverageGenerationTests(unittest.TestCase):
         self.assertTrue(all(candidate.query_plan == {} for candidate in candidates))
         self.assertTrue(all(candidate.bound_schema_items.get("nodes") for candidate in candidates))
         self.assertTrue(any("WITH" in candidate.cypher.upper() for candidate in candidates if candidate.difficulty == "L8"))
+
+    def test_coverage_merge_keeps_template_fallback_for_each_requested_difficulty(self) -> None:
+        service = GenerationService()
+        template_candidates = [
+            self._cypher_candidate("tmpl_l1", "L1", "MATCH (n:NetworkElement) RETURN n"),
+            self._cypher_candidate("tmpl_l2", "L2", "MATCH (n:NetworkElement) WHERE n.vendor = 'VendorA' RETURN n"),
+            self._cypher_candidate(
+                "tmpl_l7",
+                "L7",
+                "MATCH (a:NetworkElement)-[:HAS_PORT]->(:Port)-[:FIBER_SRC]->(:Tunnel)-[:SERVES]->(d:Service) RETURN d",
+            ),
+            self._cypher_candidate(
+                "tmpl_l8",
+                "L8",
+                "MATCH (a:NetworkElement)-[:HAS_PORT]->(b:Port) WITH a, count(b) AS first_total "
+                "MATCH (a)-[:HAS_PORT]->(:Port)-[:FIBER_SRC]->(c:Tunnel) RETURN a.id AS key, first_total, count(c) AS total",
+            ),
+        ]
+        llm_candidates = [
+            self._cypher_candidate(f"llm_l1_{index}", "L1", f"MATCH (n:NetworkElement) RETURN n LIMIT {index + 1}", "llm_direct")
+            for index in range(2)
+        ] + [
+            self._cypher_candidate(
+                f"llm_l2_{index}",
+                "L2",
+                f"MATCH (n:NetworkElement) WHERE n.vendor = 'VendorA' RETURN n LIMIT {index + 1}",
+                "llm_direct",
+            )
+            for index in range(2)
+        ]
+
+        merged = service._merge_llm_with_template_fallback(llm_candidates, template_candidates, max_count=4)
+
+        self.assertEqual({candidate.difficulty for candidate in merged}, {"L1", "L2", "L7", "L8"})
 
     def test_coverage_candidates_classify_to_declared_difficulty(self) -> None:
         specs = CoverageService().build_specs(

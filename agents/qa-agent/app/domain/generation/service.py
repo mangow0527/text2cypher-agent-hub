@@ -319,7 +319,8 @@ class GenerationService:
     ) -> List[CypherCandidate]:
         output: list[CypherCandidate] = []
         seen: set[str] = set()
-        for candidate in [*llm_candidates, *template_candidates]:
+
+        for candidate in llm_candidates:
             normalized = " ".join(candidate.cypher.lower().split())
             if normalized in seen:
                 continue
@@ -327,6 +328,54 @@ class GenerationService:
             seen.add(normalized)
             if len(output) >= max_count:
                 break
+
+        for candidate in template_candidates:
+            if len(output) >= max_count:
+                break
+            normalized = " ".join(candidate.cypher.lower().split())
+            if normalized in seen:
+                continue
+            output.append(candidate)
+            seen.add(normalized)
+            if len(output) >= max_count:
+                break
+
+        # Coverage specs are the contract for requested difficulty distribution.
+        # If LLM variants fill the batch with duplicate easy levels, replace a
+        # duplicate with the template fallback for any missing requested level.
+        required_by_difficulty: dict[str, CypherCandidate] = {}
+        for candidate in template_candidates:
+            required_by_difficulty.setdefault(candidate.difficulty, candidate)
+        present = {candidate.difficulty for candidate in output}
+        for difficulty, fallback in required_by_difficulty.items():
+            if difficulty in present:
+                continue
+            fallback_key = " ".join(fallback.cypher.lower().split())
+            if fallback_key in seen:
+                continue
+            if len(output) < max_count:
+                output.append(fallback)
+                seen.add(fallback_key)
+                present.add(difficulty)
+                continue
+            difficulty_counts: dict[str, int] = {}
+            for candidate in output:
+                difficulty_counts[candidate.difficulty] = difficulty_counts.get(candidate.difficulty, 0) + 1
+            replace_index = next(
+                (
+                    index
+                    for index in range(len(output) - 1, -1, -1)
+                    if difficulty_counts.get(output[index].difficulty, 0) > 1
+                ),
+                -1,
+            )
+            if replace_index < 0:
+                continue
+            removed = output[replace_index]
+            seen.discard(" ".join(removed.cypher.lower().split()))
+            output[replace_index] = fallback
+            seen.add(fallback_key)
+            present = {candidate.difficulty for candidate in output}
         return output
 
     def _cypher_uses_known_schema_items(self, schema: CanonicalSchemaSpec, cypher: str) -> bool:

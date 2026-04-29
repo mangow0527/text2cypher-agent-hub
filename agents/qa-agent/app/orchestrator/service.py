@@ -544,7 +544,7 @@ class Orchestrator:
         target_qa_count: int,
         difficulty_targets: dict[str, int] | None = None,
     ) -> tuple[list[QASample], dict]:
-        if any(sample.answer for sample in samples):
+        if not difficulty_targets and any(sample.answer for sample in samples):
             samples = [sample for sample in samples if sample.answer]
         history_questions = history.get("questions", set())
         history_cyphers = history.get("cyphers", set())
