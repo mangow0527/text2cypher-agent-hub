@@ -7,13 +7,14 @@ class Settings(BaseSettings):
     app_name: str = "runtime-results-service"
     host: str = "0.0.0.0"
     port: int = 8001
+    cypher_generator_agent_data_dir: str = "data/cypher_generator_agent"
     testing_data_dir: str = "data/testing_service"
     repair_data_dir: str = "data/repair_service"
     poll_interval_seconds: int = 5
     cypher_generator_agent_base_url: str = "http://127.0.0.1:8000"
     testing_service_base_url: str = "http://127.0.0.1:8003"
     repair_service_base_url: str = "http://127.0.0.1:8002"
-    knowledge_ops_base_url: str = "http://127.0.0.1:8010"
+    knowledge_agent_base_url: str = "http://127.0.0.1:8010"
     qa_generator_base_url: str = "http://127.0.0.1:8020"
 
     model_config = SettingsConfigDict(

@@ -21,12 +21,13 @@ GenerationFailureReason = Literal[
 ]
 
 ServiceFailureReason = Literal[
-    "knowledge_agent_context_unavailable",
+    "knowledge_context_unavailable",
     "model_invocation_failed",
     "testing_agent_submission_failed",
 ]
 
 GenerationStatus = Literal["submitted_to_testing", "generation_failed", "service_failed"]
+GenerationReportStatus = Literal["generation_failed", "service_failed"]
 
 
 class QAQuestionRequest(BaseModel):
@@ -60,6 +61,40 @@ class GeneratedCypherSubmissionRequest(BaseModel):
     generation_run_id: str
     generated_cypher: str
     input_prompt_snapshot: str
+    last_llm_raw_output: str
+    generation_retry_count: int = Field(default=0, ge=0)
+    generation_failure_reasons: list[GenerationFailureReason] = Field(default_factory=list)
+
+
+class GenerationRunFailureReport(BaseModel):
+    id: str
+    question: str
+    generation_run_id: str
+    input_prompt_snapshot: str
+    last_llm_raw_output: str = ""
+    generation_status: GenerationReportStatus
+    failure_reason: GenerationFailureReason | ServiceFailureReason
+    last_generation_failure_reason: Optional[GenerationFailureReason] = None
+    generation_retry_count: int = Field(default=0, ge=0)
+    generation_failure_reasons: list[GenerationFailureReason] = Field(default_factory=list)
+    parsed_cypher: Optional[str] = None
+    gate_passed: bool = False
+
+    @model_validator(mode="after")
+    def validate_failure_reason_matches_status(self) -> "GenerationRunFailureReport":
+        generation_reasons = set(GenerationFailureReason.__args__)
+        service_reasons = set(ServiceFailureReason.__args__)
+        if self.generation_status == "generation_failed":
+            if self.failure_reason not in generation_reasons:
+                raise ValueError("generation_failed requires GenerationFailure reason")
+            if self.failure_reason == "generation_retry_exhausted" and self.last_generation_failure_reason is None:
+                raise ValueError("generation_retry_exhausted requires last_generation_failure_reason")
+            return self
+        if self.failure_reason not in service_reasons:
+            raise ValueError("service_failed requires ServiceFailure reason")
+        if self.last_generation_failure_reason is not None:
+            raise ValueError("service_failed must not include last_generation_failure_reason")
+        return self
 
 
 class GenerationRunResult(BaseModel):

@@ -1,3 +1,5 @@
+import asyncio
+from contextlib import asynccontextmanager
 from typing import Dict
 
 from fastapi import FastAPI
@@ -9,7 +11,13 @@ from .config import get_settings
 from .service import get_generator_status, get_workflow_service
 
 
-app = FastAPI(title="cypher-generator-agent", version="1.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    asyncio.create_task(get_workflow_service().retry_pending_deliveries())
+    yield
+
+
+app = FastAPI(title="cypher-generator-agent", version="1.0.0", lifespan=lifespan)
 
 
 @app.get("/health")

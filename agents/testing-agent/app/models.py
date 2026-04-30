@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 Difficulty = Literal["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8"]
@@ -11,6 +11,8 @@ EvaluationState = Literal[
     "received_golden_only",
     "received_submission_only",
     "ready_to_evaluate",
+    "tugraph_execution_failed",
+    "semantic_review_invalid",
     "repair_pending",
     "repair_submission_failed",
     "issue_ticket_created",
@@ -26,6 +28,27 @@ ExecutionAccuracyReason = Literal[
     "not_equivalent",
 ]
 ImprovementStatus = Literal["improved", "regressed", "unchanged"]
+GenerationFailureReason = Literal[
+    "empty_output",
+    "no_cypher_found",
+    "wrapped_in_markdown",
+    "wrapped_in_json",
+    "contains_explanation",
+    "multiple_statements",
+    "unbalanced_brackets",
+    "unclosed_string",
+    "write_operation",
+    "unsupported_call",
+    "unsupported_start_clause",
+    "generation_retry_exhausted",
+]
+ServiceFailureReason = Literal[
+    "knowledge_context_unavailable",
+    "model_invocation_failed",
+    "testing_agent_submission_failed",
+]
+GenerationReportStatus = Literal["generation_failed", "service_failed"]
+SubmissionGenerationStatus = Literal["generated", "generation_failed"]
 
 
 class QAGoldenRequest(BaseModel):
@@ -48,10 +71,59 @@ class GeneratedCypherSubmissionRequest(BaseModel):
     generation_run_id: str
     generated_cypher: str
     input_prompt_snapshot: str
+    last_llm_raw_output: str
+    generation_retry_count: int = Field(default=0, ge=0)
+    generation_failure_reasons: List[GenerationFailureReason] = Field(default_factory=list)
+
+
+class GenerationRunFailureReport(BaseModel):
+    id: str
+    question: str
+    generation_run_id: str
+    input_prompt_snapshot: str
+    last_llm_raw_output: str = ""
+    generation_status: GenerationReportStatus
+    failure_reason: GenerationFailureReason | ServiceFailureReason
+    last_generation_failure_reason: Optional[GenerationFailureReason] = None
+    generation_retry_count: int = Field(default=0, ge=0)
+    generation_failure_reasons: List[GenerationFailureReason] = Field(default_factory=list)
+    parsed_cypher: Optional[str] = None
+    gate_passed: bool = False
+
+    @model_validator(mode="after")
+    def validate_failure_reason_matches_status(self) -> "GenerationRunFailureReport":
+        generation_reasons = set(GenerationFailureReason.__args__)
+        service_reasons = set(ServiceFailureReason.__args__)
+        if self.generation_status == "generation_failed":
+            if self.failure_reason not in generation_reasons:
+                raise ValueError("generation_failed requires GenerationFailure reason")
+            if self.failure_reason == "generation_retry_exhausted" and self.last_generation_failure_reason is None:
+                raise ValueError("generation_retry_exhausted requires last_generation_failure_reason")
+            return self
+        if self.failure_reason not in service_reasons:
+            raise ValueError("service_failed requires ServiceFailure reason")
+        if self.last_generation_failure_reason is not None:
+            raise ValueError("service_failed must not include last_generation_failure_reason")
+        return self
 
 
 class SubmissionReceipt(BaseModel):
     accepted: bool
+
+
+class RepairAgentKnowledgeRequest(BaseModel):
+    id: str
+    suggestion: str
+    knowledge_types: List[str]
+
+
+class RepairAgentResponse(BaseModel):
+    status: str
+    analysis_id: str
+    id: str
+    knowledge_repair_request: Optional[RepairAgentKnowledgeRequest] = None
+    knowledge_agent_response: Optional[Dict[str, Any]] = None
+    applied: bool = True
 
 
 class ExecutionResult(BaseModel):
@@ -93,6 +165,18 @@ class SemanticCheck(BaseModel):
     status: SemanticCheckStatus
     message: Optional[str] = None
     raw_output: Optional[Dict[str, Any]] = None
+
+
+class SemanticReviewArtifact(BaseModel):
+    status: Literal["accepted", "invalid"]
+    raw_text: str
+    payload: Optional[Dict[str, Any]] = None
+    request_id: Optional[str] = None
+    model: Optional[str] = None
+    prompt_snapshot: Optional[str] = None
+    normalized_judgement: Optional[Literal["pass", "fail"]] = None
+    reasoning: Optional[str] = None
+    message: Optional[str] = None
 
 
 class ExecutionAccuracy(BaseModel):
@@ -145,6 +229,11 @@ class GenerationEvidence(BaseModel):
     generation_run_id: str
     attempt_no: int = Field(ge=1)
     input_prompt_snapshot: str
+    last_llm_raw_output: str = ""
+    generation_status: SubmissionGenerationStatus = "generated"
+    failure_reason: Optional[GenerationFailureReason | ServiceFailureReason] = None
+    generation_retry_count: int = Field(default=0, ge=0)
+    generation_failure_reasons: List[GenerationFailureReason] = Field(default_factory=list)
 
 
 class IssueTicket(BaseModel):
@@ -188,9 +277,15 @@ class SubmissionRecord(BaseModel):
     generation_run_id: str
     generated_cypher: str
     input_prompt_snapshot: str
+    last_llm_raw_output: str = ""
+    generation_status: SubmissionGenerationStatus = "generated"
+    failure_reason: Optional[GenerationFailureReason | ServiceFailureReason] = None
+    generation_retry_count: int = Field(default=0, ge=0)
+    generation_failure_reasons: List[GenerationFailureReason] = Field(default_factory=list)
     state: EvaluationState
     execution: Optional[ExecutionResult] = None
     evaluation: Optional[EvaluationSummary] = None
+    semantic_review: Optional[SemanticReviewArtifact] = None
     issue_ticket_id: Optional[str] = None
     repair_response: Optional[Dict[str, Any]] = None
     improvement_assessment: Optional[ImprovementAssessment] = None
@@ -209,4 +304,5 @@ class EvaluationStatusResponse(BaseModel):
     golden: Optional[Dict[str, Any]] = None
     submission: Optional[Dict[str, Any]] = None
     attempts: List[Dict[str, Any]] = Field(default_factory=list)
+    generation_failures: List[Dict[str, Any]] = Field(default_factory=list)
     issue_ticket: Optional[Dict[str, Any]] = None

@@ -3,15 +3,41 @@ from __future__ import annotations
 import json
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any, Dict
 
 import httpx
 
-from services.repair_agent.app.models import RepairIssueTicketResponse
-
-from .models import IssueTicket
+from .models import IssueTicket, RepairAgentResponse
 
 logger = logging.getLogger("testing_service")
+
+
+@dataclass
+class JSONCompletionResponse:
+    payload: Dict[str, Any]
+    raw_text: str
+    request_id: str | None
+    model: str
+
+
+class InvalidSemanticReviewResponse(RuntimeError):
+    def __init__(
+        self,
+        *,
+        raw_text: str,
+        payload: Dict[str, Any] | None,
+        request_id: str | None,
+        model: str,
+        prompt_snapshot: str,
+        message: str,
+    ) -> None:
+        super().__init__(message)
+        self.raw_text = raw_text
+        self.payload = payload
+        self.request_id = request_id
+        self.model = model
+        self.prompt_snapshot = prompt_snapshot
 
 
 class RepairServiceClient:
@@ -19,7 +45,7 @@ class RepairServiceClient:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
 
-    async def submit_issue_ticket(self, ticket: IssueTicket) -> RepairIssueTicketResponse:
+    async def submit_issue_ticket(self, ticket: IssueTicket) -> RepairAgentResponse:
         started = time.monotonic()
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             response = await client.post(
@@ -36,10 +62,10 @@ class RepairServiceClient:
                     "elapsed_ms": int((time.monotonic() - started) * 1000),
                 },
             )
-            return RepairIssueTicketResponse.model_validate(response.json())
+            return RepairAgentResponse.model_validate(response.json())
 
 
-class OpenAICompatibleLLMClient:
+class OpenAIChatCompletionLLMClient:
     def __init__(
         self,
         *,
@@ -55,7 +81,13 @@ class OpenAICompatibleLLMClient:
         self.timeout_seconds = timeout_seconds
         self.temperature = temperature
 
-    async def complete_json(self, prompt: str, *, qa_id: str | None = None, target: str = "testing.llm") -> Dict[str, Any]:
+    async def complete_json_response(
+        self,
+        prompt: str,
+        *,
+        qa_id: str | None = None,
+        target: str = "testing.llm",
+    ) -> JSONCompletionResponse:
         started = time.monotonic()
         logger.info(
             "llm_call_started target=%s qa_id=%s model=%s",
@@ -79,12 +111,8 @@ class OpenAICompatibleLLMClient:
                 },
             )
             response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"].strip()
-        if content.startswith("```"):
-            content = content.strip("`")
-            if content.startswith("json"):
-                content = content[4:].strip()
-        payload = json.loads(content)
+        raw_text = response.json()["choices"][0]["message"]["content"].strip()
+        payload = json.loads(_strip_code_fence(raw_text))
         request_id = None
         headers = getattr(response, "headers", None) or {}
         request_id = headers.get("request-id") or headers.get("x-request-id")
@@ -103,10 +131,19 @@ class OpenAICompatibleLLMClient:
                 "request_id": request_id,
             },
         )
-        return payload
+        return JSONCompletionResponse(
+            payload=payload,
+            raw_text=raw_text,
+            request_id=request_id,
+            model=self.model,
+        )
+
+    async def complete_json(self, prompt: str, *, qa_id: str | None = None, target: str = "testing.llm") -> Dict[str, Any]:
+        response = await self.complete_json_response(prompt, qa_id=qa_id, target=target)
+        return response.payload
 
 
-class LLMEvaluationClient(OpenAICompatibleLLMClient):
+class LLMEvaluationClient(OpenAIChatCompletionLLMClient):
     async def evaluate(
         self,
         *,
@@ -134,7 +171,7 @@ class LLMEvaluationClient(OpenAICompatibleLLMClient):
 
 
 class GrammarExplanationClient:
-    def __init__(self, llm: OpenAICompatibleLLMClient) -> None:
+    def __init__(self, llm: OpenAIChatCompletionLLMClient) -> None:
         self.llm = llm
 
     async def explain(self, generated_cypher: str, parser_error: str) -> str:
@@ -153,7 +190,7 @@ class GrammarExplanationClient:
 
 
 class SemanticReviewClient:
-    def __init__(self, llm: OpenAICompatibleLLMClient) -> None:
+    def __init__(self, llm: OpenAIChatCompletionLLMClient) -> None:
         self.llm = llm
 
     async def review(
@@ -171,7 +208,12 @@ class SemanticReviewClient:
             "你是 testing-agent 中的 Cypher 语义复核器。"
             "只在 strict compare 已失败的前提下，判断 actual_answer 是否仍满足 question。"
             "不提供修复建议，不讨论模型行为、prompt 设计或 schema 问题。"
-            "输出必须是 JSON，并至少包含 judgement 与 reasoning。\n\n"
+            "输出必须是 JSON object，并且至少包含 judgement 与 reasoning。"
+            "judgement 只能取字符串 \"pass\" 或 \"fail\"。"
+            "reasoning 必须使用中文，不能使用英文解释；可以保留 label、relation、Cypher、ID 等原始英文术语。"
+            "reasoning 应简洁说明 actual_answer 是否满足 question，以及与 Gold Answer/Strict Diff 的关键差异。"
+            "不要输出 valid、invalid、correct、incorrect、equivalent、not_equivalent 或任何第三状态。"
+            "如果你本来想表达正确/等价，请输出 \"pass\"；如果你本来想表达错误/不等价，请输出 \"fail\"。\n\n"
             f"Question:\n{question}\n\n"
             f"Gold Cypher:\n{gold_cypher}\n\n"
             f"Gold Answer:\n{json.dumps(gold_answer, ensure_ascii=False, default=str)}\n\n"
@@ -180,26 +222,39 @@ class SemanticReviewClient:
             f"Strict Check Message:\n{strict_check_message}\n\n"
             f"Strict Diff:\n{json.dumps(strict_diff, ensure_ascii=False, default=str)}"
         )
-        payload = await self.llm.complete_json(prompt)
+        response = await self.llm.complete_json_response(prompt)
+        payload = response.payload
         judgement = _normalize_semantic_judgement(payload)
-        if judgement is None:
-            raise RuntimeError("Semantic review returned invalid judgement.")
+        reasoning = payload.get("reasoning")
+        if judgement is None or not isinstance(reasoning, str) or not reasoning.strip():
+            raise InvalidSemanticReviewResponse(
+                raw_text=response.raw_text,
+                payload=payload,
+                request_id=response.request_id,
+                model=response.model,
+                prompt_snapshot=prompt,
+                message="Semantic review returned invalid judgement.",
+            )
+        if not _contains_chinese(reasoning):
+            raise InvalidSemanticReviewResponse(
+                raw_text=response.raw_text,
+                payload=payload,
+                request_id=response.request_id,
+                model=response.model,
+                prompt_snapshot=prompt,
+                message="Semantic review returned invalid Chinese reasoning.",
+            )
         payload["judgement"] = judgement
+        payload["reasoning"] = reasoning.strip()
+        payload["_raw_text"] = response.raw_text
+        payload["_request_id"] = response.request_id
+        payload["_model"] = response.model
+        payload["_prompt_snapshot"] = prompt
         return payload
 
 
 def _normalize_semantic_judgement(payload: Dict[str, Any]) -> str | None:
-    for key in ("judgement", "judgment", "result_correctness", "semantic_equivalence"):
-        normalized = _normalize_pass_fail_token(payload.get(key))
-        if normalized is not None:
-            return normalized
-
-    for key in ("is_equivalent", "equivalent", "is_correct", "correct"):
-        value = payload.get(key)
-        if isinstance(value, bool):
-            return "pass" if value else "fail"
-
-    return None
+    return _normalize_pass_fail_token(payload.get("judgement"))
 
 
 def _normalize_pass_fail_token(value: Any) -> str | None:
@@ -207,8 +262,20 @@ def _normalize_pass_fail_token(value: Any) -> str | None:
         return None
 
     normalized = value.strip().lower()
-    if normalized in {"pass", "passed", "ok", "true", "yes", "equivalent", "correct"}:
+    if normalized == "pass":
         return "pass"
-    if normalized in {"fail", "failed", "false", "no", "not_equivalent", "incorrect"}:
+    if normalized == "fail":
         return "fail"
     return None
+
+
+def _contains_chinese(value: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in value)
+
+
+def _strip_code_fence(content: str) -> str:
+    if content.startswith("```"):
+        content = content.strip("`")
+        if content.startswith("json"):
+            content = content[4:].strip()
+    return content

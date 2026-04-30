@@ -11,7 +11,7 @@
 1. 在远端服务器上执行一轮固定 knowledge 基线实验
 2. 保留完整跨服务证据链
 3. 阻断 `repair-agent -> knowledge-agent apply`
-4. 用 `qa-agent` 生成候选池并收敛为每级 `5` 题的正式实验集
+4. 用 `qa-agent` 内置作业流水线生成、校验、发布并发送正式 QA
 
 本 runbook 面向当前已确认的远端环境：
 
@@ -38,9 +38,9 @@
 
 - 实验模式：固定 knowledge 基线
 - repair 策略：保留分析，阻断 apply
-- 正式实验集规模：每个 `Lx` 取 `5` 题
-- 总体正式实验集规模：`40` 题
-- 候选池目标规模：`80-120` 题
+- 正式样本目标规模：`40` 题
+- 样本来源：`qa-agent` job / release / dispatch 产物
+- 难度覆盖：优先争取 `L1-L8` 均衡；若 `qa-agent` 当前接口不能精确约束每级数量，则按实际发布分布统计并在结论中说明
 
 ### 1.2 本轮不做的事
 
@@ -48,6 +48,7 @@
 - 不让 repair-agent 真实写回 knowledge-agent
 - 不在正式实验中途换题
 - 不混用不同模型、不同数据、不同样本集版本
+- 不在实验侧构造候选池、手工筛选正式集，或拼接历史 QA 行
 
 ---
 
@@ -63,7 +64,7 @@
 
 当前正在运行的服务使用的日志路径是：
 
-- `cypher-generator-agent`: `/tmp/cgs_8000.log`
+- `cypher-generator-agent`: 以当前进程实际 stdout/stderr 重定向路径为准
 - `runtime-results-service`: `/tmp/runtime_8001.log`
 - `testing-agent`: `/tmp/testing_8003.log`
 - `repair-agent`: `/tmp/repair_agent_8002.log`
@@ -91,7 +92,7 @@
 
 `repair-agent` 支持：
 
-- `REPAIR_SERVICE_KNOWLEDGE_OPS_REPAIRS_APPLY_CAPTURE_DIR`
+- `REPAIR_SERVICE_KNOWLEDGE_AGENT_REPAIRS_APPLY_CAPTURE_DIR`
 
 即使 apply 被阻断，也可以利用 capture 保留准备发往 knowledge-agent 的 payload。
 
@@ -103,21 +104,21 @@
 
 建议格式：
 
-`2026-04-26-cgs-baseline-freeze-v1`
+`2026-04-26-cypher-generator-agent-baseline-freeze-v1`
 
 ### 3.2 建议实验根目录
 
 建议在远端建立：
 
-`/root/multi-agent/experiment_runs/2026-04-26-cgs-baseline-freeze-v1`
+`/root/multi-agent/experiment_runs/2026-04-26-cypher-generator-agent-baseline-freeze-v1`
 
 ### 3.3 建议目录结构
 
 ```text
-/root/multi-agent/experiment_runs/2026-04-26-cgs-baseline-freeze-v1/
+/root/multi-agent/experiment_runs/2026-04-26-cypher-generator-agent-baseline-freeze-v1/
   manifest.json
   environment/
-  samples/
+  qa_agent/
   rounds/
   indexes/
   summaries/
@@ -134,7 +135,8 @@
 5. 记录当前策略：
    - `knowledge_frozen=true`
    - `repair_apply_blocked=true`
-   - `target_per_level=5`
+   - `qa_agent_owns_sample_generation=true`
+   - `target_qa_count=40`
 
 ---
 
@@ -200,12 +202,12 @@
 
 推荐采用“双保险”：
 
-1. 把 `REPAIR_SERVICE_KNOWLEDGE_OPS_REPAIRS_APPLY_CAPTURE_DIR` 指向实验目录下的 capture 目录
-2. 把 `REPAIR_SERVICE_KNOWLEDGE_OPS_REPAIRS_APPLY_URL` 改为一个不可写回 knowledge 的阻断地址
+1. 把 `REPAIR_SERVICE_KNOWLEDGE_AGENT_REPAIRS_APPLY_CAPTURE_DIR` 指向实验目录下的 capture 目录
+2. 把 `REPAIR_SERVICE_KNOWLEDGE_AGENT_REPAIRS_APPLY_URL` 改为一个不可写回 knowledge 的阻断地址
 
 推荐 capture 目录：
 
-`/root/multi-agent/experiment_runs/2026-04-26-cgs-baseline-freeze-v1/environment/repair_apply_captures`
+`/root/multi-agent/experiment_runs/2026-04-26-cypher-generator-agent-baseline-freeze-v1/environment/repair_apply_captures`
 
 ### 5.3 阻断策略要求
 
@@ -258,90 +260,169 @@
 - repair 侧 analysis 可落盘
 - apply 被阻断且有 capture 或失败证据
 
-### 6.4 产物
+### 6.4 semantic review 联调补充
+
+在真实 TuGraph 恢复后，最小链路联调还必须额外确认：
+
+- semantic review 正常返回 `pass/fail + reasoning`
+
+如果 semantic review 返回不合规，则本轮不进入正式实验，而应先保留以下证据：
+
+- semantic review 原始返回
+- semantic review 解析结果
+- request id / model / qa_id / attempt_no
+
+并将该样本记为：
+
+- `failure_stage=semantic_review_invalid`
+
+此时不得把样本直接计入普通业务失败，也不得继续触发 repair。
+
+### 6.5 产物
 
 建议保存到：
 
 `rounds/smoke-test/`
 
-如果最小链路联调不通过，不进入候选池生成阶段。
+如果最小链路联调不通过，不进入正式 `qa-agent` 作业阶段。
 
 ---
 
-## 七、候选池生成
+## 七、`qa-agent` 作业生成与内置 dispatch
 
 ### 7.1 当前目标
 
-- 正式实验集：`40` 题
-- 候选池：`80-120` 题
+- 目标正式 QA：`40` 题
+- 正式来源：`qa-agent` job 输出、release rows 与 dispatch result
+- 约束：实验侧不得构造 `candidate_pool`、不得生成 `final_sample_set`、不得改写 QA 行
 
-### 7.2 生成方式
+### 7.2 远端已确认的 `qa-agent` 逻辑
 
-使用 `qa-agent` 自动生成能力分批生成候选样本。
+远端 `qa-agent` 提供以下入口：
 
-建议不是一次性压大批量，而是多批次生成，例如：
+- `POST /jobs`
+- `POST /jobs/quick-run`
+- `POST /jobs/{job_id}/run`
+- `POST /jobs/{job_id}/dispatch`
+- `POST /qa/{qa_id}/redispatch`
 
-- batch-001
-- batch-002
-- batch-003
+作业模型中 `output_config.target_qa_count` 当前限制为 `1-50`，因此本轮 `40` 题目标应作为一次 `qa-agent` 作业请求参数传入。
 
-每批都单独保留原始结果。
+dispatch 逻辑由 `qa-agent` 内置完成：
 
-### 7.3 每批必须保存的内容
+1. 先向 question endpoint 发送 `id` 与 `question`
+2. 再向 golden endpoint 发送同一 `id` 的 `cypher`、`answer` 与 `difficulty`
+3. 记录 question 与 golden 两段各自的状态
 
-- 触发请求参数
-- 原始响应
-- 生成的样本文件
-- 批次号
-- 时间戳
+这意味着 question 与 gold 必须来自同一个 `QASample` / release row，不允许实验侧拆开重组。
 
-### 7.4 建议保存位置
+### 7.3 推荐触发方式
 
-```text
-samples/
-  raw_batches/
-    batch-001/
-    batch-002/
-  candidate_pool.jsonl
-  sample_set_manifest.json
+优先使用“创建 job，再 run”的两步方式，便于归档 job id 和中间状态。
+
+示例：
+
+```bash
+EXP_ROOT=/root/multi-agent/experiment_runs/2026-04-26-cypher-generator-agent-baseline-freeze-v1
+mkdir -p "$EXP_ROOT/qa_agent"
+
+cat > "$EXP_ROOT/qa_agent/job_request.json" <<'JSON'
+{
+  "mode": "online",
+  "validation_config": {
+    "require_runtime_validation": true,
+    "allow_empty_results": true,
+    "roundtrip_required": true
+  },
+  "output_config": {
+    "target_qa_count": 40
+  }
+}
+JSON
+
+curl -sS http://127.0.0.1:8020/jobs \
+  -H 'Content-Type: application/json' \
+  -d @"$EXP_ROOT/qa_agent/job_request.json" \
+  | tee "$EXP_ROOT/qa_agent/job_create_response.json"
 ```
 
-### 7.5 候选池停止条件
+从 `job_create_response.json` 中取出 `job_id` 后执行：
 
-只有满足以下条件时，才停止扩充候选池：
+```bash
+JOB_ID=<job_id>
 
-- 总体候选数达到 `80-120`
-- `L1-L8` 均有覆盖
-- 高难层级不再明显空洞
+curl -sS -X POST "http://127.0.0.1:8020/jobs/$JOB_ID/run" \
+  | tee "$EXP_ROOT/qa_agent/job_run_response.json"
+
+curl -sS "http://127.0.0.1:8020/jobs/$JOB_ID" \
+  | tee "$EXP_ROOT/qa_agent/job_snapshot.json"
+```
+
+如需快速联调，也可以使用：
+
+```bash
+curl -sS http://127.0.0.1:8020/jobs/quick-run \
+  -H 'Content-Type: application/json' \
+  -d @"$EXP_ROOT/qa_agent/job_request.json" \
+  | tee "$EXP_ROOT/qa_agent/job_quick_run_response.json"
+```
+
+但正式实验优先保留两步 job 形式。
+
+### 7.4 本阶段必须保存的内容
+
+- `qa_agent/job_request.json`
+- `qa_agent/job_create_response.json`
+- `qa_agent/job_run_response.json`
+- `qa_agent/job_snapshot.json`
+- job artifacts 下载结果或引用
+- release rows 或 packaged rows
+- dispatch result
+- dispatch log 摘录
+- 覆盖统计报告
+
+### 7.5 作业接受条件
+
+只有满足以下条件时，才把该 job 作为正式实验输入：
+
+- job 状态为 completed，或失败状态与失败原因已完整归档
+- 所有正式 QA 都能追溯到同一个 job id
+- question 与 golden dispatch 状态均可追踪
+- `qa_id`、question、cypher、answer、difficulty 没有被实验侧改写
+- 难度与 family 覆盖已统计
 
 ---
 
-## 八、候选池清洗与正式实验集冻结
+## 八、覆盖检查与作业接受 / 重跑决策
 
-### 8.1 清洗顺序
+### 8.1 覆盖检查
 
-按以下顺序处理：
+对 `qa-agent` 发布结果做只读统计：
 
-1. 完整性检查
-2. 去重
-3. 难度覆盖统计
-4. family 覆盖统计
-5. 分层抽样
-6. 冻结实验集版本
+1. `difficulty` 分布
+2. `query_type` 分布
+3. `structure_family` 分布
+4. 空结果 / 非空结果比例
+5. dispatch 成功 / 部分成功 / 失败分布
 
-### 8.2 当前正式实验集目标
+### 8.2 接受原则
 
-- 每个 `Lx` 选 `5` 题
-- 总计 `40` 题
+覆盖检查只用于决定“接受该 job”还是“另起一个新 job”，不得用于手工改写该 job 的发布行。
 
-### 8.3 当前抽样优先级
+如果本轮必须严格达到每个 `Lx` `5` 题，只有两种合规方式：
 
-按以下优先级补覆盖：
+1. 使用 `qa-agent` 已支持的作业参数或发布机制达成
+2. 若当前 `qa-agent` 不支持该约束，则把“不支持精确分层控制”记录为实验限制，不在实验侧补造样本
 
-1. `difficulty`
-2. `query_type`
-3. `structure_family`
-4. 关键语义特征
+### 8.3 重跑原则
+
+覆盖不足时，可以重新发起新的 `qa-agent` job。
+
+要求：
+
+- 每个 job 单独保留 job id、request、snapshot、release 与 dispatch 证据
+- 多 job 结果可以在总结中并列分析
+- 不得把多个 job 的样本在实验侧重新洗牌后伪装成单一发布集
 
 ### 8.4 必须禁止的做法
 
@@ -350,24 +431,31 @@ samples/
 - 依据“是否容易成功”筛样本
 - 先试跑再把失败样本排除出正式实验集
 - 用“看起来更像 demo”的题替换难样本
+- 从历史 candidate 文件里补题
+- 手工修改 gold cypher 以适配当前 schema
+- 手工修改 question 或 answer 以绕过 qa-agent 的一致性约束
 
-### 8.5 正式实验集落盘
+### 8.5 作业归档落盘
 
 建议保存：
 
-- `samples/final_sample_set.jsonl`
-- `samples/final_sample_set_manifest.json`
-- `samples/coverage_report.json`
+- `qa_agent/job_request.json`
+- `qa_agent/job_snapshot.json`
+- `qa_agent/release_rows.jsonl`
+- `qa_agent/dispatch_result.json`
+- `qa_agent/coverage_report.json`
 
-一旦正式实验集冻结，不在同一实验 id 中修改。
+一旦接受某个 job，该 job 的发布结果不在同一实验 id 中修改。
 
 ---
 
-## 九、分轮执行正式实验
+## 九、按难度归档与分析正式样本
 
 ### 9.1 轮次结构
 
-建议按难度分轮：
+`qa-agent` 已经完成正式发送后，实验侧的“轮次”只表示分析分组，不再表示手动提交批次。
+
+建议按难度生成分析目录：
 
 - `round-001-L1`
 - `round-002-L2`
@@ -378,17 +466,22 @@ samples/
 - `round-007-L7`
 - `round-008-L8`
 
-### 9.2 每轮固定动作
+### 9.2 每组固定动作
 
-每一轮都按以下顺序：
+每个难度组都按以下顺序：
 
 1. 记录轮次开始时环境快照
-2. 提交该难度的 `5` 题
-3. 归档每题证据目录
+2. 从已接受的 `qa-agent` job / release 中筛出该难度样本
+3. 按 `qa_id` 归档每题证据目录
 4. 更新统一索引
 5. 生成本轮 `summary.json`
 
-### 9.3 每轮结束必须输出
+注意：
+
+- 这里的筛出只用于分析归档，不改变样本来源
+- 如果某个 `Lx` 样本数不是 `5`，按实际数量统计，并在总结中说明
+
+### 9.3 每组结束必须输出
 
 - 总题数
 - 通过数
@@ -405,62 +498,167 @@ samples/
 
 ### 10.1 每题证据目录
 
-每个 `qa_id` 建议保存：
+每个 `qa_id` 只保存实验相关内容：
 
 ```text
 qa/qa-0001/
-  input.json
-  qa_dispatch.json
-  cgs_request.json
-  cgs_result.json
-  testing_submission.json
-  testing_result.json
-  issue_ticket.json
-  repair_analysis.json
+  experiment_sample.json
+  timing.json
   repair_apply_attempt.json
-  logs.json
+  notes.md
 ```
 
-### 10.2 可直接利用的现有数据源
+不得保存：
 
-#### `testing-agent`
+- `generator_request.json`
+- `generator_result.json`
+- `testing_submission.json`
+- `testing_result.json`
+- `issue_ticket.json`
+- `repair_analysis.json`
+- `service_refs.json`
+- prompt、raw output、generated Cypher、evaluation、semantic review、repair suggestion 的正文副本
+- 上述服务证据的服务路径、文件路径或引用清单
 
-可直接从：
+正式服务证据统一从运行中心界面查看，实验目录不再承担服务证据浏览入口职责。
 
-- `/root/multi-agent/nl2cypher/data/testing_service/goldens`
-- `/root/multi-agent/nl2cypher/data/testing_service/submissions`
-- `/root/multi-agent/nl2cypher/data/testing_service/submission_attempts`
-- `/root/multi-agent/nl2cypher/data/testing_service/issue_tickets`
+### 10.1.1 实验字段裁剪原则
 
-提取：
+正式实验归档只保存实验侧内容：
 
-- golden payload
-- submission payload
-- attempt 级 submission
-- issue ticket
+- 实验身份
+- qa-agent 作业与 release 维度
+- 实验分组维度
+- dispatch 统计
+- repair apply 阻断证据
+- 耗时与聚合统计
+- 人工复盘结论
 
-#### `repair-agent`
+#### 必须完整保留的实验字段
 
-可直接从：
+- `qa_id`
+- `experiment_id`
+- `round_id`
+- `qa_agent_job_id`
+- `qa_agent_release_ref`
+- `qa_agent_release_row_index`
+- `qa_dispatch_result`
+- `difficulty`
+- `query_type`
+- `structure_family`
+- `failure_stage`
+- `failure_reason`
+- `repair_apply_attempted`
+- `repair_apply_blocked`
+- `apply_effective`
+- `artifact_dir`
+- `timing_status`
+- `total_elapsed_ms`
+- `qa_agent_elapsed_ms`
+- `cypher_generator_elapsed_ms`
+- `testing_agent_elapsed_ms`
+- `repair_agent_elapsed_ms`
+- `tugraph_execution_elapsed_ms`
+- `semantic_review_elapsed_ms`
 
-- `data/repair_service`
-- `REPAIR_SERVICE_KNOWLEDGE_OPS_REPAIRS_APPLY_CAPTURE_DIR`
+#### 默认不保留
 
-提取：
+这些字段属于正式服务证据，不进入实验落盘，也不保留路径引用：
 
-- analysis record
-- knowledge repair request
-- apply capture
+- `question`
+- `reference_cypher`
+- `reference_answer`
+- `generation_run_id`
+- `generated_cypher`
+- `input_prompt_snapshot`
+- `generator_prompt_snapshot`
+- `last_llm_raw_output`
+- `generation_retry_count`
+- `generation_failure_reasons`
+- `submission.state`
+- `execution`
+- `evaluation`
+- `strict_diff`
+- `semantic_review`
+- `issue_ticket_id`
+- `analysis_id`
+- `knowledge_repair_request`
+- `repair_prompt_snapshot`
+- `repair raw output`
+- `repair suggestion`
+- 完整服务日志全文
 
-#### 服务日志
+### 10.2 耗时归档要求
 
-仅用于补充时间线，不作为唯一事实来源：
+每个 `qa_id` 都必须额外生成：
 
-- `/tmp/cgs_8000.log`
-- `/tmp/testing_8003.log`
-- `/tmp/repair_agent_8002.log`
-- `/tmp/qa_8020.log`
-- `/root/multi-agent/knowledge-agent/backend/backend.out`
+- `timing.json`
+
+建议字段：
+
+- `qa_id`
+- `round_id`
+- `timing_status`
+- `qa_agent_started_at`
+- `qa_agent_finished_at`
+- `cypher_generator_started_at`
+- `cypher_generator_finished_at`
+- `testing_agent_started_at`
+- `testing_agent_finished_at`
+- `repair_agent_started_at`
+- `repair_agent_finished_at`
+- `qa_dispatch_started_at`
+- `qa_dispatch_finished_at`
+- `generator_started_at`
+- `generator_finished_at`
+- `testing_submission_received_at`
+- `tugraph_execution_started_at`
+- `tugraph_execution_finished_at`
+- `semantic_review_started_at`
+- `semantic_review_finished_at`
+- `repair_started_at`
+- `repair_finished_at`
+- `total_elapsed_ms`
+- `qa_agent_elapsed_ms`
+- `cypher_generator_elapsed_ms`
+- `testing_agent_elapsed_ms`
+- `repair_agent_elapsed_ms`
+- `generator_elapsed_ms`
+- `tugraph_execution_elapsed_ms`
+- `semantic_review_elapsed_ms`
+- `repair_elapsed_ms`
+
+规则：
+
+- 一律使用 `ms`
+- 一律使用带时区的 ISO 8601 时间
+- 未触发阶段填 `null`
+- 只能部分还原时，记录 `timing_status=partial`
+- 完全无法还原时，记录 `timing_status=missing`
+- 先记录服务总耗时，再记录服务内部关键子阶段耗时
+- `semantic_review_elapsed_ms` 仅表示 `testing-agent` 内部子阶段
+
+### 10.2.1 耗时字段提取优先级
+
+优先按以下顺序还原时间：
+
+1. 服务持久化记录中的时间戳
+2. API 请求发出与响应返回时间
+3. 结构化日志时间戳
+4. 服务普通日志中的时间近似推断
+
+如果同一阶段存在多种时间来源，优先选择更接近服务内部处理边界的记录。
+
+服务总耗时建议按以下边界定义：
+
+1. `qa_agent_elapsed_ms`
+   从 `qa-agent` 接收触发请求，到完成下游 dispatch 为止
+2. `cypher_generator_elapsed_ms`
+   从 `cypher-generator-agent` 接收问题，到返回生成结果或提交 testing 为止
+3. `testing_agent_elapsed_ms`
+   从 `testing-agent` 接收 submission，到形成最终评测状态为止
+4. `repair_agent_elapsed_ms`
+   从 `repair-agent` 接收 issue ticket，到形成 repair 结果并完成 apply 阻断尝试为止
 
 ### 10.3 统一索引表
 
@@ -474,19 +672,29 @@ qa/qa-0001/
 - `experiment_id`
 - `round_id`
 - `qa_id`
+- `qa_agent_job_id`
+- `qa_agent_release_ref`
+- `qa_dispatch_result`
 - `difficulty`
 - `query_type`
 - `structure_family`
-- `question`
-- `generated_cypher`
 - `pass_fail`
 - `failure_stage`
 - `failure_reason`
-- `issue_ticket_id`
-- `repair_generated`
+- `repair_triggered`
 - `repair_apply_attempted`
 - `repair_apply_blocked`
 - `artifact_dir`
+- `timing_status`
+- `total_elapsed_ms`
+- `qa_agent_elapsed_ms`
+- `cypher_generator_elapsed_ms`
+- `testing_agent_elapsed_ms`
+- `repair_agent_elapsed_ms`
+- `generator_elapsed_ms`
+- `tugraph_execution_elapsed_ms`
+- `semantic_review_elapsed_ms`
+- `repair_elapsed_ms`
 
 ---
 
@@ -504,6 +712,9 @@ qa/qa-0001/
 - 与上一层级做对照
 - 汇总主要失败阶段
 - 汇总主要失败模式
+- 先比较各服务总耗时
+- 对比主要阶段耗时分位数
+- 判断慢点是否集中在某个服务，或进一步集中在其内部子阶段
 
 ### 11.3 输出
 
@@ -521,7 +732,9 @@ qa/qa-0001/
 2. 所有 `qa_id` 是否都有证据目录
 3. 索引表是否完整
 4. apply capture 是否存在
-5. 最终总结是否能明确回答能力边界问题
+5. 所有 `qa_id` 是否都有 `timing.json`
+6. 实验归档中是否没有 prompt、raw output、generated Cypher、evaluation、repair suggestion 或服务路径引用
+7. 最终总结是否能明确回答能力边界问题
 
 ### 12.1 必须能回答的问题
 
@@ -530,6 +743,8 @@ qa/qa-0001/
 - 当前稳定能力边界在哪一层
 - 首个明显失稳层级是哪一层
 - 失败主要发生在哪个阶段
+- 慢主要集中在哪个服务
+- 如果某个服务较慢，是否能继续定位到内部子阶段
 - repair 是否已经能看出根因
 - 本轮结论是否建立在固定 knowledge 基线上
 
@@ -547,5 +762,5 @@ qa/qa-0001/
 如果本 runbook 继续下钻，下一步可以单独再拆成：
 
 1. 远端 repair apply 阻断手册
-2. `qa-agent` 候选池生成手册
+2. `qa-agent` 作业生成与 dispatch 手册
 3. 证据归档与汇总脚本使用手册

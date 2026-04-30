@@ -1,5 +1,6 @@
 from .models import (
     GeneratedCypherSubmissionRequest,
+    GenerationRunFailureReport,
     GenerationRunResult,
     PreflightCheck,
     QAQuestionRequest,
@@ -7,6 +8,7 @@ from .models import (
 
 __all__ = [
     "GeneratedCypherSubmissionRequest",
+    "GenerationRunFailureReport",
     "GenerationRunResult",
     "PreflightCheck",
     "QAQuestionRequest",

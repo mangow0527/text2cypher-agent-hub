@@ -1,6 +1,7 @@
 from .models import (
     EvaluationStatusResponse,
     GeneratedCypherSubmissionRequest,
+    GenerationRunFailureReport,
     IssueTicket,
     QAGoldenRequest,
     QAGoldenResponse,
@@ -10,6 +11,7 @@ from .models import (
 __all__ = [
     "EvaluationStatusResponse",
     "GeneratedCypherSubmissionRequest",
+    "GenerationRunFailureReport",
     "IssueTicket",
     "QAGoldenRequest",
     "QAGoldenResponse",

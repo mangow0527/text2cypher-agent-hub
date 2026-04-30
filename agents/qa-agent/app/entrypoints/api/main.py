@@ -169,6 +169,14 @@ def redispatch_single_qa(qa_id: str):
         raise HTTPException(status_code=status_code, detail={"code": exc.code, "message": exc.message}) from exc
 
 
+@app.delete("/qa/{qa_id}")
+def delete_single_qa(qa_id: str):
+    try:
+        return single_qa_redispatch_service.delete(qa_id)
+    except AppError as exc:
+        raise HTTPException(status_code=404, detail={"code": exc.code, "message": exc.message}) from exc
+
+
 @app.get("/jobs")
 def list_jobs():
     return orchestrator.list_job_snapshots()
@@ -246,6 +254,14 @@ def download_import_artifact(import_id: str, artifact_name: str):
         raise HTTPException(status_code=404, detail="Artifact not found")
 
     return FileResponse(path=artifact_path, filename=f"{import_id}-{artifact_name}")
+
+
+@app.get("/qa/{qa_id}")
+def get_single_qa(qa_id: str):
+    try:
+        return single_qa_redispatch_service.get_detail(qa_id)
+    except AppError as exc:
+        raise HTTPException(status_code=404, detail={"code": exc.code, "message": exc.message}) from exc
 
 
 @app.post("/helpers/schema/resolve")

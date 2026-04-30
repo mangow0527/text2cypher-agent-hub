@@ -13,11 +13,13 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     testing_agent_url: str = "http://127.0.0.1:8003"
-    knowledge_agent_url: str = "http://127.0.0.1:8010"
+    knowledge_docs_dir: str = "/root/multi-agent/knowledge-agent/backend/knowledge"
     service_public_base_url: str = "http://127.0.0.1:8000"
+    data_dir: str = "data/cypher_generator_agent"
+    delivery_outbox_dir: Optional[str] = None
     request_timeout_seconds: float = 120.0
     llm_enabled: bool = True
-    llm_provider: str = "openai-compatible"
+    llm_provider: str = "openai_chat"
     llm_base_url: Optional[str] = None
     llm_api_key: Optional[str] = None
     llm_model: Optional[str] = None

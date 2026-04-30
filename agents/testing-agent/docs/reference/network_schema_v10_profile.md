@@ -59,29 +59,14 @@ Schema 画像被多个模块引用：
 ### services/testing_agent/app/schema_profile.py
 定义 `NETWORK_SCHEMA_V10_CONTEXT`（完整 schema 字符串）和 `NETWORK_SCHEMA_V10_HINTS`（实体关键词映射）。
 
-### services/repair_agent/app/knowledge.py
-该模块当前主要保留给 `repair-agent`的对照实验使用，不再属于 `cypher-generator-agent` 主链路。
-它基于 schema 画像构建默认知识包 `DEFAULT_KNOWLEDGE_PACKAGE`：
-- 包含标签（tags）如 `network_element`, `port`, `tunnel`, `service`, `protocol`, `fiber`, `link`
-- 每个标签关联业务术语、查询模式、约束
-- `select_knowledge_tags(question)` 根据问题关键词选择相关标签
-- `build_schema_hint_from_tags(tags)` 从标签构建 schema hint
-- `build_knowledge_context(tags)` 生成完整的 `KnowledgeContext`
+### 当前 agent 边界
+- testing-agent 使用 schema 画像作为评测和排查参考。
+- cypher-generator-agent 的正式知识上下文来自 knowledge-agent，不在本地组装 `KnowledgeContext`。
+- repair-agent 消费 testing-agent 的 `IssueTicket`，不从本参考文档派生修复请求。
 
-### services/testing_agent/app/evaluation.py
-评测引擎使用 schema 中的合法 label 和 edge 集合：
-- `VALID_LABELS` = `{NetworkElement, Protocol, Tunnel, Service, Port, Fiber, Link}`
-- `VALID_RELATIONS` = `{HAS_PORT, FIBER_SRC, FIBER_DST, LINK_SRC, LINK_DST, TUNNEL_SRC, TUNNEL_DST, TUNNEL_PROTO, PATH_THROUGH, SERVICE_USES_TUNNEL}`
-- `schema_alignment` 维度检查生成的 Cypher 是否使用了合法的 label 和 edge
+## Schema 关键词参考表
 
-### cypher-generator-agent
-- 当前 cypher-generator-agent 已不再提供启发式生成器；`NETWORK_SCHEMA_V10_HINTS` 仅作为图谱结构参考资料保留，不再作为 `cypher-generator-agent` 的回退实现来源
-- LLM 生成器在 prompt 中注入 `NETWORK_SCHEMA_V10_CONTEXT`
-- 主链路不再在服务内选择知识标签，也不再在服务内组装 `KnowledgeContext`
-
-## 历史启发式映射表（仅参考）
-
-下表来自早期启发式生成器设计，只作为理解旧样例和 schema 关键词的参考。当前 cypher-generator-agent 主链路已经不再使用启发式生成器，也不再根据这些映射在服务内组装 `KnowledgeContext`。
+下表仅用于人工理解 schema 中常见中文问题词与图谱元素的对应关系。
 
 | 关键词 | 映射目标 |
 |---|---|

@@ -10,13 +10,15 @@ from .models import (
     EvaluationSummary,
     ExecutionResult,
     GeneratedCypherSubmissionRequest,
+    GenerationRunFailureReport,
     ImprovementAssessment,
     IssueTicket,
     QAGoldenRequest,
+    SemanticReviewArtifact,
     SaveSubmissionResult,
+    RepairAgentResponse,
     SubmissionRecord,
 )
-from services.repair_agent.app.models import RepairIssueTicketResponse
 
 
 @dataclass
@@ -24,6 +26,7 @@ class _PathSet:
     goldens: Path
     submissions: Path
     attempts: Path
+    generation_failures: Path
     tickets: Path
 
 
@@ -35,10 +38,11 @@ class TestingRepository:
             goldens=Path(data_dir) / "goldens",
             submissions=Path(data_dir) / "submissions",
             attempts=Path(data_dir) / "submission_attempts",
+            generation_failures=Path(data_dir) / "generation_failures",
             tickets=Path(data_dir) / "issue_tickets",
         )
         self._paths = paths
-        for path in (paths.goldens, paths.submissions, paths.attempts, paths.tickets):
+        for path in (paths.goldens, paths.submissions, paths.attempts, paths.generation_failures, paths.tickets):
             path.mkdir(parents=True, exist_ok=True)
 
     def save_golden(self, request: QAGoldenRequest) -> None:
@@ -87,6 +91,81 @@ class TestingRepository:
             generation_run_id=request.generation_run_id,
             generated_cypher=request.generated_cypher,
             input_prompt_snapshot=request.input_prompt_snapshot,
+            last_llm_raw_output=request.last_llm_raw_output,
+            generation_status="generated",
+            failure_reason=None,
+            generation_retry_count=request.generation_retry_count,
+            generation_failure_reasons=request.generation_failure_reasons,
+            state=state,
+            received_at=_utc_now(),
+            updated_at=_utc_now(),
+        )
+        self._write_submission_record(record)
+        return SaveSubmissionResult(created=True, attempt_no=attempt_no, record=record)
+
+    def save_generation_failure_report(self, report: GenerationRunFailureReport) -> None:
+        path = self._generation_failure_report_path(report.id, report.generation_run_id)
+        payload = report.model_dump(mode="json")
+        payload["received_at"] = _utc_now()
+        if path.exists():
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            comparable = {key: value for key, value in existing.items() if key != "received_at"}
+            if comparable != report.model_dump(mode="json"):
+                raise ValueError(f"Generation failure report conflict for id={report.id}")
+            return
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def get_generation_failure_report(self, qa_id: str, generation_run_id: str) -> Optional[Dict[str, Any]]:
+        path = self._generation_failure_report_path(qa_id, generation_run_id)
+        if not path.exists():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def list_generation_failure_reports(self, qa_id: str) -> list[Dict[str, Any]]:
+        reports = []
+        for path in sorted(self._paths.generation_failures.glob(f"{qa_id}__*.json")):
+            reports.append(json.loads(path.read_text(encoding="utf-8")))
+        return sorted(
+            reports,
+            key=lambda item: (
+                str(item.get("received_at", "")),
+                str(item.get("generation_run_id", "")),
+            ),
+        )
+
+    def save_generation_failure_submission(
+        self,
+        report: GenerationRunFailureReport,
+        *,
+        state: str,
+    ) -> SaveSubmissionResult:
+        self.save_generation_failure_report(report)
+        parsed_cypher = (report.parsed_cypher or "").strip()
+        generated_cypher = parsed_cypher or report.last_llm_raw_output or ""
+        for existing in self.list_submission_attempts(report.id):
+            if existing["generation_run_id"] != report.generation_run_id:
+                continue
+            if self._generation_failure_submission_matches(existing, report, generated_cypher):
+                return SaveSubmissionResult(
+                    created=False,
+                    attempt_no=int(existing["attempt_no"]),
+                    record=SubmissionRecord.model_validate(existing),
+                )
+            raise ValueError(f"Submission conflict for id={report.id}")
+
+        attempt_no = len(self.list_submission_attempts(report.id)) + 1
+        record = SubmissionRecord(
+            id=report.id,
+            attempt_no=attempt_no,
+            question=report.question,
+            generation_run_id=report.generation_run_id,
+            generated_cypher=generated_cypher,
+            input_prompt_snapshot=report.input_prompt_snapshot,
+            last_llm_raw_output=report.last_llm_raw_output,
+            generation_status="generation_failed",
+            failure_reason=report.failure_reason,
+            generation_retry_count=report.generation_retry_count,
+            generation_failure_reasons=report.generation_failure_reasons,
             state=state,
             received_at=_utc_now(),
             updated_at=_utc_now(),
@@ -111,6 +190,21 @@ class TestingRepository:
         for path in sorted(self._paths.attempts.glob(f"{qa_id}__attempt_*.json")):
             attempts.append(json.loads(path.read_text(encoding="utf-8")))
         return sorted(attempts, key=lambda item: int(item["attempt_no"]))
+
+    def list_submission_attempts_by_state(self, state: str) -> list[Dict[str, Any]]:
+        attempts: list[Dict[str, Any]] = []
+        for path in sorted(self._paths.attempts.glob("*.json")):
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("state") == state:
+                attempts.append(data)
+        return sorted(
+            attempts,
+            key=lambda item: (
+                str(item.get("received_at", "")),
+                str(item.get("id", "")),
+                int(item.get("attempt_no", 0)),
+            ),
+        )
 
     def update_submission_state(self, qa_id: str, attempt_no: int, state: str) -> None:
         self._mutate_submission(
@@ -143,6 +237,23 @@ class TestingRepository:
             ),
         )
 
+    def save_semantic_review_artifact(
+        self,
+        qa_id: str,
+        attempt_no: int,
+        artifact: SemanticReviewArtifact,
+    ) -> None:
+        self._mutate_submission(
+            qa_id,
+            attempt_no,
+            lambda record: record.update(
+                {
+                    "semantic_review": artifact.model_dump(mode="json"),
+                    "updated_at": _utc_now(),
+                }
+            ),
+        )
+
     def save_issue_ticket(self, ticket: IssueTicket, *, attempt_no: int) -> None:
         path = self._paths.tickets / f"{ticket.ticket_id}.json"
         path.write_text(ticket.model_dump_json(indent=2), encoding="utf-8")
@@ -163,7 +274,7 @@ class TestingRepository:
             return None
         return IssueTicket.model_validate_json(path.read_text(encoding="utf-8"))
 
-    def save_repair_response(self, qa_id: str, attempt_no: int, response: RepairIssueTicketResponse) -> None:
+    def save_repair_response(self, qa_id: str, attempt_no: int, response: RepairAgentResponse) -> None:
         self._mutate_submission(
             qa_id,
             attempt_no,
@@ -213,7 +324,33 @@ class TestingRepository:
             and existing["generation_run_id"] == request.generation_run_id
             and existing["generated_cypher"] == request.generated_cypher
             and existing["input_prompt_snapshot"] == request.input_prompt_snapshot
+            and existing.get("last_llm_raw_output", "") == request.last_llm_raw_output
+            and int(existing.get("generation_retry_count", 0)) == request.generation_retry_count
+            and existing.get("generation_failure_reasons", []) == request.generation_failure_reasons
+            and existing.get("generation_status", "generated") == "generated"
         )
+
+    def _generation_failure_submission_matches(
+        self,
+        existing: Dict[str, Any],
+        report: GenerationRunFailureReport,
+        generated_cypher: str,
+    ) -> bool:
+        return (
+            existing["id"] == report.id
+            and existing["question"] == report.question
+            and existing["generation_run_id"] == report.generation_run_id
+            and existing["generated_cypher"] == generated_cypher
+            and existing["input_prompt_snapshot"] == report.input_prompt_snapshot
+            and existing.get("last_llm_raw_output", "") == report.last_llm_raw_output
+            and existing.get("generation_status") == "generation_failed"
+            and existing.get("failure_reason") == report.failure_reason
+            and int(existing.get("generation_retry_count", 0)) == report.generation_retry_count
+            and existing.get("generation_failure_reasons", []) == report.generation_failure_reasons
+        )
+
+    def _generation_failure_report_path(self, qa_id: str, generation_run_id: str) -> Path:
+        return self._paths.generation_failures / f"{qa_id}__{generation_run_id}.json"
 
 
 def _utc_now() -> str:

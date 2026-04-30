@@ -24,12 +24,12 @@ EXTRA_CONSTRAINT_BY_REASON: dict[GenerationFailureReason, str] = {
 def render_llm_prompt(*, question: str, ko_context: str, extra_constraint_reason: GenerationFailureReason | None = None) -> str:
     extra_constraint = _render_extra_constraint(extra_constraint_reason)
     return f"""【任务说明】
-你是 cypher-generator-agent 的 Cypher 生成模型调用。请根据用户问题和 knowledge-agent 上下文，生成一条只读 Cypher 查询。
+你是 cypher-generator-agent 的 Cypher 生成模型调用。请根据用户问题和知识文档上下文，生成一条只读 Cypher 查询。
 
 【用户问题】
 {question.strip()}
 
-【knowledge-agent 上下文】
+【知识文档上下文】
 {ko_context.strip()}
 
 【输出格式】
@@ -41,7 +41,7 @@ def render_llm_prompt(*, question: str, ko_context: str, extra_constraint_reason
 
 【优先级】
 - 与输出形态、只读安全和提交前检查有关的要求，以本模板为准。
-- 与图谱 schema、业务词汇、查询模式和示例有关的知识，以 knowledge-agent 上下文为准。
+- 与图谱 schema、业务词汇、查询模式和示例有关的知识，以知识文档上下文为准。
 {extra_constraint}""".strip()
 
 

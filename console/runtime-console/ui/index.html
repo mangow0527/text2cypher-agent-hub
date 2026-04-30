@@ -12,84 +12,82 @@
       <div>
         <p class="eyebrow">QA Runtime / 运行结果中心</p>
         <h1>运行结果中心 <span>Runtime Results Center</span></h1>
-        <p>自动汇总来自 QA 生成服务的任务，查看全流程状态、当前生成的 Cypher，以及这一轮结果的质量概括。repair-agent 诊断区会直接读取 Testing Service 持久化的 IssueTicket 与 RepairAnalysisRecord，不再假设它回头向 CGS 拉取 prompt snapshot。</p>
-      </div>
-      <div class="pulse-card">
-        <span></span>
-        Live Task Feed
+        <p>只展示符合 testing-agent 新契约的正式运行索引；点击任务后进入独立详情页查看 cypher-generator-agent、testing-agent、repair-agent 的落盘证据。</p>
       </div>
     </section>
 
     <section class="panel services-panel">
       <div class="section-heading">
         <h2>服务运行状态 <span>Runtime Service Status</span></h2>
-        <p>继续保留五个核心服务的实时状态，方便你在查看任务时同步判断链路健康度。</p>
+        <p>展示五个核心服务的实时状态，用来判断当前运行链路是否健康。</p>
       </div>
       <div class="service-grid" id="service-grid"></div>
     </section>
 
-    <section class="workspace">
-      <aside class="panel task-list-panel">
-        <div class="section-heading">
-          <h2>任务列表 <span>Task Feed</span></h2>
-          <p>这里只展示来自 QA 生成服务的任务，页面会持续刷新。</p>
-        </div>
-        <div class="task-list" id="task-list"></div>
-      </aside>
+    <section class="panel difficulty-panel">
+      <div class="section-heading">
+        <h2>难度结论概览 <span>Final Verdict Summary by Difficulty</span></h2>
+        <p>八个难度分别统计最终结论为通过、失败、待定的真实运行样本。</p>
+      </div>
+      <div class="difficulty-grid" id="difficulty-grid"></div>
+    </section>
 
-      <section class="detail-column">
-        <article class="panel summary-panel">
-          <div class="section-heading">
-            <h2>运行结果总览 <span>Run Summary</span></h2>
-            <p id="task-meta">请选择左侧任务查看详情。</p>
-          </div>
-          <div class="overview-grid" id="overview-grid"></div>
-        </article>
-
-        <article class="panel cypher-panel">
-          <div class="section-heading">
-            <h2>Cypher 结果与质量 <span>Cypher Result & Quality</span></h2>
-            <p id="quality-summary">这里会展示当前生成的 Cypher 与测试服务给出的质量概括。</p>
-          </div>
-          <div class="quality-strip">
-            <span class="quality-pill" id="quality-pill">待评估</span>
-          </div>
-          <pre id="cypher-view"></pre>
-          <div class="findings" id="quality-findings"></div>
-        </article>
-
-        <article class="panel improvement-panel">
-          <div class="section-heading">
-            <h2>改进评估 <span>Improvement Assessment</span></h2>
-            <p id="improvement-summary">这里会展示当前轮次与上一轮相比是否更接近正确结果。</p>
-          </div>
-          <div class="quality-strip">
-            <span class="quality-pill" id="improvement-pill">首轮</span>
-          </div>
-          <div class="overview-grid" id="improvement-dimensions"></div>
-          <div class="findings" id="improvement-highlights"></div>
-        </article>
-
-        <article class="panel improvement-panel">
-          <div class="section-heading">
-            <h2>repair-agent 诊断摘要 <span>repair-agent Diagnosis</span></h2>
-            <p id="repair-summary">这里会展示 Testing Service 记录的 IssueTicket / RepairAnalysisRecord 中的 prompt snapshot 来源、主根因类型、验证模式和最终建议。</p>
-          </div>
-          <div class="overview-grid" id="repair-diagnosis-grid"></div>
-          <div class="findings" id="repair-diagnosis-findings"></div>
-        </article>
-
-        <section class="artifact-grid">
-          <article class="panel">
-            <h3>评测与执行 <span>Evaluation & Execution</span></h3>
-            <pre id="evaluation-view"></pre>
-          </article>
-          <article class="panel">
-            <h3>修复闭环 <span>Repair Trace</span></h3>
-            <pre id="repair-view"></pre>
-          </article>
-        </section>
-      </section>
+    <section class="panel task-table-panel">
+      <div class="section-heading">
+        <h2>任务明细表 <span>Task Table</span></h2>
+        <p>默认只加载轻量任务索引，点击表格行后再读取三个 agent 的落盘详情。</p>
+      </div>
+      <div class="table-toolbar">
+        <label>
+          <span>按难度过滤</span>
+          <select id="difficulty-filter">
+            <option value="">全部难度</option>
+            <option value="L1">L1</option>
+            <option value="L2">L2</option>
+            <option value="L3">L3</option>
+            <option value="L4">L4</option>
+            <option value="L5">L5</option>
+            <option value="L6">L6</option>
+            <option value="L7">L7</option>
+            <option value="L8">L8</option>
+          </select>
+        </label>
+        <label>
+          <span>按 ID 搜索</span>
+          <input id="id-search" type="search" placeholder="输入 QA ID" autocomplete="off" />
+        </label>
+        <label>
+          <span>每页数量</span>
+          <select id="page-size">
+            <option value="10">10</option>
+            <option value="20" selected>20</option>
+            <option value="50">50</option>
+          </select>
+        </label>
+        <p id="table-meta">正在加载任务索引...</p>
+      </div>
+      <div class="table-shell">
+        <table>
+          <thead>
+            <tr>
+              <th>难度</th>
+              <th>ID</th>
+              <th>生成状态</th>
+              <th>最终结论</th>
+              <th>当前阶段</th>
+              <th>尝试</th>
+              <th>更新时间</th>
+              <th>问题</th>
+            </tr>
+          </thead>
+          <tbody id="task-table-body"></tbody>
+        </table>
+      </div>
+      <div class="pagination-bar">
+        <button type="button" id="prev-page">上一页</button>
+        <span id="page-indicator">第 1 / 1 页</span>
+        <button type="button" id="next-page">下一页</button>
+      </div>
     </section>
   </main>
 

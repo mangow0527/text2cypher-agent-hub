@@ -82,6 +82,62 @@ class SingleQARedispatchService:
         )
         return result
 
+    def get_detail(self, qa_id: str) -> dict[str, Any]:
+        row, source_file = self._find_release_row(qa_id)
+        result = {
+            **row,
+            "source_file": source_file.name,
+            "job_id": source_file.stem,
+        }
+        self.module_logs.append(
+            module="redispatch",
+            level="info",
+            operation="qa_release_lookup_completed",
+            trace_id=qa_id,
+            status="completed",
+            request_body={"qa_id": qa_id},
+            response_body={"qa_id": qa_id, "source_file": source_file.name},
+        )
+        return result
+
+    def delete(self, qa_id: str) -> dict[str, Any]:
+        _row, source_file = self._find_release_row(qa_id)
+        remaining_rows: list[dict[str, Any]] = []
+        deleted = False
+        for line in source_file.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            if row.get("id") == qa_id:
+                deleted = True
+                continue
+            remaining_rows.append(row)
+
+        if not deleted:
+            raise AppError("QA_RELEASE_NOT_FOUND", f"Unable to find release row for qa_id={qa_id}.")
+
+        next_content = "".join(
+            f"{json.dumps(row, ensure_ascii=False, sort_keys=True)}\n" for row in remaining_rows
+        )
+        source_file.write_text(next_content, encoding="utf-8")
+
+        result = {
+            "qa_id": qa_id,
+            "deleted": True,
+            "source_file": source_file.name,
+            "job_id": source_file.stem,
+        }
+        self.module_logs.append(
+            module="redispatch",
+            level="info",
+            operation="qa_release_deleted",
+            trace_id=qa_id,
+            status="completed",
+            request_body={"qa_id": qa_id},
+            response_body=result,
+        )
+        return result
+
     def _find_release_row(self, qa_id: str) -> tuple[dict[str, Any], Path]:
         release_files = sorted(self.releases_root.glob("*.jsonl"), key=lambda path: path.stat().st_mtime, reverse=True)
         for path in release_files:

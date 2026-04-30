@@ -87,6 +87,24 @@ export interface QAStats {
   latest_updated_at?: string | null;
 }
 
+export interface QADetail {
+  id: string;
+  question?: string;
+  cypher?: string;
+  answer?: unknown;
+  difficulty?: string;
+  source_file: string;
+  job_id: string;
+  [key: string]: unknown;
+}
+
+export interface QADeleteResponse {
+  qa_id: string;
+  deleted: boolean;
+  source_file: string;
+  job_id: string;
+}
+
 export async function listJobs(): Promise<JobRecord[]> {
   const response = await fetch(`${API_BASE}/jobs`);
   return parseJsonOrThrow(response);
@@ -250,6 +268,21 @@ export async function listImports(): Promise<ImportRecord[]> {
 
 export async function getQAStats(): Promise<QAStats> {
   const response = await fetch(`${API_BASE}/qa/stats`);
+  return parseJsonOrThrow(response);
+}
+
+export async function getQADetail(qaId: string): Promise<QADetail> {
+  const response = await fetch(`${API_BASE}/qa/${encodeURIComponent(qaId)}`);
+  return parseJsonOrThrow(response);
+}
+
+export async function redispatchSingleQA(qaId: string): Promise<Record<string, unknown>> {
+  const response = await fetch(`${API_BASE}/qa/${encodeURIComponent(qaId)}/redispatch`, { method: "POST" });
+  return parseJsonOrThrow(response);
+}
+
+export async function deleteSingleQA(qaId: string): Promise<QADeleteResponse> {
+  const response = await fetch(`${API_BASE}/qa/${encodeURIComponent(qaId)}`, { method: "DELETE" });
   return parseJsonOrThrow(response);
 }
 

@@ -6,10 +6,15 @@ import uvicorn
 
 from .config import get_settings
 from .models import EvaluationStatusResponse, IssueTicket, QAGoldenResponse, SubmissionReceipt
-from .schemas import GeneratedCypherSubmissionRequest, QAGoldenRequest
+from .schemas import GeneratedCypherSubmissionRequest, GenerationRunFailureReport, QAGoldenRequest
 from .service import get_testing_service
 
 app = FastAPI(title="testing-agent", version="2.0.0")
+
+
+@app.on_event("startup")
+async def resume_pending_evaluations() -> None:
+    await get_testing_service().resume_pending_evaluations()
 
 
 @app.get("/", include_in_schema=False)
@@ -39,6 +44,14 @@ async def ingest_golden(request: QAGoldenRequest) -> QAGoldenResponse:
 async def submit_evaluation(request: GeneratedCypherSubmissionRequest) -> SubmissionReceipt:
     try:
         return await get_testing_service().ingest_submission(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/evaluations/generation-failures", response_model=SubmissionReceipt)
+async def submit_generation_failure(request: GenerationRunFailureReport) -> SubmissionReceipt:
+    try:
+        return await get_testing_service().ingest_generation_failure(request)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

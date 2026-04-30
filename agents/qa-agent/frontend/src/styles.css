@@ -175,6 +175,31 @@ input {
   margin-bottom: 16px;
 }
 
+.qa-detail-lookup {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.qa-detail-search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.qa-detail-result {
+  display: grid;
+  gap: 14px;
+}
+
+.qa-detail-copy {
+  margin: 0;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .qa-stats-meta {
   color: var(--muted);
   font-size: 13px;
@@ -1011,6 +1036,24 @@ input {
   font-size: 14px;
 }
 
+.code-block {
+  max-height: 360px;
+  margin: 0;
+  overflow: auto;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: #101827;
+  color: #e8eefc;
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.code-block code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+
 .result-action-row {
   display: flex;
   gap: 10px;
@@ -1404,6 +1447,10 @@ input {
   }
 
   .list-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .qa-detail-search {
     grid-template-columns: 1fr;
   }
 

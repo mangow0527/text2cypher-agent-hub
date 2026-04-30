@@ -17,21 +17,18 @@ class Settings(BaseSettings):
     data_dir: str = "data/testing_service"
     repair_service_url: str = "http://127.0.0.1:8002"
     request_timeout_seconds: float = 120.0
-    tugraph_url: str = "http://118.196.92.128:7070"
+    tugraph_url: str = "http://114.215.172.132:7070"
     tugraph_username: str = "admin"
-    tugraph_password: str = "admin"
-    tugraph_graph: str = "default"
+    tugraph_password: str = "73@TuGraph"
+    tugraph_graph: str = "network_schema_v10"
     mock_tugraph: bool = True
 
     llm_enabled: bool = True
-    llm_provider: str = "openai_compatible"
+    llm_provider: str = "openai_chat"
     llm_base_url: Optional[str] = None
     llm_api_key: Optional[str] = None
     llm_model: Optional[str] = None
     llm_temperature: float = 0.1
-    llm_max_retries: int = 5
-    llm_retry_base_delay_seconds: float = 2.0
-    llm_max_concurrency: int = 1
 
     model_config = SettingsConfigDict(
         env_prefix="TESTING_SERVICE_",

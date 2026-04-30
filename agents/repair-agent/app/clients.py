@@ -11,173 +11,13 @@ import httpx
 
 from .llm_retry import classify_retryable_error, extract_request_id, sleep_with_backoff
 from .models import IssueTicket, KnowledgeRepairSuggestionRequest
+from .prompting import build_repair_diagnosis_prompt, compact_diagnosis_context
 from services.repair_agent.app.analysis import build_diagnosis_context
 
 logger = logging.getLogger("repair_service")
 
 
-def _dedupe_lines(text: str) -> str:
-    seen: set[str] = set()
-    compacted: list[str] = []
-    for raw_line in text.splitlines():
-        line = raw_line.rstrip()
-        normalized = line.strip()
-        if normalized and normalized in seen:
-            continue
-        if normalized:
-            seen.add(normalized)
-        if line or (compacted and compacted[-1] != ""):
-            compacted.append(line)
-    while compacted and compacted[-1] == "":
-        compacted.pop()
-    return "\n".join(compacted)
-
-
-def _compact_prompt_snapshot(prompt_snapshot: str, max_chars: int = 1200) -> str:
-    compacted = _dedupe_lines(prompt_snapshot.strip())
-    if len(compacted) <= max_chars:
-        return compacted
-    head_budget = max_chars // 2
-    tail_budget = max_chars - head_budget - len("\n...[prompt truncated]...\n")
-    return compacted[:head_budget].rstrip() + "\n...[prompt truncated]...\n" + compacted[-tail_budget:].lstrip()
-
-
-def _trim_text(value: str | None, max_chars: int) -> str | None:
-    if not value:
-        return value
-    if len(value) <= max_chars:
-        return value
-    return value[: max_chars - 3].rstrip() + "..."
-
-
-def _compact_json_value(value: Any, max_chars: int = 600) -> Any:
-    serialized = json.dumps(value, ensure_ascii=False, default=str)
-    if len(serialized) <= max_chars:
-        return value
-    if isinstance(value, list):
-        compacted = value[:1]
-    elif isinstance(value, dict):
-        compacted = {key: value[key] for key in list(value)[:6]}
-    else:
-        compacted = str(value)
-    serialized = json.dumps(compacted, ensure_ascii=False, default=str)
-    if len(serialized) <= max_chars:
-        return compacted
-    return _trim_text(serialized, max_chars)
-
-
-def _build_repair_ticket_payload(ticket: IssueTicket) -> dict[str, Any]:
-    execution = ticket.actual.execution
-    return {
-        "ticket_id": ticket.ticket_id,
-        "id": ticket.id,
-        "difficulty": ticket.difficulty,
-        "question": ticket.question,
-        "expected": {"cypher": ticket.expected.cypher},
-        "actual": {
-            "generated_cypher": ticket.actual.generated_cypher,
-            "execution": {
-                "success": execution.success,
-                "row_count": execution.row_count,
-                "error_message": _trim_text(execution.error_message, 240),
-                "elapsed_ms": execution.elapsed_ms,
-            },
-        },
-        "evaluation": {
-            "verdict": ticket.evaluation.verdict,
-            "primary_metrics": ticket.evaluation.primary_metrics.model_dump(mode="json"),
-            "secondary_signals": ticket.evaluation.secondary_signals.model_dump(mode="json"),
-        },
-    }
-
-
-def _build_repair_ticket_payload_from_context(context: Dict[str, Any]) -> dict[str, Any]:
-    evaluation_summary = context.get("evaluation_summary") or {}
-    return {
-        "ticket_id": context.get("ticket_id") or "diagnosis-context",
-        "id": context.get("id") or "unknown",
-        "difficulty": context.get("difficulty") or "L1",
-        "question": context.get("question") or "",
-        "expected": {"cypher": (context.get("sql_pair") or {}).get("expected_cypher", "")},
-        "actual": {"generated_cypher": (context.get("sql_pair") or {}).get("actual_cypher", "")},
-        "evaluation": {
-            "verdict": evaluation_summary.get("verdict") or "fail",
-            "primary_metrics": evaluation_summary.get("primary_metrics") or {},
-            "secondary_signals": evaluation_summary.get("secondary_signals") or {},
-        },
-    }
-
-
-def _compact_relevant_prompt_fragments(fragments: Dict[str, Any]) -> Dict[str, Any]:
-    compacted: Dict[str, Any] = {}
-    seen_lines: set[str] = set()
-    for key, value in fragments.items():
-        if isinstance(value, str):
-            unique_lines: list[str] = []
-            for raw_line in value.splitlines():
-                line = raw_line.strip()
-                if not line or line in seen_lines:
-                    continue
-                seen_lines.add(line)
-                unique_lines.append(raw_line)
-            compacted[key] = _compact_prompt_snapshot("\n".join(unique_lines), max_chars=320)
-        else:
-            compacted[key] = value
-    return compacted
-
-
-def _compact_recent_repairs(repairs: Any) -> list[dict[str, Any]]:
-    if not isinstance(repairs, list):
-        return []
-    compacted: list[dict[str, Any]] = []
-    for repair in repairs[:2]:
-        if not isinstance(repair, dict):
-            continue
-        compacted.append(
-            {
-                "knowledge_type": repair.get("knowledge_type"),
-                "suggestion": _trim_text(str(repair.get("suggestion") or ""), 180),
-            }
-        )
-    return compacted
-
-
-def _compact_prompt_evidence_for_context(context: Dict[str, Any]) -> str:
-    prompt_evidence = str(context.get("prompt_evidence") or "")
-    fragments = context.get("relevant_prompt_fragments") or {}
-    fragment_lines: set[str] = set()
-    if isinstance(fragments, dict):
-        for value in fragments.values():
-            if not isinstance(value, str):
-                continue
-            fragment_lines.update(line.strip() for line in value.splitlines() if line.strip())
-    if not fragment_lines:
-        return _compact_prompt_snapshot(prompt_evidence, max_chars=1200)
-    filtered_lines = [
-        raw_line
-        for raw_line in prompt_evidence.splitlines()
-        if raw_line.strip() and raw_line.strip() not in fragment_lines
-    ]
-    return _compact_prompt_snapshot("\n".join(filtered_lines), max_chars=1200)
-
-
-def _compact_diagnosis_context(context: Dict[str, Any]) -> Dict[str, Any]:
-    generation_evidence = dict(context.get("generation_evidence") or {})
-    generation_evidence.pop("input_prompt_snapshot", None)
-    return {
-        "question": context.get("question"),
-        "difficulty": context.get("difficulty"),
-        "sql_pair": context.get("sql_pair"),
-        "evaluation_summary": context.get("evaluation_summary"),
-        "failure_diff": context.get("failure_diff"),
-        "prompt_evidence": _compact_prompt_evidence_for_context(context),
-        "generation_evidence": _compact_json_value(generation_evidence, max_chars=900),
-        "relevant_prompt_fragments": _compact_relevant_prompt_fragments(context.get("relevant_prompt_fragments", {})),
-        "recent_applied_repairs": _compact_recent_repairs(context.get("recent_applied_repairs")),
-    }
-
-
-class OpenAICompatibleRepairAnalyzer:
+class OpenAIChatCompletionRepairAnalyzer:
     def __init__(
         self,
         base_url: str,
@@ -212,21 +52,10 @@ class OpenAICompatibleRepairAnalyzer:
             if ticket is None:
                 raise ValueError("ticket is required when context is not provided")
             context = build_diagnosis_context(ticket, prompt_snapshot or "")
-        compact_context = _compact_diagnosis_context(context)
-        compact_ticket = _build_repair_ticket_payload(ticket) if ticket is not None else _build_repair_ticket_payload_from_context(context)
-        system_prompt = (
-            "You are the Knowledge Repair Suggestion Service for a Text2Cypher system. "
-            "Diagnose root cause using only these knowledge types: cypher_syntax, few_shot, system_prompt, business_knowledge. "
-            "Return JSON only with keys primary_knowledge_type, secondary_knowledge_types, candidate_patch_types, confidence, suggestion, rationale, need_validation."
-        )
-        user_prompt = (
-            f"IssueTicketSummary: {json.dumps(compact_ticket, ensure_ascii=False)}\n"
-            f"DiagnosisContext: {json.dumps(compact_context, ensure_ascii=False)}\n"
-            "primary_knowledge_type, secondary_knowledge_types, and candidate_patch_types must use only: "
-            "cypher_syntax, few_shot, system_prompt, business_knowledge."
-        )
+        compact_context = compact_diagnosis_context(context)
+        system_prompt, user_prompt = build_repair_diagnosis_prompt(context, ticket=ticket)
         started = time.monotonic()
-        compact_ticket_chars = len(json.dumps(compact_ticket, ensure_ascii=False, default=str))
+        compact_ticket_chars = user_prompt.find("\nDiagnosisContext:")
         compact_context_chars = len(json.dumps(compact_context, ensure_ascii=False, default=str))
         logger.warning(
             "llm_call_started target=%s qa_id=%s ticket_id=%s model=%s base_url=%s context_chars=%s compact_ticket_chars=%s",
@@ -270,6 +99,8 @@ class OpenAICompatibleRepairAnalyzer:
                         )
                         response.raise_for_status()
                         payload = response.json()
+                        payload["_system_prompt"] = system_prompt
+                        payload["_user_prompt"] = user_prompt
                         break
                     except Exception as exc:
                         elapsed_ms = int((time.monotonic() - started) * 1000)
@@ -339,7 +170,8 @@ class OpenAICompatibleRepairAnalyzer:
                         )
                         raise
 
-        content = payload["choices"][0]["message"]["content"].strip()
+        raw_content = payload["choices"][0]["message"]["content"].strip()
+        content = raw_content
         if content.startswith("```"):
             content = content.strip("`")
             if content.startswith("json"):
@@ -348,14 +180,22 @@ class OpenAICompatibleRepairAnalyzer:
         parsed = json.loads(content)
         if not isinstance(parsed, dict):
             raise ValueError("repair diagnosis response must be a JSON object")
-        if "primary_knowledge_type" not in parsed and parsed.get("knowledge_types"):
-            knowledge_types = parsed.get("knowledge_types") or []
-            primary = knowledge_types[0] if knowledge_types else "system_prompt"
-            secondary = knowledge_types[1:3] if isinstance(knowledge_types, list) else []
-            parsed["primary_knowledge_type"] = primary
-            parsed["secondary_knowledge_types"] = secondary
-        if "need_validation" not in parsed:
-            parsed["need_validation"] = parsed.get("need_experiments", False)
+        parsed["_system_prompt"] = system_prompt
+        parsed["_user_prompt"] = user_prompt
+        parsed["_raw_output"] = raw_content
+        required_fields = {
+            "repairable",
+            "non_repairable_reason",
+            "primary_knowledge_type",
+            "secondary_knowledge_types",
+            "confidence",
+            "suggestion",
+            "rationale",
+        }
+        missing_fields = sorted(required_fields - set(parsed))
+        if missing_fields:
+            raise ValueError(f"missing required diagnosis fields: {', '.join(missing_fields)}")
+        _validate_chinese_diagnosis_text(parsed)
         elapsed_ms = int((time.monotonic() - started) * 1000)
         request_id = extract_request_id(getattr(response, "headers", None))
         logger.warning(
@@ -380,7 +220,21 @@ class OpenAICompatibleRepairAnalyzer:
         return parsed
 
 
-class KnowledgeOpsRepairApplyClient:
+def _validate_chinese_diagnosis_text(parsed: Dict[str, Any]) -> None:
+    text_fields = ["suggestion", "rationale"]
+    if str(parsed.get("non_repairable_reason") or "").strip():
+        text_fields.append("non_repairable_reason")
+    for field in text_fields:
+        value = parsed.get(field)
+        if not isinstance(value, str) or not _contains_chinese(value):
+            raise ValueError(f"repair diagnosis response must contain Chinese diagnosis text in {field}")
+
+
+def _contains_chinese(value: str) -> bool:
+    return any("\u4e00" <= char <= "\u9fff" for char in value)
+
+
+class KnowledgeAgentRepairApplyClient:
     def __init__(
         self,
         apply_url: str,
@@ -388,12 +242,14 @@ class KnowledgeOpsRepairApplyClient:
         capture_dir: Optional[str] = None,
         sleep_fn: Callable[[float], Awaitable[None]] = asyncio.sleep,
         retry_delay_seconds: float = 0.1,
+        max_attempts: int = 5,
     ) -> None:
         self.apply_url = apply_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.capture_dir = capture_dir
         self.sleep_fn = sleep_fn
         self.retry_delay_seconds = retry_delay_seconds
+        self.max_attempts = max(1, max_attempts)
 
     async def apply(self, payload: KnowledgeRepairSuggestionRequest) -> Dict[str, Any] | None:
         self._capture_payload(payload)
@@ -406,12 +262,12 @@ class KnowledgeOpsRepairApplyClient:
                 attempts += 1
                 try:
                     response = await client.post(self.apply_url, json=request_payload)
-                except httpx.RequestError:
+                except httpx.RequestError as exc:
                     elapsed_ms = int((time.monotonic() - started) * 1000)
                     logger.warning(
                         "outbound_call_failed",
                         extra={
-                            "target": "knowledge_ops.repairs_apply",
+                            "target": "knowledge_agent.repairs_apply",
                             "analysis_id": payload.id,
                             "knowledge_types": knowledge_types,
                             "attempt": attempts,
@@ -419,7 +275,8 @@ class KnowledgeOpsRepairApplyClient:
                             "error": "transport_error",
                         },
                     )
-                    # Transport failures are retried the same way as non-200 responses.
+                    if attempts >= self.max_attempts:
+                        raise RuntimeError(f"knowledge-agent repair apply failed after {attempts} attempts: transport_error") from exc
                     await self.sleep_fn(self.retry_delay_seconds)
                     continue
                 if response.status_code == 200:
@@ -427,7 +284,7 @@ class KnowledgeOpsRepairApplyClient:
                     logger.info(
                         "outbound_call_ok",
                         extra={
-                            "target": "knowledge_ops.repairs_apply",
+                            "target": "knowledge_agent.repairs_apply",
                             "analysis_id": payload.id,
                             "knowledge_types": knowledge_types,
                             "attempts": attempts,
@@ -439,12 +296,28 @@ class KnowledgeOpsRepairApplyClient:
                         return response.json()
                     except Exception:
                         return {"raw": response.text}
+                paused_response = _knowledge_repair_apply_paused_response(response)
+                if paused_response is not None:
+                    elapsed_ms = int((time.monotonic() - started) * 1000)
+                    logger.warning(
+                        "outbound_call_paused",
+                        extra={
+                            "target": "knowledge_agent.repairs_apply",
+                            "analysis_id": payload.id,
+                            "knowledge_types": knowledge_types,
+                            "attempts": attempts,
+                            "status_code": response.status_code,
+                            "elapsed_ms": elapsed_ms,
+                            "code": paused_response["code"],
+                        },
+                    )
+                    return paused_response
                 if 400 <= response.status_code < 500:
                     elapsed_ms = int((time.monotonic() - started) * 1000)
                     logger.warning(
                         "outbound_call_failed",
                         extra={
-                            "target": "knowledge_ops.repairs_apply",
+                            "target": "knowledge_agent.repairs_apply",
                             "analysis_id": payload.id,
                             "knowledge_types": knowledge_types,
                             "attempts": attempts,
@@ -454,10 +327,14 @@ class KnowledgeOpsRepairApplyClient:
                         },
                     )
                     response.raise_for_status()
+                if attempts >= self.max_attempts:
+                    raise RuntimeError(
+                        f"knowledge-agent repair apply failed after {attempts} attempts: HTTP {response.status_code}"
+                    )
                 logger.warning(
                     "outbound_call_retry",
                     extra={
-                        "target": "knowledge_ops.repairs_apply",
+                        "target": "knowledge_agent.repairs_apply",
                         "analysis_id": payload.id,
                         "knowledge_types": knowledge_types,
                         "attempt": attempts,
@@ -479,3 +356,20 @@ class KnowledgeOpsRepairApplyClient:
             )
         except Exception:
             return
+
+
+def _knowledge_repair_apply_paused_response(response: httpx.Response) -> Dict[str, Any] | None:
+    try:
+        payload = response.json()
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("code") != "KNOWLEDGE_REPAIR_APPLY_DISABLED":
+        return None
+    message = payload.get("message")
+    return {
+        "status": "paused",
+        "code": "KNOWLEDGE_REPAIR_APPLY_DISABLED",
+        "message": message if isinstance(message, str) and message else "Knowledge repair apply is disabled.",
+    }

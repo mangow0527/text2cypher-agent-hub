@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>任务详情 - 运行结果中心</title>
+  <link rel="stylesheet" href="/ui/styles.css" />
+</head>
+<body>
+  <main class="layout">
+    <section class="masthead">
+      <div>
+        <p class="eyebrow">QA Runtime / 任务详情</p>
+        <h1>任务详情 <span>Runtime Task Detail</span></h1>
+        <p id="task-meta">正在加载任务详情。</p>
+      </div>
+      <a class="back-link" href="/console">返回任务明细表</a>
+    </section>
+
+    <article class="panel summary-panel">
+      <div class="section-heading">
+        <h2>运行结果总览 <span>Run Summary</span></h2>
+      </div>
+      <div class="overview-grid" id="overview-grid"></div>
+    </article>
+
+    <section class="panel agent-evidence-panel">
+      <div class="section-heading">
+        <h2>Agent 落盘信息 <span>Persisted Agent Evidence</span></h2>
+        <p>按 cypher-generator-agent、testing-agent、repair-agent 展示单题完整证据。</p>
+      </div>
+      <div class="pipeline" id="pipeline-view">
+        <p class="empty">正在加载三个 agent 的落盘信息。</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="/ui/detail.js"></script>
+</body>
+</html>

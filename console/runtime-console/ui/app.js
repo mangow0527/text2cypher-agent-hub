@@ -1,76 +1,63 @@
-const taskList = document.getElementById('task-list');
 const serviceGrid = document.getElementById('service-grid');
-const taskMeta = document.getElementById('task-meta');
-const overviewGrid = document.getElementById('overview-grid');
-const qualityPill = document.getElementById('quality-pill');
-const qualitySummary = document.getElementById('quality-summary');
-const qualityFindings = document.getElementById('quality-findings');
-const improvementPill = document.getElementById('improvement-pill');
-const improvementSummary = document.getElementById('improvement-summary');
-const improvementDimensions = document.getElementById('improvement-dimensions');
-const improvementHighlights = document.getElementById('improvement-highlights');
-const repairSummary = document.getElementById('repair-summary');
-const repairDiagnosisGrid = document.getElementById('repair-diagnosis-grid');
-const repairDiagnosisFindings = document.getElementById('repair-diagnosis-findings');
-const cypherView = document.getElementById('cypher-view');
-const evaluationView = document.getElementById('evaluation-view');
-const repairView = document.getElementById('repair-view');
+const difficultyGrid = document.getElementById('difficulty-grid');
+const taskTableBody = document.getElementById('task-table-body');
+const difficultyFilter = document.getElementById('difficulty-filter');
+const idSearch = document.getElementById('id-search');
+const tableMeta = document.getElementById('table-meta');
+const pageSizeSelect = document.getElementById('page-size');
+const prevPageButton = document.getElementById('prev-page');
+const nextPageButton = document.getElementById('next-page');
+const pageIndicator = document.getElementById('page-indicator');
 
-let selectedTaskId = null;
+const generationLabels = {
+  generated: '生成成功',
+  generation_failed: '生成失败',
+  service_failed: '服务失败',
+};
 
-function pretty(value) {
-  return JSON.stringify(value ?? {}, null, 2);
+const verdictLabels = {
+  pass: '通过',
+  fail: '失败',
+  pending: '待定',
+};
+
+let currentPage = 1;
+let currentPagination = {
+  page: 1,
+  page_size: 20,
+  total: 0,
+  total_pages: 1,
+  has_previous: false,
+  has_next: false,
+};
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 function tone(status) {
   switch (status) {
+    case 'pass':
     case 'passed':
-    case 'good':
+    case 'generated':
+    case 'ok':
       return 'ok';
+    case 'fail':
     case 'failed':
-    case 'bad':
+    case 'service_failed':
       return 'danger';
     case 'running':
-    case 'risky':
+    case 'pending':
+    case 'generation_failed':
       return 'warn';
     default:
       return 'neutral';
   }
-}
-
-function renderTaskList(tasks) {
-  if (!tasks.length) {
-    taskList.innerHTML = '<p class="empty">暂无可展示的 QA 任务。</p>';
-    return;
-  }
-  if (!selectedTaskId) {
-    selectedTaskId = tasks[0].id;
-  }
-  taskList.innerHTML = tasks
-    .map(
-      (task) => `
-        <button type="button" class="task-card ${task.id === selectedTaskId ? 'is-active' : ''}" data-task-id="${task.id}">
-          <div class="task-card-head">
-            <strong>${task.id}</strong>
-            <span class="status-pill tone-${tone(task.final_verdict === 'pass' ? 'passed' : task.final_verdict === 'fail' ? 'failed' : 'pending')}">${task.final_verdict}</span>
-          </div>
-          <p>${task.question || '未提供问题文本'}</p>
-          <div class="task-card-meta">
-            <span>${task.current_stage}</span>
-            <span>${task.cypher_quality_label_zh}</span>
-            <span>${task.improvement_status}</span>
-          </div>
-        </button>
-      `
-    )
-    .join('');
-  Array.from(document.querySelectorAll('.task-card')).forEach((node) => {
-    node.addEventListener('click', () => {
-      selectedTaskId = node.dataset.taskId;
-      loadTaskDetail();
-      renderTaskList(tasks);
-    });
-  });
 }
 
 function renderServiceCards(services) {
@@ -80,207 +67,205 @@ function renderServiceCards(services) {
         <article class="service-card">
           <div class="task-card-head">
             <div>
-              <strong>${service.label_zh}</strong>
-              <p>${service.label_en}</p>
+              <strong>${escapeHtml(service.label_zh)}</strong>
+              <p>${escapeHtml(service.label_en)}</p>
             </div>
-            <span class="status-pill tone-${tone(service.status)}">${service.status}</span>
+            <span class="status-pill tone-${tone(service.status)}">${escapeHtml(service.status)}</span>
           </div>
           <div class="task-card-meta">
-            <span>Port ${service.port}</span>
-            <span>${service.base_url}</span>
+            <span>Port ${escapeHtml(service.port)}</span>
+            <span>${escapeHtml(service.base_url)}</span>
           </div>
-          <p>${service.description_zh}</p>
+          <p>${escapeHtml(service.description_zh)}</p>
         </article>
       `
     )
     .join('');
 }
 
-function renderOverview(detail) {
-  taskMeta.textContent = `${detail.id} · ${detail.question || '未提供问题文本'}`;
-  overviewGrid.innerHTML = Object.entries(detail.stages || {})
+function percentage(value, total) {
+  if (!total) {
+    return 0;
+  }
+  return Math.round((value / total) * 1000) / 10;
+}
+
+function pieStyle(bucket) {
+  const total = bucket.total || 0;
+  if (!total) {
+    return 'background: #ece2d3;';
+  }
+  const passed = percentage(bucket.pass || 0, total);
+  const failed = percentage(bucket.fail || 0, total);
+  const pending = percentage(bucket.pending || 0, total);
+  const passedEnd = passed;
+  const failedEnd = passed + failed;
+  const pendingEnd = failedEnd + pending;
+  return `background: conic-gradient(#177245 0 ${passedEnd}%, #af3d36 ${passedEnd}% ${failedEnd}%, #8c5b0a ${failedEnd}% ${pendingEnd}%, #ece2d3 ${pendingEnd}% 100%);`;
+}
+
+function renderDifficultySummary(summary) {
+  const buckets = summary.buckets || [];
+  if (!buckets.length) {
+    difficultyGrid.innerHTML = '<p class="empty">暂无难度统计数据。</p>';
+    return;
+  }
+  difficultyGrid.innerHTML = buckets
     .map(
-      ([stageKey, stage]) => `
-        <article class="overview-card">
-          <div>
-            <h3>${stage.label_zh}</h3>
-            <p>${stage.label_en}</p>
+      (bucket) => `
+        <article class="difficulty-card">
+          <div class="difficulty-card-head">
+            <strong>${escapeHtml(bucket.difficulty)}</strong>
+            <span>${escapeHtml(bucket.total)} 个样本</span>
           </div>
-          <span class="status-pill tone-${tone(stage.status)}">${stage.status}</span>
-          <small>${stageKey}</small>
+          <div class="pie" style="${pieStyle(bucket)}" aria-label="${escapeHtml(bucket.difficulty)} 最终结论分布"></div>
+          <div class="difficulty-counts">
+            <span><i class="legend-dot ok"></i>${verdictLabels.pass}: ${escapeHtml(bucket.pass || 0)}</span>
+            <span><i class="legend-dot danger"></i>${verdictLabels.fail}: ${escapeHtml(bucket.fail || 0)}</span>
+            <span><i class="legend-dot warn"></i>${verdictLabels.pending}: ${escapeHtml(bucket.pending || 0)}</span>
+          </div>
         </article>
       `
     )
     .join('');
 }
 
-function renderQuality(detail) {
-  const quality = detail.cypher_quality || {};
-  qualityPill.textContent = quality.label_zh || '待评估';
-  qualityPill.className = `quality-pill tone-${tone(quality.label || 'pending')}`;
-  qualitySummary.textContent = quality.summary_zh || '暂无质量概括。';
-  cypherView.textContent = detail.generated_cypher || '// 暂无 Cypher';
-  qualityFindings.innerHTML = (quality.findings || [])
-    .map((finding) => `<div class="finding-item">${finding}</div>`)
-    .join('');
+function renderPagination() {
+  const page = currentPagination.page || 1;
+  const totalPages = currentPagination.total_pages || 1;
+  pageIndicator.textContent = `第 ${page} / ${totalPages} 页`;
+  prevPageButton.disabled = !currentPagination.has_previous;
+  nextPageButton.disabled = !currentPagination.has_next;
 }
 
-function renderArtifacts(detail) {
-  evaluationView.textContent = pretty({
-    evaluation: detail.artifacts?.evaluation,
-    execution: detail.artifacts?.execution,
-    golden: detail.artifacts?.golden,
+function renderTaskTable(tasks) {
+  if (!tasks.length) {
+    taskTableBody.innerHTML = '<tr><td colspan="8" class="empty-cell">暂无符合新契约的运行任务。</td></tr>';
+    tableMeta.textContent = `共 ${currentPagination.total || 0} 个任务，当前页 0 个`;
+    renderPagination();
+    return;
+  }
+  tableMeta.textContent = `共 ${currentPagination.total} 个任务，当前页 ${tasks.length} 个`;
+  taskTableBody.innerHTML = tasks
+    .map(
+      (task) => `
+        <tr data-task-id="${escapeHtml(task.id)}" tabindex="0">
+          <td>${escapeHtml(task.difficulty)}</td>
+          <td><strong>${escapeHtml(task.id)}</strong></td>
+          <td><span class="status-pill tone-${tone(task.generation_status)}">${escapeHtml(generationLabels[task.generation_status])}</span></td>
+          <td><span class="status-pill tone-${tone(task.final_verdict)}">${escapeHtml(verdictLabels[task.final_verdict] || '待定')}</span></td>
+          <td>${escapeHtml(task.current_stage || 'pending')}</td>
+          <td>${escapeHtml(task.attempt_no ?? 0)}</td>
+          <td>${escapeHtml(task.updated_at || '未提供')}</td>
+          <td>${escapeHtml(task.question || '未提供问题文本')}</td>
+        </tr>
+      `
+    )
+    .join('');
+  Array.from(taskTableBody.querySelectorAll('tr[data-task-id]')).forEach((row) => {
+    const openDetail = () => {
+      window.location.href = `/console/tasks/${encodeURIComponent(row.dataset.taskId)}`;
+    };
+    row.addEventListener('click', openDetail);
+    row.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openDetail();
+      }
+    });
   });
-  repairView.textContent = pretty(detail.artifacts?.repair);
+  renderPagination();
 }
 
-function renderRepairDiagnosis(detail) {
-  const analysis = detail.artifacts?.repair?.analysis || {};
-  const issueTicket = detail.artifacts?.repair?.issue_ticket || {};
-  const request = analysis.knowledge_repair_request || {};
-  const validationResult = analysis.validation_result || {};
-  const promptSnapshotSource = analysis.prompt_snapshot
-    ? 'Testing Service 持久化的 RepairAnalysisRecord.prompt_snapshot'
-    : issueTicket.generation_evidence?.input_prompt_snapshot
-      ? 'Testing Service 持久化的 IssueTicket.generation_evidence.input_prompt_snapshot'
-      : '未提供';
-  repairSummary.textContent = analysis.rationale || '暂无 repair-agent 诊断摘要。';
-  repairDiagnosisGrid.innerHTML = [
-    ['Prompt snapshot 来源', promptSnapshotSource],
-    ['主根因类型', analysis.primary_knowledge_type || '未提供'],
-    ['候选修复类型', (analysis.candidate_patch_types || []).join(', ') || '未提供'],
-    ['验证模式', analysis.validation_mode || 'disabled'],
-    ['最终下发类型', (request.knowledge_types || []).join(', ') || '未提供'],
-  ]
-    .map(
-      ([label, value]) => `
-        <article class="overview-card">
-          <div>
-            <h3>${label}</h3>
-            <p>${value}</p>
-          </div>
-        </article>
-      `
-    )
-    .join('');
-  repairDiagnosisFindings.innerHTML = [
-    request.suggestion ? `最终建议: ${request.suggestion}` : null,
-    (validationResult.validated_patch_types || []).length
-      ? `验证通过: ${(validationResult.validated_patch_types || []).join(', ')}`
-      : null,
-    (validationResult.rejected_patch_types || []).length
-      ? `验证拒绝: ${(validationResult.rejected_patch_types || []).join(', ')}`
-      : null,
-    ...((validationResult.validation_reasoning || []).map((item) => `验证说明: ${item}`)),
-  ]
-    .filter(Boolean)
-    .map((item) => `<div class="finding-item">${item}</div>`)
-    .join('');
-}
-
-function improvementTone(status) {
-  switch (status) {
-    case 'improved':
-      return 'ok';
-    case 'regressed':
-      return 'danger';
-    case 'unchanged':
-      return 'warn';
-    default:
-      return 'neutral';
+function taskQueryParams() {
+  const params = new URLSearchParams();
+  params.set('page', String(currentPage));
+  params.set('page_size', pageSizeSelect.value || '20');
+  if (difficultyFilter.value) {
+    params.set('difficulty', difficultyFilter.value);
   }
-}
-
-function improvementLabel(status) {
-  const labels = {
-    improved: '已改善',
-    regressed: '已回退',
-    unchanged: '无明显变化',
-    not_comparable: '暂不可比较',
-  };
-  return labels[status] || '暂不可比较';
-}
-
-function improvementOverview(dimensions) {
-  const values = Object.values(dimensions || {});
-  if (!values.length || values.every((value) => value === 'not_comparable')) {
-    return { label: '暂不可比较', tone: 'neutral' };
+  if (idSearch.value.trim()) {
+    params.set('q', idSearch.value.trim());
   }
-  const improved = values.filter((value) => value === 'improved').length;
-  const regressed = values.filter((value) => value === 'regressed').length;
-  const unchanged = values.filter((value) => value === 'unchanged').length;
-  const parts = [`${improved} 项改善`, `${regressed} 项回退`, `${unchanged} 项不变`];
-  const notComparable = values.filter((value) => value === 'not_comparable').length;
-  if (notComparable) {
-    parts.push(`${notComparable} 项暂不可比较`);
-  }
-  return {
-    label: parts.join(' / '),
-    tone: regressed ? 'danger' : improved ? 'ok' : 'warn',
-  };
-}
-
-function renderImprovement(detail) {
-  const assessment = detail.improvement_assessment || {};
-  const dimensions = assessment.dimensions || {};
-  const overview = improvementOverview(dimensions);
-  improvementPill.textContent = overview.label;
-  improvementPill.className = `quality-pill tone-${overview.tone}`;
-  improvementSummary.textContent = assessment.summary_zh || '暂无改进评估。';
-
-  improvementDimensions.innerHTML = Object.entries(dimensions)
-    .map(
-      ([key, value]) => `
-        <article class="overview-card">
-          <div>
-            <h3>${key}</h3>
-            <p>${improvementLabel(value)}</p>
-          </div>
-          <span class="status-pill tone-${improvementTone(value)}">${value}</span>
-        </article>
-      `
-    )
-    .join('');
-  improvementHighlights.innerHTML = (assessment.highlights || [])
-    .map((item) => `<div class="finding-item">${item}</div>`)
-    .join('');
+  return params;
 }
 
 async function loadTasks() {
-  const response = await fetch('/api/v1/tasks');
-  const payload = await response.json();
-  renderTaskList(payload.tasks || []);
-  if (selectedTaskId) {
-    loadTaskDetail().catch((error) => {
-      taskMeta.textContent = `详情加载失败: ${String(error)}`;
-    });
+  const response = await fetch(`/api/v1/tasks?${taskQueryParams().toString()}`);
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
   }
+  const payload = await response.json();
+  currentPagination = payload.pagination || currentPagination;
+  currentPage = currentPagination.page || 1;
+  renderTaskTable(payload.tasks || []);
 }
 
 async function loadServices() {
   const response = await fetch('/api/v1/runtime/services');
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
   const payload = await response.json();
   renderServiceCards(payload.services || []);
 }
 
-async function loadTaskDetail() {
-  if (!selectedTaskId) {
-    return;
+async function loadTaskSummary() {
+  const response = await fetch('/api/v1/tasks/summary');
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
   }
-  const response = await fetch(`/api/v1/tasks/${selectedTaskId}`);
   const payload = await response.json();
-  renderOverview(payload);
-  renderQuality(payload);
-  renderImprovement(payload);
-  renderRepairDiagnosis(payload);
-  renderArtifacts(payload);
+  renderDifficultySummary(payload);
 }
 
-Promise.all([loadServices(), loadTasks()]).catch((error) => {
-  taskList.innerHTML = `<p class="empty">${String(error)}</p>`;
+difficultyFilter.addEventListener('change', () => {
+  currentPage = 1;
+  loadTasks().catch((error) => {
+    tableMeta.textContent = `任务索引加载失败: ${String(error)}`;
+  });
+});
+idSearch.addEventListener('input', () => {
+  currentPage = 1;
+  loadTasks().catch((error) => {
+    tableMeta.textContent = `任务索引加载失败: ${String(error)}`;
+  });
+});
+pageSizeSelect.addEventListener('change', () => {
+  currentPage = 1;
+  loadTasks().catch((error) => {
+    tableMeta.textContent = `任务索引加载失败: ${String(error)}`;
+  });
+});
+prevPageButton.addEventListener('click', () => {
+  if (!currentPagination.has_previous) {
+    return;
+  }
+  currentPage -= 1;
+  loadTasks().catch((error) => {
+    tableMeta.textContent = `任务索引加载失败: ${String(error)}`;
+  });
+});
+nextPageButton.addEventListener('click', () => {
+  if (!currentPagination.has_next) {
+    return;
+  }
+  currentPage += 1;
+  loadTasks().catch((error) => {
+    tableMeta.textContent = `任务索引加载失败: ${String(error)}`;
+  });
+});
+
+Promise.all([loadServices(), loadTaskSummary(), loadTasks()]).catch((error) => {
+  tableMeta.textContent = `任务索引加载失败: ${String(error)}`;
+  taskTableBody.innerHTML = `<tr><td colspan="8" class="empty-cell">${escapeHtml(String(error))}</td></tr>`;
 });
 
 setInterval(() => {
   loadServices().catch(() => {});
+}, 10000);
+
+setInterval(() => {
+  loadTaskSummary().catch(() => {});
   loadTasks().catch(() => {});
-}, 5000);
+}, 15000);

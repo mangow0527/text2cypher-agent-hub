@@ -3,7 +3,7 @@
 维护说明：
 
 - 本文件维护的是 cypher-generator-agent 最终输送给 LLM 的 prompt 示例。
-- 后续实验复盘时，主要替换 `【knowledge-agent 上下文】` 段落。
+- 后续实验复盘时，主要替换 `【知识文档上下文】` 段落。
 - 本文件不是 knowledge-agent 知识包本身，也不是跨服务 API 契约。
 - 下方 prompt 使用 2026-04-20 本地 knowledge-agent 替身实验中的链路、端口、过滤、聚合、排序样本填充。
 
@@ -12,12 +12,12 @@
 ```text
 【任务说明】
 你是 cypher-generator-agent 的 Cypher 生成器。
-你的任务是基于用户问题和 knowledge-agent 上下文生成一条只读 Cypher 查询。
+你的任务是基于用户问题和知识文档上下文生成一条只读 Cypher 查询。
 
 【用户问题】
 统计带宽大于等于1000的链路按目的端口状态分组的数量，并按数量降序排列。
 
-【knowledge-agent 上下文】
+【知识文档上下文】
 # Local KO Substitute Prompt Package
 
 ## Selected Knowledge
@@ -123,8 +123,8 @@ Why Not: 这会把分组对象和统计对象反过来，语义偏离问题。
 查询必须是单条语句。
 
 【优先级】
-如果 knowledge-agent 上下文中的输出格式要求与本模板冲突，以本模板为准。
-如果 knowledge-agent 上下文中的业务知识与用户问题有关，按 knowledge-agent 上下文理解业务语义。
+如果知识文档上下文中的输出格式要求与本模板冲突，以本模板为准。
+如果知识文档上下文中的业务知识与用户问题有关，按知识文档上下文理解业务语义。
 cypher-generator-agent 只要求输出可用的只读 Cypher，不要求你解释推理过程。
 ```
 

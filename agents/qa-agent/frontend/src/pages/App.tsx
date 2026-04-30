@@ -4,16 +4,20 @@ import {
   createJob,
   CreateJobPayload,
   deleteJob,
+  deleteSingleQA,
   getJob,
   getQAStats,
+  getQADetail,
   getImport,
   ImportRecord,
   importQa,
   JobRecord,
   listImports,
   listJobs,
+  QADetail,
   QAStats,
   redispatchJob,
+  redispatchSingleQA,
   resolveSchema,
   runJob,
   testTuGraph,
@@ -24,6 +28,7 @@ import { ImportList } from "../components/ImportList";
 import { JobComposer } from "../components/JobComposer";
 import { JobDetail } from "../components/JobDetail";
 import { JobList, JobStatusFilter, jobStatusLabel } from "../components/JobList";
+import { QADetailLookup } from "../components/QADetailLookup";
 import { QAStatsPanel } from "../components/QAStatsPanel";
 
 const ACTIVE_STATUSES = new Set([
@@ -54,6 +59,11 @@ export function App() {
   const [jobPage, setJobPage] = useState(1);
   const [jobQuery, setJobQuery] = useState("");
   const [jobStatusFilter, setJobStatusFilter] = useState<JobStatusFilter>("all");
+  const [qaLookupId, setQaLookupId] = useState("");
+  const [qaDetail, setQaDetail] = useState<QADetail | undefined>();
+  const [qaLookupBusy, setQaLookupBusy] = useState(false);
+  const [qaActionBusy, setQaActionBusy] = useState(false);
+  const [qaLookupMessage, setQaLookupMessage] = useState("输入 QA ID 后可查看详情");
   const [jobMessage, setJobMessage] = useState("准备就绪");
   const [importMessage, setImportMessage] = useState("可随时导入现成 QA");
 
@@ -380,6 +390,61 @@ export function App() {
     setImportMessage(`当前选中导入批次 ${record.import_id.slice(0, 12)}`);
   }
 
+  async function handleLookupQA() {
+    const qaId = qaLookupId.trim();
+    if (!qaId) {
+      return;
+    }
+    setQaLookupBusy(true);
+    setQaLookupMessage("正在查询 QA 详情...");
+    try {
+      const detail = await getQADetail(qaId);
+      setQaDetail(detail);
+      setQaLookupMessage(`已找到 ${detail.id}`);
+    } catch (error) {
+      setQaDetail(undefined);
+      setQaLookupMessage(`查询失败：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setQaLookupBusy(false);
+    }
+  }
+
+  async function handleRedispatchQA() {
+    if (!qaDetail) {
+      return;
+    }
+    setQaActionBusy(true);
+    setQaLookupMessage(`正在重新发送 ${qaDetail.id}...`);
+    try {
+      const result = await redispatchSingleQA(qaDetail.id);
+      setQaLookupMessage(`重新发送完成：${String(result.status ?? "unknown")}`);
+    } catch (error) {
+      setQaLookupMessage(`重新发送失败：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setQaActionBusy(false);
+    }
+  }
+
+  async function handleDeleteQA() {
+    if (!qaDetail || !window.confirm(`确定删除 QA ${qaDetail.id} 吗？`)) {
+      return;
+    }
+    setQaActionBusy(true);
+    setQaLookupMessage(`正在删除 ${qaDetail.id}...`);
+    try {
+      await deleteSingleQA(qaDetail.id);
+      const deletedId = qaDetail.id;
+      setQaDetail(undefined);
+      setQaLookupId("");
+      setQaLookupMessage(`已删除 ${deletedId}`);
+      await refreshQAStats();
+    } catch (error) {
+      setQaLookupMessage(`删除失败：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setQaActionBusy(false);
+    }
+  }
+
   const activeJob = useMemo(
     () => jobs.find((job) => ACTIVE_STATUSES.has(job.status)) ?? selectedJob,
     [jobs, selectedJob],
@@ -443,6 +508,18 @@ export function App() {
       </section>
 
       <QAStatsPanel stats={qaStats} />
+
+      <QADetailLookup
+        query={qaLookupId}
+        detail={qaDetail}
+        message={qaLookupMessage}
+        busy={qaLookupBusy}
+        actionBusy={qaActionBusy}
+        onQueryChange={setQaLookupId}
+        onSearch={handleLookupQA}
+        onRedispatch={handleRedispatchQA}
+        onDelete={handleDeleteQA}
+      />
 
       <section className="current-run-banner">
         <div>
