@@ -97,6 +97,18 @@ class ApiContractTest(unittest.TestCase):
         self.assertEqual(response.json()["code"], "REPAIR_PATCH_INVALID")
         self.assertIn("repair patch output was not valid", response.json()["message"])
 
+    def test_app_error_responses_include_cors_headers(self) -> None:
+        with patch("app.entrypoints.api.main.repair_workflow_service", FailingRepairWorkflowService()):
+            response = self.client.post(
+                "/api/knowledge/repairs/apply",
+                headers={"Origin": "http://39.106.229.163:5174"},
+                json={"id": "q_001", "suggestion": "补充协议版本映射"},
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.headers["access-control-allow-origin"], "http://39.106.229.163:5174")
+        self.assertEqual(response.headers["access-control-allow-credentials"], "true")
+
     def test_knowledge_document_list_read_and_update_contract(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             store = KnowledgeStore(Path(tmp_dir))

@@ -73,6 +73,16 @@ async def _request_body_preview(request: Request) -> str:
         return "<unavailable>"
 
 
+def _json_error_response(request: Request, status_code: int, content: dict) -> JSONResponse:
+    response = JSONResponse(status_code=status_code, content=content)
+    origin = request.headers.get("origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Vary"] = "Origin"
+    return response
+
+
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     started = time.perf_counter()
@@ -102,7 +112,8 @@ async def log_requests(request: Request, call_next):
             response_body={"code": exc.code, "message": exc.message},
             duration_ms=duration_ms,
         )
-        return JSONResponse(
+        return _json_error_response(
+            request,
             status_code=500,
             content={"status": "error", "code": exc.code, "message": exc.message},
         )
@@ -128,7 +139,11 @@ async def log_requests(request: Request, call_next):
             response_body={"error_type": exc.__class__.__name__, "message": str(exc)},
             duration_ms=duration_ms,
         )
-        return JSONResponse(status_code=500, content={"status": "error", "message": "Internal Server Error"})
+        return _json_error_response(
+            request,
+            status_code=500,
+            content={"status": "error", "message": "Internal Server Error"},
+        )
 
     duration_ms = int((time.perf_counter() - started) * 1000)
     logger.info(

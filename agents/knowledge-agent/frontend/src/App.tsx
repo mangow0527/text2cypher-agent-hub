@@ -79,9 +79,12 @@ export default function App() {
           findFirstNode(response.tree, (node) => node.id === "concept:NetworkElement") ??
           findFirstNode(response.tree, (node) => node.kind === "concept") ??
           findFirstNode(response.tree, () => true);
-        if (preferred) {
-          setSelectedNodeId((current) => current || preferred.id);
-        }
+        setSelectedNodeId((current) => {
+          if (current && findFirstNode(response.tree, (node) => node.id === current)) {
+            return current;
+          }
+          return preferred?.id ?? "";
+        });
       } catch (error) {
         if (active) {
           setTreeError(error instanceof Error ? error.message : "获取知识树失败");
