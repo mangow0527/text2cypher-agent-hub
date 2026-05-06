@@ -23,6 +23,8 @@ class Settings:
     openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
     openai_base_url: str = os.getenv("OPENAI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
     openai_model: str = os.getenv("OPENAI_MODEL", "glm-5")
+    llm_batch_chunk_size: int = int(os.getenv("LLM_BATCH_CHUNK_SIZE", "3"))
+    llm_batch_parallelism: int = int(os.getenv("LLM_BATCH_PARALLELISM", "3"))
     test_agent_host: str = os.getenv("TEST_AGENT_HOST", "")
     test_agent_question_port: int = int(os.getenv("TEST_AGENT_QUESTION_PORT", "8000"))
     test_agent_golden_port: int = int(os.getenv("TEST_AGENT_GOLDEN_PORT", "8001"))

@@ -305,7 +305,14 @@ class Orchestrator:
                         job.request.output_config.difficulty_targets,
                     ),
                 )
-                if job.request.mode.value == "online" and deduped:
+                if (
+                    job.request.mode.value == "online"
+                    and deduped
+                    and (
+                        not job.request.output_config.difficulty_targets
+                        or self._difficulty_targets_satisfied(deduped, job.request.output_config.difficulty_targets)
+                    )
+                ):
                     break
                 if (
                     len(deduped) >= job.request.output_config.target_qa_count
@@ -580,8 +587,7 @@ class Orchestrator:
         target_qa_count: int,
         difficulty_targets: dict[str, int] | None = None,
     ) -> tuple[list[QASample], dict]:
-        if not difficulty_targets and any(sample.answer for sample in samples):
-            samples = [sample for sample in samples if sample.answer]
+        samples = [sample for sample in samples if self._has_non_empty_answer(sample)]
         history_questions = history.get("questions", set())
         history_cyphers = history.get("cyphers", set())
         fresh_pool = []
@@ -645,6 +651,9 @@ class Orchestrator:
             "fresh_candidate_count": len(fresh_pool),
             "selected_count": min(len(selected), target_qa_count),
         }
+
+    def _has_non_empty_answer(self, sample: QASample) -> bool:
+        return bool(sample.answer)
 
     def _select_release_batch_by_difficulty(
         self,

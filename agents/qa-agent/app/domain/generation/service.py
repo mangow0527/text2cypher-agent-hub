@@ -6,10 +6,12 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, List
 
+from app.config import settings
 from app.domain.difficulty.service import DifficultyService
 from app.domain.generation.registry import QUERY_TYPE_REGISTRY
 from app.domain.models import CanonicalSchemaSpec, CoverageSpec, CypherCandidate, CypherSkeleton, GenerationLimits, ModelConfig, QueryPlan
 from app.errors import AppError
+from app.integrations.openai.batch_executor import run_chunked_parallel
 from app.integrations.openai.model_gateway import ModelGateway
 
 
@@ -57,6 +59,8 @@ class GenerationService:
     def __init__(self, model_gateway: ModelGateway | None = None) -> None:
         self.model_gateway = model_gateway or ModelGateway()
         self.difficulty_service = DifficultyService()
+        self.batch_chunk_size = settings.llm_batch_chunk_size
+        self.batch_parallelism = settings.llm_batch_parallelism
 
     def build_skeletons(
         self,
@@ -229,6 +233,20 @@ class GenerationService:
             )
             contexts[request_id] = (spec, template_candidate, index)
 
+        return run_chunked_parallel(
+            requests_payload,
+            chunk_size=self.batch_chunk_size,
+            max_workers=self.batch_parallelism,
+            worker=lambda batch: self._build_coverage_llm_candidates_batch_chunk(schema, batch, contexts, model_config),
+        )
+
+    def _build_coverage_llm_candidates_batch_chunk(
+        self,
+        schema: CanonicalSchemaSpec,
+        requests_payload: List[dict],
+        contexts: dict[str, tuple[CoverageSpec, CypherCandidate, int]],
+        model_config: ModelConfig,
+    ) -> List[CypherCandidate]:
         batch_config = model_config.model_copy(
             update={"max_output_tokens": max(model_config.max_output_tokens, 1200 * max(1, len(requests_payload)))}
         )
@@ -683,6 +701,19 @@ class GenerationService:
         return request_payload, context
 
     def _build_llm_candidates_batch(
+        self,
+        requests_payload: List[dict],
+        contexts: Dict[str, dict],
+        model_config: ModelConfig,
+    ) -> List[CypherCandidate]:
+        return run_chunked_parallel(
+            requests_payload,
+            chunk_size=self.batch_chunk_size,
+            max_workers=self.batch_parallelism,
+            worker=lambda batch: self._build_llm_candidates_batch_chunk(batch, contexts, model_config),
+        )
+
+    def _build_llm_candidates_batch_chunk(
         self,
         requests_payload: List[dict],
         contexts: Dict[str, dict],

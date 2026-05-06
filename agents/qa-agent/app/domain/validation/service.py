@@ -66,7 +66,10 @@ class ValidationService:
                 runtime_ok = False
             result.runtime = runtime_ok if config.require_runtime_validation else True
             result.result_sanity = runtime_ok and (
-                config.allow_empty_results or result_signature.row_count > 0 or bool(result_signature.result_preview)
+                config.allow_empty_results
+                or result_signature.row_count > 0
+                or bool(result_signature.result_preview)
+                or bool(result_signature.result_rows)
             )
 
         return ValidatedSample(

@@ -79,7 +79,7 @@ class GenerationLimits(BaseModel):
 
 class ValidationConfig(BaseModel):
     require_runtime_validation: bool = True
-    allow_empty_results: bool = True
+    allow_empty_results: bool = False
     roundtrip_required: bool = True
 
 

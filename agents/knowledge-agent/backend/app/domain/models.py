@@ -4,6 +4,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from app.domain.agent.models import AgentRun, CreateRepairAgentRunRequest
+
 
 KnowledgeType = Literal["cypher_syntax", "few_shot", "system_prompt", "business_knowledge"]
 KnowledgeDocumentType = Literal["schema", "cypher_syntax", "few_shot", "system_prompt", "business_knowledge"]
@@ -35,6 +37,18 @@ class RepairChange(BaseModel):
 
 class StatusResponse(BaseModel):
     status: Literal["ok"]
+
+
+class RepairAgentRunResponse(StatusResponse):
+    run: AgentRun
+
+
+class RepairAgentRunsResponse(StatusResponse):
+    runs: list[AgentRun] = Field(default_factory=list)
+
+
+class RejectRepairAgentRunRequest(BaseModel):
+    reason: str = Field(min_length=1)
 
 
 class KnowledgeDocumentSummary(BaseModel):

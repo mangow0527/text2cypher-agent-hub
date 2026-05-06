@@ -52,6 +52,103 @@ export interface ApplyRepairResponse {
   changes: RepairChange[];
 }
 
+export type AgentRunStatus =
+  | "created"
+  | "running"
+  | "needs_review"
+  | "approved"
+  | "applied"
+  | "redispatched"
+  | "completed"
+  | "rejected"
+  | "failed";
+
+export interface RootCause {
+  type: string;
+  summary: string;
+  suggested_fix: string;
+  evidence: string[];
+}
+
+export interface AgentAction {
+  action: "tool_call" | "request_human_review" | "final";
+  tool_name: string | null;
+  arguments: Record<string, unknown>;
+  status: "ready_for_review" | "rejected" | null;
+  reason_summary: string;
+  summary: string;
+}
+
+export interface AgentTraceEntry {
+  step: number;
+  action: AgentAction;
+  observation: Record<string, unknown>;
+  error: string | null;
+}
+
+export interface CandidateChange {
+  operation: "add" | "modify" | "delete";
+  doc_type: KnowledgeType;
+  section: string;
+  target_key: string;
+  new_content: string;
+  rationale: string;
+  risk: "low" | "medium" | "high";
+  confidence: number;
+  duplicate_checked: boolean;
+  conflict_checked: boolean;
+}
+
+export interface GapDiagnosis {
+  gap_type:
+    | "knowledge_missing"
+    | "retrieval_miss"
+    | "prompt_orchestration_gap"
+    | "generator_noncompliance"
+    | "knowledge_conflict"
+    | "unknown";
+  reason: string;
+  suggested_action: string;
+}
+
+export interface ValidationSummary {
+  prompt_package_built: boolean;
+  before_after_improved: boolean;
+  redispatch_status: string;
+  remaining_risks: string[];
+}
+
+export interface AgentDecision {
+  action: "continue" | "human_review" | "apply" | "reject" | "complete";
+  reason: string;
+}
+
+export interface AgentRun {
+  run_id: string;
+  qa_id: string;
+  goal: string;
+  root_cause: RootCause;
+  status: AgentRunStatus;
+  trace: AgentTraceEntry[];
+  memory_hits: Array<Record<string, unknown>>;
+  evidence: Array<Record<string, unknown>>;
+  gap_diagnosis: GapDiagnosis;
+  candidate_changes: CandidateChange[];
+  validation: ValidationSummary;
+  decision: AgentDecision | null;
+  errors: string[];
+}
+
+export interface RepairAgentRunResponse {
+  status: "ok";
+  run: AgentRun;
+}
+
+export interface RepairAgentRunsResponse {
+  status: "ok";
+  runs: AgentRun[];
+}
+
 export interface KnowledgeDocumentSummary {
   doc_type: KnowledgeDocumentType;
   title: string;
@@ -139,6 +236,33 @@ export async function applyRepair(payload: {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+  });
+  return parseJsonOrThrow(response);
+}
+
+export async function listRepairAgentRuns(status?: AgentRunStatus): Promise<RepairAgentRunsResponse> {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  const response = await fetch(`${API_BASE}/api/knowledge/agent/repair-runs${query}`);
+  return parseJsonOrThrow(response);
+}
+
+export async function fetchRepairAgentRun(runId: string): Promise<RepairAgentRunResponse> {
+  const response = await fetch(`${API_BASE}/api/knowledge/agent/repair-runs/${encodeURIComponent(runId)}`);
+  return parseJsonOrThrow(response);
+}
+
+export async function approveRepairAgentRun(runId: string): Promise<RepairAgentRunResponse> {
+  const response = await fetch(`${API_BASE}/api/knowledge/agent/repair-runs/${encodeURIComponent(runId)}/approve`, {
+    method: "POST",
+  });
+  return parseJsonOrThrow(response);
+}
+
+export async function rejectRepairAgentRun(runId: string, reason: string): Promise<RepairAgentRunResponse> {
+  const response = await fetch(`${API_BASE}/api/knowledge/agent/repair-runs/${encodeURIComponent(runId)}/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
   });
   return parseJsonOrThrow(response);
 }

@@ -156,3 +156,16 @@ class RepairServiceTest(unittest.TestCase):
             self.assertTrue(changes)
             self.assertIn("所属对象", business)
             self.assertIn("MATCH (owner)-[:OWNS]->(resource) RETURN owner.id", few_shot)
+
+    def test_propose_does_not_write_knowledge_documents(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            store = KnowledgeStore(Path(tmp_dir))
+            store.bootstrap_defaults()
+            gateway = FakeGateway()
+            service = RepairService(store, gateway)
+            before = store.read_text("business_knowledge.md")
+
+            patches = service.propose("补充协议版本映射", ["business_knowledge"])
+
+            self.assertTrue(patches)
+            self.assertEqual(store.read_text("business_knowledge.md"), before)

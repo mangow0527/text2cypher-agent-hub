@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import re
 
+from app.config import settings
 from app.domain.models import CanonicalSchemaSpec, ModelConfig, QASample, ValidatedSample
 from app.errors import AppError
+from app.integrations.openai.batch_executor import run_chunked_parallel
 from app.integrations.openai.model_gateway import ModelGateway
 
 QUESTION_VARIANT_STYLES = [
@@ -89,6 +91,8 @@ def build_result_summary(sample: ValidatedSample) -> str:
 class QuestionService:
     def __init__(self, model_gateway: ModelGateway | None = None) -> None:
         self.model_gateway = model_gateway or ModelGateway()
+        self.batch_chunk_size = settings.llm_batch_chunk_size
+        self.batch_parallelism = settings.llm_batch_parallelism
 
     def generate_batch(
         self,
@@ -122,8 +126,22 @@ class QuestionService:
                 "return_semantics": ",".join(sample.result_signature.columns or ["result"]),
             }
 
+        return run_chunked_parallel(
+            requests_payload,
+            chunk_size=self.batch_chunk_size,
+            max_workers=self.batch_parallelism,
+            worker=lambda batch: self._generate_batch_chunk(batch, contexts, model_config, max_variants),
+        )
+
+    def _generate_batch_chunk(
+        self,
+        requests_payload: list[dict],
+        contexts: dict[str, dict],
+        model_config: ModelConfig,
+        max_variants: int,
+    ) -> list[QASample]:
         batch_config = model_config.model_copy(
-            update={"max_output_tokens": max(model_config.max_output_tokens, 900 * max(1, len(samples)))}
+            update={"max_output_tokens": max(model_config.max_output_tokens, 900 * max(1, len(requests_payload)))}
         )
         bundle_text = self.model_gateway.generate_text(
             "question_bundle_batch",

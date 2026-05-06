@@ -120,6 +120,8 @@ python3 -m app.entrypoints.cli.main create-job \
 OPENAI_API_KEY=你的智谱 API Key
 OPENAI_BASE_URL=https://open.bigmodel.cn/api/paas/v4
 OPENAI_MODEL=glm-5
+LLM_BATCH_CHUNK_SIZE=3
+LLM_BATCH_PARALLELISM=3
 
 TUGRAPH_BASE_URL=http://118.196.92.128:7070
 TUGRAPH_USER=admin

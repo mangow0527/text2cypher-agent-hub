@@ -3,11 +3,24 @@ from __future__ import annotations
 import re
 import unittest
 import json
+import threading
+import time
 
 from app.domain.coverage.service import CoverageService
 from app.domain.difficulty.service import DifficultyService
 from app.domain.generation.service import GenerationService
-from app.domain.models import CanonicalSchemaSpec, CypherCandidate, GenerationLimits, JobRecord, JobRequest, ModelConfig, QASample, ValidationConfig
+from app.domain.models import (
+    CanonicalSchemaSpec,
+    CypherCandidate,
+    GenerationLimits,
+    JobRecord,
+    JobRequest,
+    ModelConfig,
+    QASample,
+    ResultSignature,
+    RuntimeMeta,
+    ValidationConfig,
+)
 from app.domain.validation.service import ValidationService
 from app.orchestrator.service import Orchestrator
 
@@ -17,10 +30,21 @@ class CoverageLLMGateway:
         self.cypher = cypher
         self.calls: list[str] = []
         self.last_requests: list[dict] = []
+        self.request_batches: list[list[dict]] = []
+        self.active = 0
+        self.max_active = 0
+        self.lock = threading.Lock()
 
     def generate_text(self, prompt_name, model_config, **kwargs):
         self.calls.append(prompt_name)
         self.last_requests = json.loads(kwargs.get("requests_json", "[]"))
+        self.request_batches.append(self.last_requests)
+        with self.lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        time.sleep(0.05)
+        with self.lock:
+            self.active -= 1
         return json.dumps(
             {
                 "items": [
@@ -43,6 +67,11 @@ class RejectDifficultyRoundtrip:
 
     def check(self, sample: QASample, model_config: ModelConfig):
         return sample.difficulty != self.rejected_difficulty, sample.question_variants_zh, sample.question_variant_styles
+
+
+class EmptyResultGraphExecutor:
+    def execute(self, cypher, config):
+        return RuntimeMeta(latency_ms=1, planner="fake-graph"), ResultSignature(), True
 
 
 class CoverageGenerationTests(unittest.TestCase):
@@ -139,10 +168,12 @@ class CoverageGenerationTests(unittest.TestCase):
         self.assertEqual(len(selected), 2)
         self.assertEqual(meta["difficulty_shortfalls"], {"L1": 1})
 
-    def test_release_selection_keeps_requested_difficulty_even_when_answer_is_empty(self) -> None:
+    def test_release_selection_rejects_empty_answers_even_with_difficulty_targets(self) -> None:
         l1 = self._qa_sample("qa_l1_a", "L1")
         l2 = self._qa_sample("qa_l2_empty", "L2")
         l2.answer = []
+        l2.result_signature.row_count = 0
+        l2.result_signature.result_preview = []
 
         selected, meta = Orchestrator()._select_release_batch(
             [l1, l2],
@@ -151,8 +182,29 @@ class CoverageGenerationTests(unittest.TestCase):
             difficulty_targets={"L1": 1, "L2": 1},
         )
 
-        self.assertEqual(meta["difficulty_shortfalls"], {})
-        self.assertEqual({sample.difficulty for sample in selected}, {"L1", "L2"})
+        self.assertEqual(meta["difficulty_shortfalls"], {"L2": 1})
+        self.assertEqual([sample.difficulty for sample in selected], ["L1"])
+
+    def test_validation_rejects_empty_runtime_results_by_default(self) -> None:
+        candidate = CypherCandidate(
+            skeleton_id="empty_result",
+            cypher="MATCH (n:NetworkElement) RETURN n",
+            query_types=["LOOKUP"],
+            structure_family="lookup_node_return",
+            generation_mode="template",
+            bound_schema_items={"nodes": ["NetworkElement"], "edges": []},
+            difficulty="L1",
+        )
+
+        sample = ValidationService(graph_executor=EmptyResultGraphExecutor()).validate(
+            candidate,
+            self.schema,
+            ValidationConfig(),
+            tugraph_config=None,
+        )
+
+        self.assertTrue(sample.validation.runtime)
+        self.assertFalse(sample.validation.result_sanity)
 
     def test_targeted_roundtrip_keeps_structurally_valid_missing_difficulty(self) -> None:
         l1 = self._qa_sample("qa_l1", "L1")
@@ -414,6 +466,27 @@ class CoverageGenerationTests(unittest.TestCase):
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0].generation_mode, "llm_direct")
         self.assertEqual(candidates[0].cypher, "MATCH (n:NetworkElement) RETURN n.id AS value")
+
+    def test_coverage_generation_splits_large_llm_batches_into_parallel_requests(self) -> None:
+        specs = CoverageService().build_specs(
+            schema=self.schema,
+            limits=GenerationLimits(max_skeletons=7, max_candidates_per_skeleton=1, max_variants_per_question=1),
+            target_qa_count=7,
+            diversity_key="job_generation_parallel",
+        )
+        gateway = CoverageLLMGateway("MATCH (n:NetworkElement) RETURN n.id AS value")
+
+        candidates = GenerationService(model_gateway=gateway).instantiate_candidates_from_specs(
+            self.schema,
+            specs,
+            GenerationLimits(max_skeletons=7, max_candidates_per_skeleton=1, max_variants_per_question=1),
+            model_config=ModelConfig(),
+        )
+
+        self.assertEqual(gateway.calls, ["cypher_candidate_batch", "cypher_candidate_batch", "cypher_candidate_batch"])
+        self.assertCountEqual([len(batch) for batch in gateway.request_batches], [3, 3, 1])
+        self.assertGreater(gateway.max_active, 1)
+        self.assertEqual(len(candidates), 7)
 
     def test_coverage_generation_rejects_invalid_llm_candidates_and_falls_back_to_template(self) -> None:
         specs = CoverageService().build_specs(

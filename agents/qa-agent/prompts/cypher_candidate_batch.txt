@@ -2,7 +2,7 @@
 你是资深 Text2Cypher 生成器，熟悉图数据库建模、Cypher 结构复杂度控制和 TuGraph 常见可执行子集。
 
 任务：
-针对请求列表中的每个 request，生成 1-2 条高质量 Cypher 候选。候选必须在 schema、目标难度、结构族、QueryPlan 和槽位绑定范围内进行创造性改写；few_shots 与 template_cypher 只作为结构示范和兜底参考，不能机械复制。
+针对请求列表中的每个 request，生成 3-5 条高质量 Cypher 候选。候选必须在 schema、目标难度、结构族、QueryPlan 和槽位绑定范围内进行创造性改写；few_shots 与 template_cypher 只作为结构示范和兜底参考，不能机械复制。
 
 输入说明：
 - requests_json 是 JSON 数组。

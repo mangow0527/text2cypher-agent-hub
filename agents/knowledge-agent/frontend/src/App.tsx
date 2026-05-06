@@ -4,14 +4,20 @@ import type { FormEvent } from "react";
 import { DiffViewer } from "./components/DiffViewer";
 import {
   applyRepair,
+  approveRepairAgentRun,
   createKnowledgeTreeNode,
   deleteKnowledgeTreeNode,
+  fetchRepairAgentRun,
   fetchKnowledgeTree,
   fetchKnowledgeTreeNode,
   fetchPromptPackage,
+  listRepairAgentRuns,
+  rejectRepairAgentRun,
   updateKnowledgeTreeNode,
 } from "./lib/api";
 import type {
+  AgentRun,
+  AgentRunStatus,
   KnowledgeTreeNode,
   KnowledgeTreeNodeDetail,
   KnowledgeTreeNodeKind,
@@ -33,6 +39,18 @@ const CREATABLE_NODE_KINDS: Array<{ value: KnowledgeTreeNodeKind; label: string 
   { value: "rule", label: "通用规则" },
 ];
 
+const AGENT_STATUS_OPTIONS: Array<{ value: AgentRunStatus; label: string }> = [
+  { value: "created", label: "已创建" },
+  { value: "running", label: "运行中" },
+  { value: "needs_review", label: "待审核" },
+  { value: "approved", label: "已批准" },
+  { value: "applied", label: "已写入" },
+  { value: "redispatched", label: "已重派" },
+  { value: "completed", label: "已完成" },
+  { value: "rejected", label: "已拒绝" },
+  { value: "failed", label: "失败" },
+];
+
 export default function App() {
   const [promptId, setPromptId] = useState("q_001");
   const [question, setQuestion] = useState("查询协议版本为v2.0的隧道所属网元");
@@ -46,6 +64,16 @@ export default function App() {
   const [repairBusy, setRepairBusy] = useState(false);
   const [repairError, setRepairError] = useState("");
   const [changes, setChanges] = useState<RepairChange[]>([]);
+
+  const [agentRuns, setAgentRuns] = useState<AgentRun[]>([]);
+  const [agentRunStatus, setAgentRunStatus] = useState<AgentRunStatus>("needs_review");
+  const [selectedAgentRunId, setSelectedAgentRunId] = useState("");
+  const [selectedAgentRun, setSelectedAgentRun] = useState<AgentRun | null>(null);
+  const [agentBusy, setAgentBusy] = useState(false);
+  const [agentActionBusy, setAgentActionBusy] = useState(false);
+  const [agentError, setAgentError] = useState("");
+  const [agentStatus, setAgentStatus] = useState("");
+  const [rejectReason, setRejectReason] = useState("需要人工补充更多上下文");
 
   const [tree, setTree] = useState<KnowledgeTreeNode[]>([]);
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(
@@ -138,6 +166,10 @@ export default function App() {
     };
   }, [selectedNodeId]);
 
+  useEffect(() => {
+    void loadAgentRuns(agentRunStatus);
+  }, [agentRunStatus]);
+
   async function handlePromptSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPromptBusy(true);
@@ -167,6 +199,87 @@ export default function App() {
       setRepairError(error instanceof Error ? error.message : "应用修复失败");
     } finally {
       setRepairBusy(false);
+    }
+  }
+
+  async function loadAgentRuns(status: AgentRunStatus) {
+    setAgentBusy(true);
+    setAgentError("");
+    setAgentStatus("");
+    try {
+      const response = await listRepairAgentRuns(status);
+      setAgentRuns(response.runs);
+      setSelectedAgentRun((current) => {
+        const refreshed = current ? response.runs.find((run) => run.run_id === current.run_id) : null;
+        if (refreshed) {
+          return refreshed;
+        }
+        return response.runs[0] ?? null;
+      });
+      setSelectedAgentRunId((current) => {
+        if (current && response.runs.some((run) => run.run_id === current)) {
+          return current;
+        }
+        return response.runs[0]?.run_id ?? "";
+      });
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "读取 Agent 修复任务失败");
+    } finally {
+      setAgentBusy(false);
+    }
+  }
+
+  async function handleAgentRunSelect(runId: string) {
+    setSelectedAgentRunId(runId);
+    setAgentBusy(true);
+    setAgentError("");
+    setAgentStatus("");
+    try {
+      const response = await fetchRepairAgentRun(runId);
+      setSelectedAgentRun(response.run);
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "读取 Agent Run 失败");
+    } finally {
+      setAgentBusy(false);
+    }
+  }
+
+  async function handleAgentApprove() {
+    if (!selectedAgentRun) {
+      return;
+    }
+    setAgentActionBusy(true);
+    setAgentError("");
+    setAgentStatus("");
+    try {
+      const response = await approveRepairAgentRun(selectedAgentRun.run_id);
+      setSelectedAgentRun(response.run);
+      await loadAgentRuns(agentRunStatus);
+      setAgentStatus("已批准并触发修复闭环");
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "批准失败");
+    } finally {
+      setAgentActionBusy(false);
+    }
+  }
+
+  async function handleAgentReject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedAgentRun || !rejectReason.trim()) {
+      return;
+    }
+    setAgentActionBusy(true);
+    setAgentError("");
+    setAgentStatus("");
+    try {
+      const response = await rejectRepairAgentRun(selectedAgentRun.run_id, rejectReason.trim());
+      setSelectedAgentRun(response.run);
+      await loadAgentRuns(agentRunStatus);
+      setAgentStatus("已拒绝并记录原因");
+    } catch (error) {
+      setAgentError(error instanceof Error ? error.message : "拒绝失败");
+    } finally {
+      setAgentActionBusy(false);
     }
   }
 
@@ -385,10 +498,173 @@ export default function App() {
           </div>
         </section>
 
+        <section className="agent-review-console">
+          <div className="console-toolbar">
+            <div>
+              <p className="surface-kicker">03 · Agent 修复审核台</p>
+              <h2>处理需要人工确认的知识修复任务</h2>
+            </div>
+            <div className="agent-toolbar-actions">
+              <select value={agentRunStatus} onChange={(event) => setAgentRunStatus(event.target.value as AgentRunStatus)}>
+                {AGENT_STATUS_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="secondary-action" onClick={() => void loadAgentRuns(agentRunStatus)} disabled={agentBusy}>
+                {agentBusy ? "刷新中..." : "刷新"}
+              </button>
+            </div>
+          </div>
+
+          {agentError ? <p className="error-banner agent-banner">{agentError}</p> : null}
+          {agentStatus ? <p className="success-banner agent-banner">{agentStatus}</p> : null}
+
+          <div className="agent-review-layout">
+            <aside className="agent-run-list">
+              {agentRuns.length ? (
+                agentRuns.map((run) => (
+                  <button
+                    key={run.run_id}
+                    type="button"
+                    className={`agent-run-row ${selectedAgentRunId === run.run_id ? "agent-run-row-active" : ""}`}
+                    onClick={() => void handleAgentRunSelect(run.run_id)}
+                  >
+                    <span>
+                      <strong>{run.qa_id}</strong>
+                      <small>{run.run_id}</small>
+                    </span>
+                    <span className={`agent-status-pill agent-status-${run.status}`}>{formatAgentStatus(run.status)}</span>
+                  </button>
+                ))
+              ) : (
+                <div className="empty-state agent-empty">
+                  <p>当前状态下没有修复任务。</p>
+                </div>
+              )}
+            </aside>
+
+            <section className="agent-run-detail">
+              {selectedAgentRun ? (
+                <>
+                  <div className="agent-detail-header">
+                    <div>
+                      <span className={`agent-status-pill agent-status-${selectedAgentRun.status}`}>
+                        {formatAgentStatus(selectedAgentRun.status)}
+                      </span>
+                      <h3>{selectedAgentRun.qa_id}</h3>
+                      <p>{selectedAgentRun.goal}</p>
+                    </div>
+                    <div className="agent-run-id">{selectedAgentRun.run_id}</div>
+                  </div>
+
+                  <div className="agent-meta-grid">
+                    <span>根因：{selectedAgentRun.root_cause.type}</span>
+                    <span>候选：{selectedAgentRun.candidate_changes.length}</span>
+                    <span>Trace：{selectedAgentRun.trace.length}</span>
+                    <span>Memory：{selectedAgentRun.memory_hits.length}</span>
+                  </div>
+
+                  <div className="agent-section">
+                    <h4>Root Cause</h4>
+                    <p>{selectedAgentRun.root_cause.summary}</p>
+                    <pre>{selectedAgentRun.root_cause.suggested_fix}</pre>
+                  </div>
+
+                  <div className="agent-section">
+                    <h4>Gap Diagnosis</h4>
+                    <p>{selectedAgentRun.gap_diagnosis.gap_type}</p>
+                    <pre>{selectedAgentRun.gap_diagnosis.reason || "暂无诊断说明"}</pre>
+                  </div>
+
+                  <div className="agent-section">
+                    <h4>Candidate Changes</h4>
+                    {selectedAgentRun.candidate_changes.length ? (
+                      <div className="agent-candidate-list">
+                        {selectedAgentRun.candidate_changes.map((change) => (
+                          <div key={`${change.doc_type}-${change.target_key}`} className="agent-candidate">
+                            <div className="agent-candidate-header">
+                              <strong>{change.doc_type}</strong>
+                              <span>
+                                {change.section} · {change.risk} · {Math.round(change.confidence * 100)}%
+                              </span>
+                            </div>
+                            <code>{change.target_key}</code>
+                            <pre>{change.new_content}</pre>
+                            <div className="agent-checks">
+                              <span>{change.duplicate_checked ? "已查重" : "未查重"}</span>
+                              <span>{change.conflict_checked ? "已查冲突" : "未查冲突"}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="agent-muted">暂无候选知识变更。</p>
+                    )}
+                  </div>
+
+                  <div className="agent-section">
+                    <h4>Validation</h4>
+                    <div className="agent-meta-grid agent-meta-grid-compact">
+                      <span>Prompt：{selectedAgentRun.validation.prompt_package_built ? "已构建" : "未构建"}</span>
+                      <span>改善：{selectedAgentRun.validation.before_after_improved ? "是" : "否"}</span>
+                      <span>重派：{selectedAgentRun.validation.redispatch_status || "未触发"}</span>
+                      <span>风险：{selectedAgentRun.validation.remaining_risks.length}</span>
+                    </div>
+                  </div>
+
+                  <div className="agent-section">
+                    <h4>Trace</h4>
+                    {selectedAgentRun.trace.length ? (
+                      <div className="agent-trace-list">
+                        {selectedAgentRun.trace.map((entry) => (
+                          <div key={entry.step} className="agent-trace-row">
+                            <span>{entry.step}</span>
+                            <strong>{entry.action.tool_name ?? entry.action.action}</strong>
+                            <small>{entry.action.reason_summary}</small>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="agent-muted">暂无执行轨迹。</p>
+                    )}
+                  </div>
+
+                  <div className="agent-actions">
+                    <button
+                      type="button"
+                      className="primary-action"
+                      disabled={selectedAgentRun.status !== "needs_review" || agentActionBusy}
+                      onClick={() => void handleAgentApprove()}
+                    >
+                      {agentActionBusy ? "处理中..." : "批准修复"}
+                    </button>
+                    <form className="agent-reject-form" onSubmit={handleAgentReject}>
+                      <input value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} placeholder="拒绝原因" />
+                      <button
+                        type="submit"
+                        className="secondary-action"
+                        disabled={selectedAgentRun.status !== "needs_review" || !rejectReason.trim() || agentActionBusy}
+                      >
+                        拒绝
+                      </button>
+                    </form>
+                  </div>
+                </>
+              ) : (
+                <div className="empty-state agent-empty">
+                  <p>选择左侧任务查看详情。</p>
+                </div>
+              )}
+            </section>
+          </div>
+        </section>
+
         <section className="knowledge-console">
           <div className="console-toolbar">
             <div>
-              <p className="surface-kicker">03 · 知识树管理</p>
+              <p className="surface-kicker">04 · 知识树管理</p>
               <h2>按业务对象维护知识关系</h2>
             </div>
             <div className="editor-status">
@@ -600,4 +876,9 @@ function filterTree(nodes: KnowledgeTreeNode[], search: string): KnowledgeTreeNo
       return matches || children.length ? { ...node, children } : null;
     })
     .filter((node): node is KnowledgeTreeNode => Boolean(node));
+}
+
+function formatAgentStatus(status: AgentRunStatus): string {
+  const match = AGENT_STATUS_OPTIONS.find((option) => option.value === status);
+  return match?.label ?? status;
 }

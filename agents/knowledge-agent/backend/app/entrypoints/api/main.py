@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from typing import Optional
 
 from fastapi import FastAPI
 from fastapi import Request
@@ -9,6 +10,27 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
+from app.domain.agent.controller import LLMController
+from app.domain.agent.evaluator import RepairEvaluator
+from app.domain.agent.memory import MemoryManager
+from app.domain.agent.policy import PolicyGuard
+from app.domain.agent.run_store import AgentRunStore
+from app.domain.agent.runtime import RepairAgentRuntime
+from app.domain.agent.tool_registry import ToolRegistry
+from app.domain.agent.tools import (
+    BuildPromptOverlayTool,
+    CheckConflictTool,
+    CheckDuplicateTool,
+    ClassifyGapTool,
+    EvaluateBeforeAfterTool,
+    InspectQACaseTool,
+    ProposePatchTool,
+    RagRetrieveTool,
+    ReadRepairMemoryTool,
+    RedispatchQATool,
+    RetrieveKnowledgeTool,
+    WriteRepairMemoryTool,
+)
 from app.domain.knowledge.prompt_service import PromptService
 from app.domain.knowledge.repair_workflow_service import RepairWorkflowService
 from app.domain.knowledge.repair_service import RepairService
@@ -17,6 +39,7 @@ from app.domain.models import (
     ApplyRepairRequest,
     ApplyRepairResponse,
     CreateKnowledgeTreeNodeRequest,
+    CreateRepairAgentRunRequest,
     KnowledgeDocumentDetailResponse,
     KnowledgeDocumentsResponse,
     KnowledgeTreeMutationResponse,
@@ -24,6 +47,9 @@ from app.domain.models import (
     KnowledgeTreeResponse,
     PromptPackageRequest,
     PromptPackageResponse,
+    RejectRepairAgentRunRequest,
+    RepairAgentRunResponse,
+    RepairAgentRunsResponse,
     StatusResponse,
     UpdateKnowledgeTreeNodeRequest,
     UpdateKnowledgeDocumentRequest,
@@ -54,6 +80,30 @@ prompt_service = PromptService(knowledge_store)
 repair_service = RepairService(knowledge_store, ModelGateway(), module_logs=module_logs)
 qa_redispatch_gateway = QARedispatchGateway(module_logs=module_logs)
 repair_workflow_service = RepairWorkflowService(repair_service, qa_redispatch_gateway, module_logs=module_logs)
+agent_memory_manager = MemoryManager()
+agent_evaluator = RepairEvaluator()
+agent_tool_registry = ToolRegistry()
+agent_tool_registry.register(InspectQACaseTool(qa_redispatch_gateway))
+agent_tool_registry.register(RetrieveKnowledgeTool(knowledge_store))
+agent_tool_registry.register(RagRetrieveTool())
+agent_tool_registry.register(ReadRepairMemoryTool(agent_memory_manager))
+agent_tool_registry.register(ClassifyGapTool(agent_evaluator))
+agent_tool_registry.register(ProposePatchTool(repair_service))
+agent_tool_registry.register(CheckDuplicateTool(knowledge_store))
+agent_tool_registry.register(CheckConflictTool())
+agent_tool_registry.register(BuildPromptOverlayTool(knowledge_store))
+agent_tool_registry.register(EvaluateBeforeAfterTool(agent_evaluator))
+agent_tool_registry.register(RedispatchQATool(qa_redispatch_gateway))
+agent_tool_registry.register(WriteRepairMemoryTool(agent_memory_manager))
+repair_agent_runtime = RepairAgentRuntime(
+    AgentRunStore(),
+    LLMController(ModelGateway()),
+    agent_tool_registry,
+    agent_memory_manager,
+    PolicyGuard(),
+    repair_service,
+    qa_redispatch_gateway,
+)
 
 
 def _preview_text(value: str, limit: int = 120) -> str:
@@ -273,6 +323,37 @@ def apply_repair(request: ApplyRepairRequest) -> ApplyRepairResponse:
             response_body={"duration_ms": duration_ms, "threshold_ms": settings.slow_request_threshold_ms},
         )
     return ApplyRepairResponse(status="ok", changes=result["changes"], redispatch=result["redispatch"])
+
+
+@app.post("/api/knowledge/agent/repair-runs", response_model=RepairAgentRunResponse)
+def create_repair_agent_run(request: CreateRepairAgentRunRequest) -> RepairAgentRunResponse:
+    run = repair_agent_runtime.create_run(request.qa_id, request.goal, request.root_cause, request.constraints)
+    return RepairAgentRunResponse(status="ok", run=run)
+
+
+@app.get("/api/knowledge/agent/repair-runs", response_model=RepairAgentRunsResponse)
+def list_repair_agent_runs(status: Optional[str] = None) -> RepairAgentRunsResponse:
+    return RepairAgentRunsResponse(status="ok", runs=repair_agent_runtime.list_runs(status=status))
+
+
+@app.get("/api/knowledge/agent/repair-runs/{run_id}", response_model=RepairAgentRunResponse)
+def get_repair_agent_run(run_id: str) -> RepairAgentRunResponse:
+    return RepairAgentRunResponse(status="ok", run=repair_agent_runtime.get_run(run_id))
+
+
+@app.post("/api/knowledge/agent/repair-runs/{run_id}/step", response_model=RepairAgentRunResponse)
+def step_repair_agent_run(run_id: str) -> RepairAgentRunResponse:
+    return RepairAgentRunResponse(status="ok", run=repair_agent_runtime.step(run_id))
+
+
+@app.post("/api/knowledge/agent/repair-runs/{run_id}/approve", response_model=RepairAgentRunResponse)
+def approve_repair_agent_run(run_id: str) -> RepairAgentRunResponse:
+    return RepairAgentRunResponse(status="ok", run=repair_agent_runtime.approve(run_id))
+
+
+@app.post("/api/knowledge/agent/repair-runs/{run_id}/reject", response_model=RepairAgentRunResponse)
+def reject_repair_agent_run(run_id: str, request: RejectRepairAgentRunRequest) -> RepairAgentRunResponse:
+    return RepairAgentRunResponse(status="ok", run=repair_agent_runtime.reject(run_id, request.reason))
 
 
 @app.get("/api/knowledge/documents", response_model=KnowledgeDocumentsResponse)

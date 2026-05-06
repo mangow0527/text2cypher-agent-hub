@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -14,6 +16,7 @@ from app.domain.questioning.service import QUESTION_VARIANT_STYLES, QuestionServ
 from app.domain.roundtrip.service import RoundtripService
 from app.domain.schema.compatibility_service import SchemaCompatibilityService
 from app.domain.validation.service import ValidationService
+from app.logging import ModuleLogStore
 from app.integrations.openai.model_gateway import ModelGateway
 from app.integrations.qa_dispatcher import QADispatcher
 from app.integrations.tugraph.graph_executor import GraphExecutor
@@ -168,54 +171,65 @@ class InspectingBatchGateway(FakeModelGateway):
 
 
 class UniqueQuestionGateway(FakeModelGateway):
+    @staticmethod
+    def _stable_fingerprint(cypher: str) -> int:
+        digest = hashlib.sha1(cypher.encode("utf-8")).hexdigest()
+        return int(digest[:8], 16)
+
+    @staticmethod
+    def _question_suffix(cypher: str) -> str:
+        digest = hashlib.sha1(cypher.encode("utf-8")).hexdigest()
+        return digest[:4]
+
     def generate_text(self, prompt_name, model_config, **kwargs):
         if prompt_name == "question_bundle_batch":
             requests = json.loads(kwargs.get("requests_json", "[]"))
             items = []
             for item in requests:
                 cypher = item.get("cypher", "")
-                fingerprint = abs(hash(cypher))
+                fingerprint = self._stable_fingerprint(cypher)
+                suffix = self._question_suffix(cypher)
                 import re
                 limit_match = re.search(r"\bLIMIT\s+(\d+)\b", cypher, flags=re.IGNORECASE)
                 limit_value = limit_match.group(1) if limit_match else None
                 if "count(" in cypher.lower():
                     canonical_options = [
-                        "网络元素总共有多少个？",
-                        "当前一共有多少个网络元素？",
-                        "网络元素的总数是多少？",
-                        "请统计网络元素的数量。",
+                        f"网络元素总共有多少个？（{suffix}）",
+                        f"当前一共有多少个网络元素？（{suffix}）",
+                        f"网络元素的总数是多少？（{suffix}）",
+                        f"请统计网络元素的数量。（{suffix}）",
                     ]
                     variant_options = [
-                        "帮我统计网络元素总数",
-                        "网络元素有多少个？",
-                        "查一下网络元素数量",
-                        "请给我网络元素数量统计",
+                        f"帮我统计网络元素总数（{suffix}）",
+                        f"网络元素有多少个？（{suffix}）",
+                        f"查一下网络元素数量（{suffix}）",
+                        f"请给我网络元素数量统计（{suffix}）",
                     ]
                 elif limit_value:
                     canonical_options = [
-                        f"列出前{limit_value}个网络设备。",
-                        f"请给我前{limit_value}个网络设备。",
-                        f"展示前{limit_value}个网络设备。",
-                        f"帮我找出前{limit_value}个网络设备。",
+                        f"列出前{limit_value}个网络设备。（{suffix}）",
+                        f"请给我前{limit_value}个网络设备。（{suffix}）",
+                        f"展示前{limit_value}个网络设备。（{suffix}）",
+                        f"帮我找出前{limit_value}个网络设备。（{suffix}）",
                     ]
                     variant_options = [
-                        f"前{limit_value}个网络设备有哪些？",
-                        f"查一下前{limit_value}个网络设备",
-                        f"给我看前{limit_value}个网络设备",
-                        f"请列出前{limit_value}个网络设备",
+                        f"前{limit_value}个网络设备有哪些？（{suffix}）",
+                        f"查一下前{limit_value}个网络设备（{suffix}）",
+                        f"给我看前{limit_value}个网络设备（{suffix}）",
+                        f"请列出前{limit_value}个网络设备（{suffix}）",
                     ]
                 else:
                     canonical_options = [
-                        "列出网络中的设备。",
-                        "请给我网络设备清单。",
-                        "展示网络里的设备。",
-                        "帮我找出网络设备。",
+                        f"列出网络中的设备。（{suffix}）",
+                        f"请给我网络设备清单。（{suffix}）",
+                        f"展示网络里的设备。（{suffix}）",
+                        f"帮我找出网络设备。（{suffix}）",
                     ]
                     variant_options = [
-                        "网络设备有哪些？",
-                        "查一下网络里的设备",
-                        "给我看网络设备列表",
-                        "请列出网络设备",
+                        f"网络设备有哪些？（{suffix}）",
+                        f"查一下网络里的设备（{suffix}）",
+                        f"给我看网络设备列表（{suffix}）",
+                        f"请列出网络设备（{suffix}）",
                     ]
                 canonical = canonical_options[fingerprint % len(canonical_options)]
                 items.append(
@@ -246,49 +260,50 @@ class UniqueQuestionGateway(FakeModelGateway):
             return json.dumps({"items": items}, ensure_ascii=False)
         if prompt_name == "question_bundle":
             cypher = kwargs.get("cypher", "")
-            fingerprint = abs(hash(cypher))
+            fingerprint = self._stable_fingerprint(cypher)
+            suffix = self._question_suffix(cypher)
             limit_match = None
             import re
             limit_match = re.search(r"\bLIMIT\s+(\d+)\b", cypher, flags=re.IGNORECASE)
             limit_value = limit_match.group(1) if limit_match else None
             if "count(" in cypher.lower():
                 canonical_options = [
-                    "网络元素总共有多少个？",
-                    "当前一共有多少个网络元素？",
-                    "网络元素的总数是多少？",
-                    "请统计网络元素的数量。",
+                    f"网络元素总共有多少个？（{suffix}）",
+                    f"当前一共有多少个网络元素？（{suffix}）",
+                    f"网络元素的总数是多少？（{suffix}）",
+                    f"请统计网络元素的数量。（{suffix}）",
                 ]
                 variant_options = [
-                    "帮我统计网络元素总数",
-                    "网络元素有多少个？",
-                    "查一下网络元素数量",
-                    "请给我网络元素数量统计",
+                    f"帮我统计网络元素总数（{suffix}）",
+                    f"网络元素有多少个？（{suffix}）",
+                    f"查一下网络元素数量（{suffix}）",
+                    f"请给我网络元素数量统计（{suffix}）",
                 ]
             elif limit_value:
                 canonical_options = [
-                    f"列出前{limit_value}个网络设备。",
-                    f"请给我前{limit_value}个网络设备。",
-                    f"展示前{limit_value}个网络设备。",
-                    f"帮我找出前{limit_value}个网络设备。",
+                    f"列出前{limit_value}个网络设备。（{suffix}）",
+                    f"请给我前{limit_value}个网络设备。（{suffix}）",
+                    f"展示前{limit_value}个网络设备。（{suffix}）",
+                    f"帮我找出前{limit_value}个网络设备。（{suffix}）",
                 ]
                 variant_options = [
-                    f"前{limit_value}个网络设备有哪些？",
-                    f"查一下前{limit_value}个网络设备",
-                    f"给我看前{limit_value}个网络设备",
-                    f"请列出前{limit_value}个网络设备",
+                    f"前{limit_value}个网络设备有哪些？（{suffix}）",
+                    f"查一下前{limit_value}个网络设备（{suffix}）",
+                    f"给我看前{limit_value}个网络设备（{suffix}）",
+                    f"请列出前{limit_value}个网络设备（{suffix}）",
                 ]
             else:
                 canonical_options = [
-                    "列出网络中的设备。",
-                    "请给我网络设备清单。",
-                    "展示网络里的设备。",
-                    "帮我找出网络设备。",
+                    f"列出网络中的设备。（{suffix}）",
+                    f"请给我网络设备清单。（{suffix}）",
+                    f"展示网络里的设备。（{suffix}）",
+                    f"帮我找出网络设备。（{suffix}）",
                 ]
                 variant_options = [
-                    "网络设备有哪些？",
-                    "查一下网络里的设备",
-                    "给我看网络设备列表",
-                    "请列出网络设备",
+                    f"网络设备有哪些？（{suffix}）",
+                    f"查一下网络里的设备（{suffix}）",
+                    f"给我看网络设备列表（{suffix}）",
+                    f"请列出网络设备（{suffix}）",
                 ]
             canonical = canonical_options[fingerprint % len(canonical_options)]
             return json.dumps(
@@ -561,6 +576,95 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(sample.answer, full_rows)
         self.assertEqual(len(sample.result_signature.result_preview), 5)
 
+    def test_question_service_splits_large_batches_into_parallel_llm_requests(self) -> None:
+        from app.domain.models import CanonicalSchemaSpec
+
+        class ConcurrentQuestionBatchGateway:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+                self.request_batch_sizes: list[int] = []
+                self.active = 0
+                self.max_active = 0
+                self.lock = threading.Lock()
+
+            def generate_text(self, prompt_name, model_config, **kwargs):
+                self.calls.append(prompt_name)
+                requests = json.loads(kwargs.get("requests_json", "[]"))
+                self.request_batch_sizes.append(len(requests))
+                with self.lock:
+                    self.active += 1
+                    self.max_active = max(self.max_active, self.active)
+                try:
+                    time.sleep(0.05)
+                    return json.dumps(
+                        {
+                            "items": [
+                                {
+                                    "request_id": item["request_id"],
+                                    "canonical_question": f"请查询样本{item['request_id']}对应的结果？",
+                                    "variants": [
+                                        {
+                                            "style": "natural_short",
+                                            "question": f"样本{item['request_id']}的结果是什么？",
+                                        }
+                                    ],
+                                    "canonical_pass": True,
+                                    "canonical_checks": {"return_target": True},
+                                    "approved_styles": ["natural_short"],
+                                }
+                                for item in requests
+                            ]
+                        },
+                        ensure_ascii=False,
+                    )
+                finally:
+                    with self.lock:
+                        self.active -= 1
+
+        schema = CanonicalSchemaSpec(node_types=["Person"], node_properties={"Person": {"name": "STRING"}})
+        validated = [
+            ValidatedSample(
+                sample_id=f"val_{idx}",
+                candidate=CypherCandidate(
+                    candidate_id=f"cand_{idx}",
+                    skeleton_id=f"sk_{idx}",
+                    cypher=f"MATCH (n:Person) RETURN n.name AS name LIMIT {idx + 1}",
+                    query_types=["LOOKUP"],
+                    structure_family="lookup_property_projection",
+                    generation_mode="llm_refine",
+                    difficulty="L1",
+                ),
+                validation=ValidationResult(
+                    syntax=True,
+                    schema=True,
+                    type_value=True,
+                    query_type_valid=True,
+                    family_valid=True,
+                    runtime=True,
+                    result_sanity=True,
+                    difficulty_valid=True,
+                    plan_valid=True,
+                ),
+                result_signature=ResultSignature(
+                    columns=["name"],
+                    column_types=["string"],
+                    row_count=1,
+                    result_preview=[{"name": f"person_{idx}"}],
+                    result_rows=[{"name": f"person_{idx}"}],
+                ),
+                classified_difficulty="L1",
+            )
+            for idx in range(7)
+        ]
+        gateway = ConcurrentQuestionBatchGateway()
+
+        samples = QuestionService(model_gateway=gateway).generate_batch(validated, schema, fake_gateway_config(), 1)
+
+        self.assertEqual(len(samples), 7)
+        self.assertEqual(gateway.calls, ["question_bundle_batch", "question_bundle_batch", "question_bundle_batch"])
+        self.assertCountEqual(gateway.request_batch_sizes, [3, 3, 1])
+        self.assertGreater(gateway.max_active, 1)
+
     def test_graph_executor_keeps_full_rows_separate_from_preview(self) -> None:
         class FakeClient:
             def call_cypher(self, cypher):
@@ -799,6 +903,107 @@ class PipelineTest(unittest.TestCase):
 
             self.assertEqual(completed.status.value, "completed")
             self.assertGreaterEqual(completed.metrics.get("sample_count", 0), 1)
+            self.assertGreaterEqual(generation_service.instantiate_calls, 2)
+
+    def test_online_job_retries_until_difficulty_targets_are_satisfied(self) -> None:
+        schema_path = Path(__file__).parent / "fixtures" / "schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+        class TargetShortfallGenerationService:
+            def __init__(self) -> None:
+                self.instantiate_calls = 0
+
+            def instantiate_candidates_from_specs(self, schema, specs, limits, model_config=None):
+                self.instantiate_calls += 1
+                count = 1 if self.instantiate_calls == 1 else 2
+                return [
+                    CypherCandidate(
+                        candidate_id=f"cand_l8_{idx}",
+                        skeleton_id=f"sk_l8_{idx}",
+                        cypher=f"MATCH (n:Person) WITH n MATCH (n)-[:WORKS_ON]->(p:Project) RETURN n.name AS name, count(p) AS total LIMIT {idx + 1}",
+                        query_types=["SUBQUERY"],
+                        structure_family="with_stage_aggregate",
+                        generation_mode="llm_refine",
+                        difficulty="L8",
+                    )
+                    for idx in range(count)
+                ]
+
+        class PassingValidationService:
+            def validate(self, candidate, schema, config, tugraph_config):
+                return ValidatedSample(
+                    candidate=candidate,
+                    validation=ValidationResult(
+                        syntax=True,
+                        schema=True,
+                        type_value=True,
+                        query_type_valid=True,
+                        family_valid=True,
+                        runtime=True,
+                        result_sanity=True,
+                        difficulty_valid=True,
+                        plan_valid=True,
+                    ),
+                    result_signature=ResultSignature(
+                        columns=["name", "total"],
+                        column_types=["string", "integer"],
+                        row_count=1,
+                        result_preview=[{"name": candidate.candidate_id, "total": 1}],
+                        result_rows=[{"name": candidate.candidate_id, "total": 1}],
+                    ),
+                    classified_difficulty="L8",
+                )
+
+        class PassingQuestionService:
+            def generate_batch(self, validated, schema, llm_config, max_variants):
+                samples = []
+                for item in validated:
+                    sample = fake_qa_sample()
+                    sample.id = f"qa_{item.candidate.candidate_id}"
+                    sample.question_canonical_zh = f"{item.candidate.candidate_id} 对应的 L8 问题？"
+                    sample.question_variants_zh = [sample.question_canonical_zh]
+                    sample.question_variant_styles = ["natural_short"]
+                    sample.cypher = item.candidate.cypher
+                    sample.cypher_normalized = item.candidate.cypher.lower()
+                    sample.query_types = item.candidate.query_types
+                    sample.difficulty = "L8"
+                    sample.answer = [{"name": item.candidate.candidate_id, "total": 1}]
+                    sample.result_signature = item.result_signature
+                    sample.provenance["generation_mode"] = item.candidate.generation_mode
+                    sample.provenance["structure_family"] = item.candidate.structure_family
+                    samples.append(sample)
+                return samples
+
+        class PassingRoundtripService:
+            def check(self, sample, llm_config):
+                return True, sample.question_variants_zh, sample.question_variant_styles
+
+        generation_service = TargetShortfallGenerationService()
+        with TemporaryDirectory() as tempdir:
+            temp_root = Path(tempdir)
+            orchestrator = Orchestrator(
+                job_store=JobStore(root=temp_root / "job-reports"),
+                artifact_store=ArtifactStore(root=temp_root / "artifacts"),
+                schema_compatibility_service=SchemaCompatibilityService(graph_executor=FakeGraphExecutor()),
+                generation_service=generation_service,
+                validation_service=PassingValidationService(),
+                question_service=PassingQuestionService(),
+                roundtrip_service=PassingRoundtripService(),
+            )
+            job = orchestrator.create_job(
+                JobRequest(
+                    mode="online",
+                    schema_input=schema,
+                    output_config={"target_qa_count": 2, "difficulty_targets": {"L8": 2}},
+                    tugraph_source={"type": "inline"},
+                    tugraph_config={"base_url": None, "username": None, "password": None, "graph": None},
+                )
+            )
+
+            completed = orchestrator.run_job(job.job_id)
+
+            self.assertEqual(completed.status.value, "completed")
+            self.assertEqual(completed.metrics["selection"]["difficulty_shortfalls"], {})
             self.assertGreaterEqual(generation_service.instantiate_calls, 2)
 
     def test_job_fails_when_all_retry_attempts_produce_zero_samples(self) -> None:
@@ -1217,7 +1422,7 @@ class PipelineTest(unittest.TestCase):
             self.assertFalse(report_path.exists())
             self.assertFalse(release_path.exists())
 
-    def test_online_mode_uses_single_batched_question_generation_call(self) -> None:
+    def test_online_mode_uses_batched_question_generation_calls(self) -> None:
         schema_path = Path(__file__).parent / "fixtures" / "schema.json"
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
 
@@ -1249,7 +1454,7 @@ class PipelineTest(unittest.TestCase):
             batch_calls = fake_gateway.calls.count("question_bundle_batch")
             consistency_calls = fake_gateway.calls.count("question_bundle_consistency")
             self.assertEqual(question_bundle_calls, 0)
-            self.assertEqual(batch_calls, 1)
+            self.assertGreaterEqual(batch_calls, 1)
             self.assertEqual(consistency_calls, 0)
             self.assertNotIn("question_variants", fake_gateway.calls)
             self.assertNotIn("cypher_canonical_question", fake_gateway.calls)
@@ -1384,6 +1589,94 @@ class PipelineTest(unittest.TestCase):
 
         self.assertEqual(output, "ok")
         self.assertEqual(fake_client.calls, 2)
+
+    def test_model_gateway_logs_llm_attempt_duration_without_sensitive_payload(self) -> None:
+        with TemporaryDirectory() as tempdir:
+            gateway = ModelGateway(module_logs=ModuleLogStore(root=Path(tempdir)))
+
+            class FakeClient:
+                def post(self, *args, **kwargs):
+                    request = httpx.Request("POST", "https://example.com/chat/completions")
+                    return httpx.Response(
+                        200,
+                        request=request,
+                        json={"choices": [{"message": {"content": "ok"}}]},
+                    )
+
+            gateway._client = FakeClient()
+            output = gateway.generate_text(
+                "question_bundle_batch",
+                fake_gateway_config(),
+                requests_json=json.dumps(
+                    [
+                        {
+                            "request_id": "val_secret",
+                            "cypher": "MATCH (n:Secret) RETURN n",
+                        }
+                    ],
+                    ensure_ascii=False,
+                ),
+            )
+            log_path = Path(tempdir) / "openai.log"
+            log_lines = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+        self.assertEqual(output, "ok")
+        self.assertEqual([line["operation"] for line in log_lines], ["llm_request_started", "llm_request_completed"])
+        completed = log_lines[-1]
+        self.assertEqual(completed["status"], "success")
+        self.assertEqual(completed["request_body"]["prompt_name"], "question_bundle_batch")
+        self.assertEqual(completed["request_body"]["batch_size"], 1)
+        self.assertEqual(completed["attempt"], 1)
+        self.assertGreaterEqual(completed["duration_ms"], 0)
+        raw_log = json.dumps(log_lines, ensure_ascii=False)
+        self.assertNotIn("MATCH (n:Secret)", raw_log)
+        self.assertNotIn("Authorization", raw_log)
+
+    def test_model_gateway_logs_retryable_attempt_before_success(self) -> None:
+        with TemporaryDirectory() as tempdir:
+            gateway = ModelGateway(module_logs=ModuleLogStore(root=Path(tempdir)))
+
+            class FakeClient:
+                def __init__(self) -> None:
+                    self.calls = 0
+
+                def post(self, *args, **kwargs):
+                    self.calls += 1
+                    request = httpx.Request("POST", "https://example.com/chat/completions")
+                    if self.calls == 1:
+                        return httpx.Response(429, request=request, json={"error": "rate limit"})
+                    return httpx.Response(
+                        200,
+                        request=request,
+                        json={"choices": [{"message": {"content": "ok"}}]},
+                    )
+
+            fake_client = FakeClient()
+            gateway._client = fake_client
+            output = gateway.generate_text(
+                "question_bundle",
+                fake_gateway_config(),
+                schema_summary="节点 NetworkElement",
+                cypher="MATCH (n:NetworkElement) RETURN n LIMIT 5",
+                query_types="LOOKUP",
+                return_semantics="n",
+                result_summary='{"columns":["n"]}',
+                requested_styles=", ".join(QUESTION_VARIANT_STYLES),
+            )
+            log_path = Path(tempdir) / "openai.log"
+            log_lines = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+        self.assertEqual(output, "ok")
+        self.assertEqual(fake_client.calls, 2)
+        self.assertEqual(
+            [line["operation"] for line in log_lines],
+            ["llm_request_started", "llm_request_retry", "llm_request_started", "llm_request_completed"],
+        )
+        retry = log_lines[1]
+        self.assertEqual(retry["status"], "retry")
+        self.assertEqual(retry["attempt"], 1)
+        self.assertEqual(retry["response_body"]["status_code"], 429)
+        self.assertEqual(log_lines[-1]["attempt"], 2)
 
     def test_model_gateway_retries_on_timeout(self) -> None:
         gateway = ModelGateway()

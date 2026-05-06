@@ -22,6 +22,10 @@ class RepairService:
         self.module_logs = module_logs
 
     def apply(self, suggestion: str, knowledge_types: list[str] | None) -> list[dict[str, str]]:
+        patches = self.propose(suggestion, knowledge_types)
+        return self.apply_candidates(patches, suggestion)
+
+    def propose(self, suggestion: str, knowledge_types: list[str] | None) -> list[dict[str, str]]:
         target_types = knowledge_types or self._infer_types(suggestion)
         if self.module_logs is not None:
             self.module_logs.append(
@@ -34,21 +38,7 @@ class RepairService:
         raw_response = self.model_gateway.generate_text(
             "repair_analysis",
             {"model": "glm-5", "temperature": 0.1, "max_output_tokens": 800},
-            prompt=(
-                "你是 TuGraph Text2Cypher 知识增强器。"
-                "请把修复建议转成结构化知识分析 JSON，用于让后续同类问题更稳定地产出正确 Cypher。"
-                "必须输出合法 JSON，对象字段必须包含："
-                "intent_summary, canonical_question_pattern, cypher_constraints, schema_bindings, "
-                "business_mapping, positive_example, negative_example, target_docs。\n"
-                "要求：\n"
-                "1. business_mapping 是字符串数组，写术语到 schema 的稳定映射。\n"
-                "2. cypher_constraints 是字符串数组，写方向、过滤、路径、返回语义等硬约束。\n"
-                "3. positive_example 必须包含 question, cypher, why。\n"
-                "4. negative_example 必须包含 question, cypher, why_not。\n"
-                "5. target_docs 只能从 cypher_syntax, few_shot, system_prompt, business_knowledge 中选择。\n"
-                f"修复建议：{suggestion}\n"
-                f"优先目标知识类型：{', '.join(target_types)}"
-            ),
+            prompt=self._repair_analysis_prompt(suggestion, target_types),
         )
         if self.module_logs is not None:
             self.module_logs.append(
@@ -60,6 +50,9 @@ class RepairService:
             )
         analysis = self._parse_analysis(raw_response, suggestion, target_types)
         patches = self._build_patches_from_analysis(analysis, target_types)
+        return patches
+
+    def apply_candidates(self, patches: list[dict[str, str]], suggestion: str) -> list[dict[str, str]]:
         changes: list[dict[str, str]] = []
         for patch in patches:
             target_type = patch["doc_type"]
@@ -106,6 +99,23 @@ class RepairService:
                 }
             )
         return changes
+
+    def _repair_analysis_prompt(self, suggestion: str, target_types: list[str]) -> str:
+        return (
+            "你是 TuGraph Text2Cypher 知识增强器。"
+            "请把修复建议转成结构化知识分析 JSON，用于让后续同类问题更稳定地产出正确 Cypher。"
+            "必须输出合法 JSON，对象字段必须包含："
+            "intent_summary, canonical_question_pattern, cypher_constraints, schema_bindings, "
+            "business_mapping, positive_example, negative_example, target_docs。\n"
+            "要求：\n"
+            "1. business_mapping 是字符串数组，写术语到 schema 的稳定映射。\n"
+            "2. cypher_constraints 是字符串数组，写方向、过滤、路径、返回语义等硬约束。\n"
+            "3. positive_example 必须包含 question, cypher, why。\n"
+            "4. negative_example 必须包含 question, cypher, why_not。\n"
+            "5. target_docs 只能从 cypher_syntax, few_shot, system_prompt, business_knowledge 中选择。\n"
+            f"修复建议：{suggestion}\n"
+            f"优先目标知识类型：{', '.join(target_types)}"
+        )
 
     def _infer_types(self, suggestion: str) -> list[str]:
         if "术语" in suggestion or "映射" in suggestion or "语义" in suggestion:
