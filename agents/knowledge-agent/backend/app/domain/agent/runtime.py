@@ -11,6 +11,7 @@ from app.domain.agent.models import (
     RootCause,
     ValidationSummary,
 )
+from app.domain.knowledge.redispatch_result import skipped_redispatch_result
 from app.errors import AppError
 
 
@@ -23,7 +24,6 @@ class RepairAgentRuntime:
         memory_manager,
         policy_guard,
         repair_service=None,
-        qa_redispatch_gateway=None,
     ) -> None:
         self.run_store = run_store
         self.controller = controller
@@ -31,7 +31,6 @@ class RepairAgentRuntime:
         self.memory_manager = memory_manager
         self.policy_guard = policy_guard
         self.repair_service = repair_service
-        self.qa_redispatch_gateway = qa_redispatch_gateway
 
     def create_run(self, qa_id: str, goal: str, root_cause: RootCause, constraints: AgentConstraints) -> AgentRun:
         return self.run_store.create(qa_id=qa_id, goal=goal, root_cause=root_cause, constraints=constraints)
@@ -102,8 +101,6 @@ class RepairAgentRuntime:
             run.evidence.append({"type": "prompt_overlay", "prompt_length": observation.get("prompt_length", 0)})
         elif tool_name == "evaluate_before_after":
             run.validation = ValidationSummary.model_validate(observation.get("validation", {}))
-        elif tool_name == "redispatch_qa":
-            run.validation.redispatch_status = observation.get("redispatch", {}).get("status", "unknown")
         elif tool_name == "write_repair_memory":
             run.evidence.append({"type": "repair_memory", "memory": observation.get("memory", {})})
         return run
@@ -129,8 +126,7 @@ class RepairAgentRuntime:
         run.evidence.append({"type": "applied_changes", "changes": changes})
         self.run_store.save(run)
 
-        redispatch = self.qa_redispatch_gateway.redispatch(run.qa_id)
-        run.status = AgentRunStatus.REDISPATCHED
+        redispatch = skipped_redispatch_result(run.qa_id)
         run.validation.redispatch_status = redispatch.get("status", "unknown")
         self.run_store.save(run)
 
@@ -146,7 +142,7 @@ class RepairAgentRuntime:
         )
         run.evidence.append({"type": "repair_memory", "memory": memory})
         run.status = AgentRunStatus.COMPLETED
-        run.decision = AgentDecision(action="complete", reason="Repair applied, redispatched, and stored in memory.")
+        run.decision = AgentDecision(action="complete", reason="Repair applied and stored in memory.")
         return self.run_store.save(run)
 
     def reject(self, run_id: str, reason: str) -> AgentRun:

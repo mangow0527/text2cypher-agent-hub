@@ -21,15 +21,16 @@ class _FakeResponse:
 
 
 class SubmitQuestionTests(unittest.TestCase):
-    @patch("send_question.urllib.request.urlopen")
-    def test_submit_question_posts_expected_json(self, mock_urlopen):
-        mock_urlopen.return_value = _FakeResponse('{"ok": true}', status=200)
+    @patch("send_question.urllib.request.build_opener")
+    def test_submit_question_posts_expected_json(self, mock_build_opener):
+        opener = mock_build_opener.return_value
+        opener.open.return_value = _FakeResponse('{"ok": true}', status=200)
 
         result = submit_question(question_id="xxx", question="今天天气如何")
 
         self.assertEqual(result["status"], 200)
         self.assertEqual(result["body"], '{"ok": true}')
-        request = mock_urlopen.call_args.args[0]
+        request = opener.open.call_args.args[0]
         self.assertEqual(request.full_url, API_URL)
         self.assertEqual(request.method, "POST")
         self.assertEqual(request.get_header("Content-type"), "application/json; charset=utf-8")

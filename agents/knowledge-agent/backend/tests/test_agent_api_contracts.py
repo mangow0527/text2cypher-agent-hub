@@ -102,6 +102,11 @@ class AgentApiContractsTest(unittest.TestCase):
         self.assertEqual(detail["id"], "qa_001")
         self.assertTrue(client.urls[0].endswith("/qa/qa_001"))
 
+    def test_qa_gateway_does_not_expose_redispatch_sender(self) -> None:
+        gateway = QARedispatchGateway(client=FakeHTTPClient())
+
+        self.assertFalse(hasattr(gateway, "redispatch"))
+
     def test_create_step_approve_reject_contracts(self) -> None:
         client = TestClient(app)
         with patch("app.entrypoints.api.main.repair_agent_runtime", FakeRuntime()):

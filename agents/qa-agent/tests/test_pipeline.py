@@ -7,8 +7,10 @@ import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 import httpx
+import requests
 
 from app.domain.generation.service import GenerationService
 from app.domain.models import CypherCandidate, CypherSkeleton, JobRequest, QueryPlan, ResultSignature, RuntimeMeta, TuGraphConfig, ValidatedSample, ValidationResult
@@ -23,6 +25,7 @@ from app.integrations.tugraph.graph_executor import GraphExecutor
 from app.orchestrator.service import Orchestrator
 from app.storage.artifact_store import ArtifactStore
 from app.storage.job_store import JobStore
+from tugraph_http_ops import TuGraphHttpOps
 
 
 class FakeModelGateway(ModelGateway):
@@ -395,6 +398,46 @@ class FakeDispatchClient:
         return response
 
 
+class _FakeTuGraphResponse:
+    def __init__(self, status_code: int, payload: dict):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = json.dumps(payload, ensure_ascii=False)
+        self.content = self.text.encode("utf-8")
+
+    def json(self):
+        return self._payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} error")
+
+
+class _RefreshingTuGraphSession:
+    def __init__(self) -> None:
+        self.login_calls = 0
+        self.cypher_auth_headers = []
+
+    def request(self, method, url, timeout=None, **kwargs):
+        if url.endswith("/login"):
+            self.login_calls += 1
+            return _FakeTuGraphResponse(200, {"jwt": f"jwt-{self.login_calls}"})
+        if url.endswith("/cypher"):
+            headers = kwargs.get("headers") or {}
+            self.cypher_auth_headers.append(headers.get("Authorization"))
+            if len(self.cypher_auth_headers) == 1:
+                return _FakeTuGraphResponse(401, {"error_message": "Unauthorized"})
+            return _FakeTuGraphResponse(
+                200,
+                {
+                    "header": [{"name": "total", "type": "integer"}],
+                    "result": [[1]],
+                    "size": 1,
+                },
+            )
+        return _FakeTuGraphResponse(404, {})
+
+
 class FakeGraphExecutor:
     def fetch_labels(self, config):
         return {
@@ -683,6 +726,22 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(len(signature.result_preview), 5)
         self.assertEqual(len(signature.result_rows), 8)
 
+    @patch("tugraph_http_ops.requests.Session")
+    def test_tugraph_client_refreshes_jwt_once_after_cypher_unauthorized(self, mock_session) -> None:
+        session = _RefreshingTuGraphSession()
+        mock_session.return_value = session
+
+        payload = TuGraphHttpOps(
+            base_url="http://fake-tugraph:7070",
+            user="admin",
+            password="secret",
+            graph="network_schema_v10",
+        ).call_cypher("MATCH (n) RETURN count(n) AS total")
+
+        self.assertEqual(payload["size"], 1)
+        self.assertEqual(session.login_calls, 2)
+        self.assertEqual(session.cypher_auth_headers, ["Bearer jwt-1", "Bearer jwt-2"])
+
     def test_job_runs_to_completion(self) -> None:
         schema_path = Path(__file__).parent / "fixtures" / "schema.json"
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
@@ -711,7 +770,7 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(completed.status.value, "completed")
             self.assertTrue(completed.artifacts["schema"])
             self.assertTrue(completed.artifacts["report"])
-            self.assertGreaterEqual(completed.metrics.get("sample_count", 0), 1)
+            self.assertEqual(completed.metrics.get("sample_count"), job.request.output_config.target_qa_count)
             self.assertIn("language_coverage", completed.metrics)
             self.assertTrue(completed.metrics["language_coverage"]["covered_styles"])
             self.assertIn("natural_short", completed.metrics["language_coverage"]["covered_styles"])
@@ -1005,6 +1064,138 @@ class PipelineTest(unittest.TestCase):
             self.assertEqual(completed.status.value, "completed")
             self.assertEqual(completed.metrics["selection"]["difficulty_shortfalls"], {})
             self.assertGreaterEqual(generation_service.instantiate_calls, 2)
+
+    def test_job_keeps_retrying_until_requested_difficulty_targets_are_filled(self) -> None:
+        schema_path = Path(__file__).parent / "fixtures" / "schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+        class DelayedTargetGenerationService:
+            def __init__(self) -> None:
+                self.instantiate_calls = 0
+
+            def instantiate_candidates_from_specs(self, schema, specs, limits, model_config=None):
+                self.instantiate_calls += 1
+                if self.instantiate_calls < 4:
+                    return [
+                        CypherCandidate(
+                            candidate_id=f"cand_l1_{self.instantiate_calls}",
+                            skeleton_id=f"sk_l1_{self.instantiate_calls}",
+                            cypher=(
+                                "MATCH (n:Person) "
+                                f"RETURN n.name AS name LIMIT {self.instantiate_calls}"
+                            ),
+                            query_types=["LOOKUP"],
+                            structure_family="lookup_node_return",
+                            generation_mode="llm_refine",
+                            difficulty="L1",
+                        )
+                    ]
+                return [
+                    CypherCandidate(
+                        candidate_id="cand_l8_final",
+                        skeleton_id="sk_l8_final",
+                        cypher=(
+                            "MATCH (n:Person) WITH n "
+                            "MATCH (n)-[:WORKS_ON]->(p:Project) "
+                            "RETURN n.name AS name, count(p) AS total LIMIT 1"
+                        ),
+                        query_types=["SUBQUERY"],
+                        structure_family="with_stage_aggregate",
+                        generation_mode="llm_refine",
+                        difficulty="L8",
+                    )
+                ]
+
+        class PassingValidationService:
+            def validate(self, candidate, schema, config, tugraph_config):
+                difficulty = candidate.difficulty
+                rows = (
+                    [{"name": candidate.candidate_id, "total": 1}]
+                    if difficulty == "L8"
+                    else [{"name": candidate.candidate_id}]
+                )
+                return ValidatedSample(
+                    candidate=candidate,
+                    validation=ValidationResult(
+                        syntax=True,
+                        schema=True,
+                        type_value=True,
+                        query_type_valid=True,
+                        family_valid=True,
+                        runtime=True,
+                        result_sanity=True,
+                        difficulty_valid=True,
+                        plan_valid=True,
+                    ),
+                    result_signature=ResultSignature(
+                        columns=list(rows[0].keys()),
+                        column_types=["string", "integer"] if difficulty == "L8" else ["string"],
+                        row_count=1,
+                        result_preview=rows,
+                        result_rows=rows,
+                    ),
+                    classified_difficulty=difficulty,
+                )
+
+        class PassingQuestionService:
+            def generate_batch(self, validated, schema, llm_config, max_variants):
+                samples = []
+                for item in validated:
+                    sample = fake_qa_sample()
+                    sample.id = f"qa_{item.candidate.candidate_id}"
+                    sample.question_canonical_zh = f"{item.candidate.candidate_id} 对应的问题？"
+                    sample.question_variants_zh = [sample.question_canonical_zh]
+                    sample.question_variant_styles = ["natural_short"]
+                    sample.cypher = item.candidate.cypher
+                    sample.cypher_normalized = item.candidate.cypher.lower()
+                    sample.query_types = item.candidate.query_types
+                    sample.difficulty = item.candidate.difficulty
+                    sample.answer = item.result_signature.result_rows
+                    sample.result_signature = item.result_signature
+                    sample.provenance["generation_mode"] = item.candidate.generation_mode
+                    sample.provenance["structure_family"] = item.candidate.structure_family
+                    samples.append(sample)
+                return samples
+
+        class PassingRoundtripService:
+            def check(self, sample, llm_config):
+                return True, sample.question_variants_zh, sample.question_variant_styles
+
+        generation_service = DelayedTargetGenerationService()
+        with TemporaryDirectory() as tempdir:
+            temp_root = Path(tempdir)
+            orchestrator = Orchestrator(
+                job_store=JobStore(root=temp_root / "job-reports"),
+                artifact_store=ArtifactStore(root=temp_root / "artifacts"),
+                schema_compatibility_service=SchemaCompatibilityService(graph_executor=FakeGraphExecutor()),
+                generation_service=generation_service,
+                validation_service=PassingValidationService(),
+                question_service=PassingQuestionService(),
+                roundtrip_service=PassingRoundtripService(),
+            )
+            job = orchestrator.create_job(
+                JobRequest(
+                    mode="online",
+                    schema_input=schema,
+                    output_config={"target_qa_count": 3, "difficulty_targets": {"L1": 2, "L8": 1}},
+                    tugraph_source={"type": "inline"},
+                    tugraph_config={"base_url": None, "username": None, "password": None, "graph": None},
+                )
+            )
+
+            completed = orchestrator.run_job(job.job_id)
+
+            self.assertEqual(completed.status.value, "completed")
+            self.assertGreaterEqual(generation_service.instantiate_calls, 4)
+            self.assertEqual(completed.metrics["sample_count"], 3)
+            self.assertEqual(completed.metrics["selection"]["difficulty_shortfalls"], {})
+            self.assertEqual(completed.metrics["selection"]["selected_difficulty_counts"], {"L1": 2, "L8": 1})
+            release_rows = [
+                json.loads(line)
+                for line in Path(completed.artifacts["releases"]).read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(len(release_rows), 3)
 
     def test_job_fails_when_all_retry_attempts_produce_zero_samples(self) -> None:
         schema_path = Path(__file__).parent / "fixtures" / "schema.json"
@@ -1495,6 +1686,36 @@ class PipelineTest(unittest.TestCase):
         self.assertEqual(orchestrator._query_plan_target_count(1, 32), 3)
         self.assertEqual(orchestrator._query_plan_target_count(2, 32), 4)
         self.assertEqual(orchestrator._query_plan_target_count(5, 32), 8)
+
+    def test_online_skeleton_budget_keeps_all_requested_difficulty_targets(self) -> None:
+        schema_path = Path(__file__).parent / "fixtures" / "schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        request = JobRequest(
+            mode="online",
+            schema_input=schema,
+            output_config={
+                "difficulty_targets": {"L1": 2, "L2": 2, "L3": 1, "L4": 1, "L5": 1, "L6": 1, "L7": 1, "L8": 1}
+            },
+            tugraph_source={"type": "inline"},
+            tugraph_config={"base_url": None, "username": None, "password": None, "graph": None},
+        )
+        orchestrator = Orchestrator()
+        normalized_schema = orchestrator.schema_service.normalize(schema)
+        limits = orchestrator._effective_limits(request)
+
+        specs = orchestrator.coverage_service.build_specs(
+            schema=normalized_schema,
+            limits=limits,
+            target_qa_count=orchestrator._query_plan_target_count(request.output_config.target_qa_count, limits.max_skeletons),
+            difficulty_targets=request.output_config.difficulty_targets,
+            diversity_key="difficulty-target-budget",
+        )
+
+        self.assertEqual(len(specs), request.output_config.target_qa_count)
+        self.assertEqual(
+            {level: sum(1 for spec in specs if spec.target_difficulty == level) for level in request.output_config.difficulty_targets},
+            request.output_config.difficulty_targets,
+        )
 
     def test_shortlist_validated_samples_limits_llm_work_for_single_target(self) -> None:
         orchestrator = Orchestrator()

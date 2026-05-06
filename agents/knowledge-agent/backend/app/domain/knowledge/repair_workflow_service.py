@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.domain.knowledge.redispatch_result import skipped_redispatch_result
+
 
 class RepairWorkflowService:
-    def __init__(self, repair_service, qa_redispatch_gateway, module_logs=None) -> None:
+    def __init__(self, repair_service, qa_redispatch_gateway=None, module_logs=None) -> None:
         self.repair_service = repair_service
-        self.qa_redispatch_gateway = qa_redispatch_gateway
         self.module_logs = module_logs
 
     def apply(self, qa_id: str, suggestion: str, knowledge_types: list[str] | None) -> dict[str, Any]:
@@ -24,7 +25,7 @@ class RepairWorkflowService:
                 },
             )
         changes = self.repair_service.apply(suggestion, knowledge_types)
-        redispatch_result = self.qa_redispatch_gateway.redispatch(qa_id)
+        redispatch_result = skipped_redispatch_result(qa_id)
         result = {"changes": changes, "redispatch": redispatch_result}
         if self.module_logs is not None:
             self.module_logs.append(

@@ -206,6 +206,10 @@ class TuGraphHttpOps:
 
         logger.info(f"TuGraphHttpOps 调用 /cypher, graph={self.graph}, script 前 100 字符: {script[:100]}...")
         resp = self._post("/cypher", body)
+        if resp.status_code == 401:
+            logger.warning("/cypher HTTP 401, refresh TuGraph JWT and retry once")
+            self.login()
+            resp = self._post("/cypher", body)
         if resp.status_code != 200:
             logger.error(f"/cypher HTTP {resp.status_code}, body: {resp.text}")
             resp.raise_for_status()

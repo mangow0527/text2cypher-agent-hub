@@ -47,10 +47,10 @@ class FakeRepairWorkflowService:
             "redispatch": {
                 "trace_id": qa_id,
                 "qa_id": qa_id,
-                "status": "success",
-                "attempt": 1,
-                "max_attempts": 3,
-                "dispatch": {"status": "success"},
+                "status": "skipped",
+                "attempt": 0,
+                "max_attempts": 0,
+                "dispatch": {"status": "skipped"},
             },
         }
 
@@ -83,7 +83,7 @@ class ApiContractTest(unittest.TestCase):
         self.assertIn("before", response.json()["changes"][0])
         self.assertIn("after", response.json()["changes"][0])
         self.assertEqual(response.json()["redispatch"]["trace_id"], "q_001")
-        self.assertEqual(response.json()["redispatch"]["status"], "success")
+        self.assertEqual(response.json()["redispatch"]["status"], "skipped")
 
     def test_apply_repair_returns_structured_app_error(self) -> None:
         with patch("app.entrypoints.api.main.repair_workflow_service", FailingRepairWorkflowService()):

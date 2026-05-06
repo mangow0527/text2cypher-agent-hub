@@ -23,12 +23,11 @@ class FakeRedispatchGateway:
         self.calls = []
 
     def redispatch(self, qa_id: str):
-        self.calls.append(qa_id)
-        return {"qa_id": qa_id, "status": "success", "attempt": 1, "max_attempts": 3, "dispatch": {"status": "success"}}
+        raise AssertionError("knowledge repair approval must not redispatch QA cases")
 
 
 class ApprovalLifecycleTest(unittest.TestCase):
-    def test_approve_applies_redispatches_writes_memory_and_completes(self) -> None:
+    def test_approve_applies_writes_memory_and_completes_without_redispatch(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             memory = MemoryManager(Path(tmp_dir) / "memory")
             repair = FakeRepairService()
@@ -40,7 +39,6 @@ class ApprovalLifecycleTest(unittest.TestCase):
                 memory,
                 PolicyGuard(),
                 repair,
-                redispatch,
             )
             run = runtime.create_run(
                 "qa_001",
@@ -67,10 +65,11 @@ class ApprovalLifecycleTest(unittest.TestCase):
 
             self.assertEqual(completed.status, AgentRunStatus.COMPLETED)
             self.assertEqual(repair.applied[0][0][0]["target_key"], "k")
-            self.assertEqual(redispatch.calls, ["qa_001"])
+            self.assertEqual(redispatch.calls, [])
+            self.assertEqual(completed.validation.redispatch_status, "skipped")
             self.assertTrue(memory.search_repair_memory("missing_few_shot"))
 
-    def test_auto_apply_uses_same_apply_redispatch_memory_completion_path(self) -> None:
+    def test_auto_apply_uses_same_apply_memory_completion_path_without_redispatch(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             memory = MemoryManager(Path(tmp_dir) / "memory")
             repair = FakeRepairService()
@@ -82,7 +81,6 @@ class ApprovalLifecycleTest(unittest.TestCase):
                 memory,
                 PolicyGuard(),
                 repair,
-                redispatch,
             )
             run = runtime.create_run(
                 "qa_001",
@@ -107,7 +105,8 @@ class ApprovalLifecycleTest(unittest.TestCase):
             completed = runtime.maybe_auto_apply(run)
 
             self.assertEqual(completed.status, AgentRunStatus.COMPLETED)
-            self.assertEqual(redispatch.calls, ["qa_001"])
+            self.assertEqual(redispatch.calls, [])
+            self.assertEqual(completed.validation.redispatch_status, "skipped")
 
 
 if __name__ == "__main__":

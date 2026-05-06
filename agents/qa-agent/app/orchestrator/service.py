@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -184,7 +185,10 @@ class Orchestrator:
             resolved_tugraph = self.source_resolver.resolve_tugraph(job.request.tugraph_source, job.request.tugraph_config)
             self.schema_compatibility_service.assert_compatible(schema, resolved_tugraph)
 
-            attempt_count = 3
+            target_qa_count = job.request.output_config.target_qa_count
+            difficulty_targets = dict(job.request.output_config.difficulty_targets)
+            active_difficulty_targets = difficulty_targets or None
+            attempt_count = self._target_completion_attempt_count(target_qa_count, difficulty_targets)
             aggregated_skeletons = []
             aggregated_candidates = []
             aggregated_validated = []
@@ -197,8 +201,8 @@ class Orchestrator:
                 coverage_specs = self.coverage_service.build_specs(
                     schema=schema,
                     limits=limits,
-                    target_qa_count=self._query_plan_target_count(job.request.output_config.target_qa_count, limits.max_skeletons),
-                    difficulty_targets=job.request.output_config.difficulty_targets,
+                    target_qa_count=self._query_plan_target_count(target_qa_count, limits.max_skeletons),
+                    difficulty_targets=active_difficulty_targets,
                     diversity_key=diversity_key,
                 )
                 skeletons = self._run_stage(
@@ -265,15 +269,19 @@ class Orchestrator:
                     f"Generated QA samples (attempt {attempt}/{attempt_count})",
                     lambda current_validated=self._shortlist_validated_samples(
                         list(aggregated_validated),
-                        job.request.output_config.target_qa_count,
-                        job.request.output_config.difficulty_targets,
+                        target_qa_count,
+                        difficulty_targets,
                     ): self._select_best_by_question(
-                        self._generate_questions(
-                            current_validated,
-                            schema,
-                            llm_config,
-                            limits.max_variants_per_question,
-                            job.request.mode.value,
+                        self._make_duplicate_questions_unique(
+                            self._repair_question_constraints(
+                                self._generate_questions(
+                                    current_validated,
+                                    schema,
+                                    llm_config,
+                                    limits.max_variants_per_question,
+                                    job.request.mode.value,
+                                )
+                            )
                         )
                     ),
                 )
@@ -298,27 +306,22 @@ class Orchestrator:
                     f"Deduplicated and split samples (attempt {attempt}/{attempt_count})",
                     lambda current_roundtrip=list(aggregated_roundtrip): self._dedupe_and_split(
                         current_roundtrip,
-                        job.request.output_config.target_qa_count,
+                        target_qa_count,
                         job.request.output_config.split_seed_limit,
                         job.request.output_config.split_gold_limit,
                         paths["releases"],
-                        job.request.output_config.difficulty_targets,
+                        difficulty_targets,
                     ),
                 )
                 if (
-                    job.request.mode.value == "online"
-                    and deduped
+                    self._release_targets_satisfied(deduped, target_qa_count, difficulty_targets)
                     and (
-                        not job.request.output_config.difficulty_targets
-                        or self._difficulty_targets_satisfied(deduped, job.request.output_config.difficulty_targets)
+                        job.request.mode.value == "online"
+                        or int(selection_meta.get("fresh_candidate_count", 0)) >= target_qa_count
                     )
                 ):
                     break
-                if (
-                    len(deduped) >= job.request.output_config.target_qa_count
-                    and int(selection_meta.get("fresh_candidate_count", 0)) >= job.request.output_config.target_qa_count
-                ):
-                    break
+                active_difficulty_targets = self._next_attempt_difficulty_targets(difficulty_targets, selection_meta)
 
             self.artifact_store.write_jsonl(paths["skeletons"], [item.model_dump() for item in aggregated_skeletons])
             job.artifacts["skeletons"] = str(paths["skeletons"])
@@ -333,13 +336,14 @@ class Orchestrator:
                 raise NoValidQAGeneratedError(
                     f"Unable to generate any valid QA after {attempt_count} attempts for job {job_id}."
                 )
-            if job.request.output_config.difficulty_targets and not self._difficulty_targets_satisfied(
-                deduped,
-                job.request.output_config.difficulty_targets,
-            ):
+            if not self._release_targets_satisfied(deduped, target_qa_count, difficulty_targets):
                 raise NoValidQAGeneratedError(
-                    "Unable to satisfy requested difficulty distribution after "
-                    f"{attempt_count} attempts: {selection_meta.get('difficulty_shortfalls', {})}"
+                    self._target_shortfall_message(
+                        target_qa_count,
+                        len(deduped),
+                        selection_meta,
+                        attempt_count,
+                    )
                 )
 
             self.artifact_store.write_jsonl(paths["releases"], [self._export_sample(item) for item in deduped])
@@ -580,6 +584,104 @@ class Orchestrator:
                 by_question[key] = sample
         return list(by_question.values())
 
+    def _make_duplicate_questions_unique(self, samples: list[QASample]) -> list[QASample]:
+        used_questions: dict[str, str] = {}
+        output: list[QASample] = []
+        for sample in samples:
+            question_key = normalize_question(sample.question_canonical_zh)
+            cypher_key = normalize_cypher(sample.cypher)
+            if question_key not in used_questions or used_questions[question_key] == cypher_key:
+                used_questions.setdefault(question_key, cypher_key)
+                output.append(sample)
+                continue
+
+            repaired = sample.model_copy(deep=True)
+            ordinal = 2
+            while True:
+                suffix = self._question_disambiguation_suffix(repaired, ordinal)
+                repaired.question_canonical_zh = self._append_question_suffix(sample.question_canonical_zh, suffix)
+                repaired.question_variants_zh = [
+                    self._append_question_suffix(variant, suffix) for variant in sample.question_variants_zh
+                ] or [repaired.question_canonical_zh]
+                repaired.provenance["question_disambiguation"] = suffix
+                repaired_key = normalize_question(repaired.question_canonical_zh)
+                if repaired_key not in used_questions:
+                    used_questions[repaired_key] = cypher_key
+                    output.append(repaired)
+                    break
+                ordinal += 1
+        return output
+
+    def _repair_question_constraints(self, samples: list[QASample]) -> list[QASample]:
+        return [self._repair_question_constraints_for_sample(sample) for sample in samples]
+
+    def _repair_question_constraints_for_sample(self, sample: QASample) -> QASample:
+        suffixes = self._missing_question_constraint_suffixes(sample)
+        if not suffixes:
+            return sample
+        repaired = sample.model_copy(deep=True)
+        suffix = "".join(suffixes)
+        repaired.question_canonical_zh = self._append_question_suffix(sample.question_canonical_zh, suffix)
+        repaired.question_variants_zh = [
+            self._append_question_suffix(variant, suffix) for variant in sample.question_variants_zh
+        ] or [repaired.question_canonical_zh]
+        repaired.provenance["question_constraint_repair"] = suffix
+        return repaired
+
+    def _missing_question_constraint_suffixes(self, sample: QASample) -> list[str]:
+        question = sample.question_canonical_zh.strip()
+        cypher_lower = sample.cypher.lower()
+        suffixes: list[str] = []
+        limit_match = re.search(r"\blimit\s+(\d+)\b", cypher_lower)
+        if limit_match and "order by" in cypher_lower and not self._question_mentions_limit(question, limit_match.group(1)):
+            suffixes.append(f"前{limit_match.group(1)}")
+        if self._cypher_uses_aggregation(cypher_lower) and not self._question_mentions_aggregation(question):
+            suffixes.append("统计数量")
+        return suffixes
+
+    def _cypher_uses_aggregation(self, cypher_lower: str) -> bool:
+        return any(token in cypher_lower for token in ["count(", "sum(", "avg(", "min(", "max("])
+
+    def _question_mentions_aggregation(self, question: str) -> bool:
+        return bool(re.search(r"多少|几个|数量|总数|统计|平均|最大|最小|总计|合计", question))
+
+    def _question_mentions_limit(self, question: str, limit_value: str) -> bool:
+        text = question.strip().lower()
+        patterns = [
+            f"前{limit_value}",
+            f"{limit_value}个",
+            f"{limit_value}条",
+            f"{limit_value}项",
+            f"{limit_value}名",
+            f"最多{limit_value}",
+            f"top {limit_value}",
+            f"top{limit_value}",
+        ]
+        if any(pattern in text for pattern in patterns):
+            return True
+        return bool(re.search(rf"\b{re.escape(limit_value)}\b", text))
+
+    def _append_question_suffix(self, question: str, suffix: str) -> str:
+        stripped = question.strip()
+        if not stripped:
+            return f"请查询相关结果（{suffix}）。"
+        punctuation = "？" if stripped.endswith(("?", "？")) else "。"
+        stem = stripped.rstrip("?？。.!！ ")
+        return f"{stem}（{suffix}）{punctuation}"
+
+    def _question_disambiguation_suffix(self, sample: QASample, ordinal: int) -> str:
+        query_type_labels = {
+            "LOOKUP": "基础查询",
+            "FILTER": "条件筛选",
+            "PATH": "关系路径",
+            "MULTI_HOP": "多跳关系",
+            "AGGREGATION": "统计汇总",
+            "SUBQUERY": "分阶段统计",
+        }
+        query_type = sample.query_types[0] if sample.query_types else ""
+        query_label = query_type_labels.get(query_type, "查询")
+        return f"{sample.difficulty}{query_label}{ordinal}"
+
     def _select_release_batch(
         self,
         samples: list[QASample],
@@ -712,12 +814,13 @@ class Orchestrator:
     def _effective_limits(self, request: JobRequest):
         limits = request.generation_limits.model_copy(deep=True)
         target = request.output_config.target_qa_count
+        limits.max_skeletons = max(limits.max_skeletons, target)
         if target >= 10:
             limits.max_candidates_per_skeleton = min(limits.max_candidates_per_skeleton, 2)
         if target >= 20:
             limits.max_variants_per_question = min(limits.max_variants_per_question, 1)
         if request.mode.value == "online":
-            limits.max_skeletons = min(limits.max_skeletons, 8)
+            limits.max_skeletons = max(min(limits.max_skeletons, 8), target)
             limits.max_candidates_per_skeleton = 1
             limits.max_variants_per_question = min(limits.max_variants_per_question, 5)
         return limits
@@ -762,6 +865,47 @@ class Orchestrator:
             return 1
         ceiling = 3 if mode == "online" else 6
         return min(ceiling, item_count)
+
+    def _target_completion_attempt_count(self, target_qa_count: int, difficulty_targets: dict[str, int]) -> int:
+        requested_count = max(target_qa_count, sum(difficulty_targets.values()) if difficulty_targets else 0)
+        return max(3, requested_count + 1)
+
+    def _release_targets_satisfied(
+        self,
+        samples: list[QASample],
+        target_qa_count: int,
+        difficulty_targets: dict[str, int],
+    ) -> bool:
+        if len(samples) < target_qa_count:
+            return False
+        if difficulty_targets:
+            return self._difficulty_targets_satisfied(samples, difficulty_targets)
+        return True
+
+    def _next_attempt_difficulty_targets(
+        self,
+        difficulty_targets: dict[str, int],
+        selection_meta: dict,
+    ) -> dict[str, int] | None:
+        if not difficulty_targets:
+            return None
+        shortfalls = selection_meta.get("difficulty_shortfalls") or {}
+        return dict(shortfalls) if shortfalls else dict(difficulty_targets)
+
+    def _target_shortfall_message(
+        self,
+        target_qa_count: int,
+        selected_count: int,
+        selection_meta: dict,
+        attempt_count: int,
+    ) -> str:
+        count_shortfall = max(0, target_qa_count - selected_count)
+        difficulty_shortfalls = selection_meta.get("difficulty_shortfalls") or {}
+        return (
+            f"Unable to satisfy requested QA count/difficulty distribution after {attempt_count} attempts: "
+            f"selected={selected_count}, requested={target_qa_count}, "
+            f"count_shortfall={count_shortfall}, difficulty_shortfalls={difficulty_shortfalls}"
+        )
 
     def _query_plan_target_count(self, target_qa_count: int, max_skeletons: int) -> int:
         if max_skeletons <= 8:

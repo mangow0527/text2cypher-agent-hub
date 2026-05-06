@@ -221,23 +221,6 @@ class EvaluateBeforeAfterTool(AgentTool):
         return {"validation": validation.model_dump()}
 
 
-class RedispatchQAInput(BaseModel):
-    qa_id: str
-
-
-class RedispatchQATool(AgentTool):
-    name = "redispatch_qa"
-    description = "Trigger QA redispatch. This is side-effecting and is not exposed to the LLM default tool allowlist."
-    input_model = RedispatchQAInput
-    side_effect = True
-
-    def __init__(self, qa_redispatch_gateway) -> None:
-        self.qa_redispatch_gateway = qa_redispatch_gateway
-
-    def execute(self, arguments: RedispatchQAInput) -> dict:
-        return {"redispatch": self.qa_redispatch_gateway.redispatch(arguments.qa_id)}
-
-
 class WriteRepairMemoryInput(BaseModel):
     entry: dict[str, Any]
 

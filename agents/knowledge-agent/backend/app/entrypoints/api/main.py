@@ -27,7 +27,6 @@ from app.domain.agent.tools import (
     ProposePatchTool,
     RagRetrieveTool,
     ReadRepairMemoryTool,
-    RedispatchQATool,
     RetrieveKnowledgeTool,
     WriteRepairMemoryTool,
 )
@@ -79,7 +78,7 @@ knowledge_tree_service = KnowledgeTreeService(knowledge_store)
 prompt_service = PromptService(knowledge_store)
 repair_service = RepairService(knowledge_store, ModelGateway(), module_logs=module_logs)
 qa_redispatch_gateway = QARedispatchGateway(module_logs=module_logs)
-repair_workflow_service = RepairWorkflowService(repair_service, qa_redispatch_gateway, module_logs=module_logs)
+repair_workflow_service = RepairWorkflowService(repair_service, module_logs=module_logs)
 agent_memory_manager = MemoryManager()
 agent_evaluator = RepairEvaluator()
 agent_tool_registry = ToolRegistry()
@@ -93,7 +92,6 @@ agent_tool_registry.register(CheckDuplicateTool(knowledge_store))
 agent_tool_registry.register(CheckConflictTool())
 agent_tool_registry.register(BuildPromptOverlayTool(knowledge_store))
 agent_tool_registry.register(EvaluateBeforeAfterTool(agent_evaluator))
-agent_tool_registry.register(RedispatchQATool(qa_redispatch_gateway))
 agent_tool_registry.register(WriteRepairMemoryTool(agent_memory_manager))
 repair_agent_runtime = RepairAgentRuntime(
     AgentRunStore(),
@@ -102,7 +100,6 @@ repair_agent_runtime = RepairAgentRuntime(
     agent_memory_manager,
     PolicyGuard(),
     repair_service,
-    qa_redispatch_gateway,
 )
 
 
