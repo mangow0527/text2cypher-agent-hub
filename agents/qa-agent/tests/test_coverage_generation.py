@@ -596,6 +596,35 @@ class CoverageGenerationTests(unittest.TestCase):
 
         self.assertFalse(sample.validation.schema_valid)
 
+    def test_validation_rejects_underbuilt_high_difficulty_candidate(self) -> None:
+        candidate = CypherCandidate(
+            skeleton_id="underbuilt_l6",
+            cypher=(
+                "MATCH (a:NetworkElement)-[:HAS_PORT]->(:Port)-[:FIBER_SRC]->(c:Tunnel) "
+                "WHERE c.latency = 12 RETURN c LIMIT 5"
+            ),
+            query_types=["MULTI_HOP"],
+            structure_family="two_hop_filtered",
+            generation_mode="llm_direct",
+            bound_schema_items={
+                "nodes": ["NetworkElement", "Port", "Tunnel"],
+                "edges": ["HAS_PORT", "FIBER_SRC"],
+                "properties": ["latency"],
+            },
+            bound_values={"latency": 12},
+            difficulty="L6",
+        )
+
+        sample = ValidationService(graph_executor=EmptyResultGraphExecutor()).validate(
+            candidate,
+            self.schema,
+            ValidationConfig(require_runtime_validation=False),
+            tugraph_config=None,
+        )
+
+        self.assertFalse(sample.validation.difficulty_valid)
+        self.assertEqual(sample.classified_difficulty, "L5")
+
     def _actual_edge_triplets(self, cypher: str) -> list[tuple[str, str, str]]:
         output: list[tuple[str, str, str]] = []
         variable_labels = {

@@ -14,15 +14,16 @@ class DifficultyService:
         text = self._normalize(cypher)
 
         hop_count = self._hop_count(text)
-        has_where = " WHERE " in text
-        has_order = " ORDER BY " in text
+        padded = f" {text} "
+        has_where = " WHERE " in padded
+        has_order = " ORDER BY " in padded
         has_agg = self._has_aggregation(text)
-        has_with = " WITH " in text
-        match_count = len(re.findall(r"\bMATCH\b", text))
-        has_match_after_with = bool(re.search(r"\bWITH\b.*\bMATCH\b", text))
+        has_distinct = " RETURN DISTINCT " in padded
+        has_union = bool(re.search(r"\bUNION\b", text))
+        condition_count = self._condition_count(text)
         aggregation_count = self._aggregation_count(text)
-        has_nested_agg = has_with and aggregation_count >= 2 and (match_count > 1 or has_match_after_with)
-        multi_stage = has_with and match_count > 1
+        multi_stage = self._has_multi_stage_match(text)
+        has_nested_agg = multi_stage and aggregation_count >= 2
         has_variable_length = self._has_variable_length(text)
 
         if has_variable_length:
@@ -34,17 +35,19 @@ class DifficultyService:
             return "L7"
         if multi_stage:
             return "L7"
-        if hop_count >= 2 and (has_where or has_order or has_agg):
+        if hop_count >= 2 and (condition_count >= 2 or has_order or has_agg):
             return "L6"
         if hop_count >= 2:
             return "L5"
+        if has_union:
+            return "L4"
         if hop_count == 1 and (has_where or has_order or has_agg):
             return "L4"
         if hop_count == 1:
             return "L3"
         if has_agg or has_order:
             return "L4"
-        if has_where:
+        if has_where or has_distinct:
             return "L2"
         return "L1"
 
@@ -123,6 +126,24 @@ class DifficultyService:
 
     def _aggregation_count(self, text: str) -> int:
         return len(self._AGGREGATION_PATTERN.findall(text))
+
+    def _condition_count(self, text: str) -> int:
+        total = 0
+        clauses = re.findall(
+            r"\bWHERE\b\s+(.*?)(?=\bMATCH\b|\bWITH\b|\bRETURN\b|\bORDER\s+BY\b|\bLIMIT\b|\bUNION\b|$)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        for clause in clauses:
+            if not clause.strip():
+                continue
+            total += 1 + len(re.findall(r"\bAND\b|\bOR\b", clause, flags=re.IGNORECASE))
+        return total
+
+    def _has_multi_stage_match(self, text: str) -> bool:
+        if " WITH " not in f" {text} " and " NEXT MATCH " not in f" {text} ":
+            return False
+        return bool(re.search(r"\bWITH\b.*\bMATCH\b", text, flags=re.IGNORECASE) or " NEXT MATCH " in f" {text} ")
 
     def _hop_count(self, text: str) -> int:
         count = 0

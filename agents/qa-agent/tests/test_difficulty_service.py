@@ -72,6 +72,45 @@ class DifficultyServiceTest(unittest.TestCase):
 
         self.assertEqual(service.classify(cypher), "L7")
 
+    def test_two_hop_single_filter_does_not_qualify_as_l6(self) -> None:
+        service = DifficultyService()
+
+        cypher = "MATCH (a:A)-[:R1]->(:B)-[:R2]->(c:C) WHERE c.name = 'x' RETURN c LIMIT 5"
+
+        self.assertEqual(service.classify(cypher), "L5")
+
+    def test_two_hop_aggregate_order_qualifies_as_l6(self) -> None:
+        service = DifficultyService()
+
+        cypher = (
+            "MATCH (a:A)-[:R1]->(:B)-[:R2]->(c:C) "
+            "WHERE c.name IS NOT NULL "
+            "RETURN c.name AS key, count(*) AS total ORDER BY total DESC LIMIT 5"
+        )
+
+        self.assertEqual(service.classify(cypher), "L6")
+
+    def test_single_match_with_projection_is_not_multistage_l7(self) -> None:
+        service = DifficultyService()
+
+        cypher = "MATCH (n:A) WITH n RETURN count(n) AS total"
+
+        self.assertEqual(service.classify(cypher), "L4")
+
+    def test_multistage_single_aggregation_is_l7_not_l8(self) -> None:
+        service = DifficultyService()
+
+        cypher = "MATCH (a:A)-[:R]->(b:B) WITH a, count(b) AS cnt MATCH (a)-[:R2]->(c:C) RETURN a.id, cnt"
+
+        self.assertEqual(service.classify(cypher), "L7")
+
+    def test_distinct_projection_is_l2(self) -> None:
+        service = DifficultyService()
+
+        cypher = "MATCH (n:A) RETURN DISTINCT n.name AS value"
+
+        self.assertEqual(service.classify(cypher), "L2")
+
     def test_does_not_treat_count_star_as_variable_length(self) -> None:
         service = DifficultyService()
 
