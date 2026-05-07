@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -41,7 +42,10 @@ class QADispatcher:
             }
 
         question_base_url, golden_base_url = self._resolve_base_urls(host)
-        results = [self._dispatch_sample(question_base_url, golden_base_url, sample) for sample in samples]
+        results = self._dispatch_many(
+            samples,
+            lambda sample: self._dispatch_sample(question_base_url, golden_base_url, sample),
+        )
         return self._summarize_results(question_base_url, golden_base_url, len(samples), results)
 
     def dispatch_release_rows(self, rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -59,8 +63,24 @@ class QADispatcher:
             }
 
         question_base_url, golden_base_url = self._resolve_base_urls(host)
-        results = [self._dispatch_row(question_base_url, golden_base_url, row) for row in rows]
+        results = self._dispatch_many(
+            rows,
+            lambda row: self._dispatch_row(question_base_url, golden_base_url, row),
+        )
         return self._summarize_results(question_base_url, golden_base_url, len(rows), results)
+
+    def _dispatch_many(self, items: list[Any], dispatch_fn) -> list[dict[str, Any]]:
+        if not items:
+            return []
+        parallelism = self._dispatch_parallelism(len(items))
+        if parallelism <= 1:
+            return [dispatch_fn(item) for item in items]
+        with ThreadPoolExecutor(max_workers=parallelism) as executor:
+            return list(executor.map(dispatch_fn, items))
+
+    def _dispatch_parallelism(self, item_count: int) -> int:
+        configured = max(1, int(getattr(settings, "test_agent_dispatch_parallelism", 4)))
+        return min(configured, item_count)
 
     def _summarize_results(
         self,

@@ -513,13 +513,13 @@ class GenerationService:
             ),
             "l6_two_hop_filtered_aggregate": (
                 f"MATCH (a:{node})-[:{edge}]->(:{target})-[:{edge2}]->(c:{target2}) "
-                f"WHERE a.{prop} = {value} "
+                f"WHERE c.{prop3} IS NOT NULL "
                 f"RETURN c.{prop3} AS key, count(*) AS total ORDER BY total {order_direction} LIMIT {limit_value}"
             ),
             "l6_two_hop_target_filtered_aggregate": (
                 f"MATCH (a:{node})-[:{edge}]->(:{target})-[:{edge2}]->(c:{target2}) "
-                f"WHERE c.{prop3} = {value2} "
-                f"RETURN a.{prop} AS key, count(c) AS total ORDER BY total {order_direction} LIMIT {limit_value}"
+                f"WHERE c.{prop3} IS NOT NULL "
+                f"RETURN c.{prop3} AS key, count(c) AS total ORDER BY total {order_direction} LIMIT {limit_value}"
             ),
             "l7_three_hop": (
                 f"MATCH (a:{node})-[:{edge}]->(:{target})-[:{edge2}]->(:{target2})-[:{edge3}]->(d:{target3}) "

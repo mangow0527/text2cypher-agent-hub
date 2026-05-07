@@ -20,6 +20,7 @@ from app.domain.schema.compatibility_service import SchemaCompatibilityService
 from app.domain.validation.service import ValidationService
 from app.logging import ModuleLogStore
 from app.integrations.openai.model_gateway import ModelGateway
+import app.integrations.qa_dispatcher as qa_dispatcher_module
 from app.integrations.qa_dispatcher import QADispatcher
 from app.integrations.tugraph.graph_executor import GraphExecutor
 from app.orchestrator.service import Orchestrator
@@ -398,6 +399,14 @@ class FakeDispatchClient:
         return response
 
 
+class NoDispatchSettings:
+    artifacts_dir = Path(".")
+    test_agent_host = ""
+    test_agent_question_port = 8000
+    test_agent_golden_port = 8001
+    test_agent_dispatch_parallelism = 4
+
+
 class _FakeTuGraphResponse:
     def __init__(self, status_code: int, payload: dict):
         self.status_code = status_code
@@ -506,6 +515,16 @@ class RetryAwareGenerationService(GenerationService):
 
 
 class PipelineTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self._dispatch_settings_patch = patch("app.integrations.qa_dispatcher.settings", NoDispatchSettings)
+        self._dispatch_settings_patch.start()
+
+    def tearDown(self) -> None:
+        self._dispatch_settings_patch.stop()
+
+    def test_pipeline_tests_disable_configured_dispatch_host_by_default(self) -> None:
+        self.assertEqual(qa_dispatcher_module.settings.test_agent_host, "")
+
     def test_question_bundle_prompt_renders(self) -> None:
         gateway = ModelGateway()
         rendered = gateway.render_prompt(
@@ -1990,6 +2009,43 @@ class PipelineTest(unittest.TestCase):
             log_lines = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines() if line.strip()]
             self.assertEqual(len(log_lines), 1)
             self.assertIn("answer must be string", log_lines[0]["result"]["response_body"])
+
+    def test_dispatch_release_rows_runs_rows_concurrently(self) -> None:
+        class SlowDispatchClient:
+            def __init__(self) -> None:
+                self.active = 0
+                self.max_active = 0
+                self.lock = threading.Lock()
+
+            def post(self, url, json):  # noqa: A002
+                with self.lock:
+                    self.active += 1
+                    self.max_active = max(self.max_active, self.active)
+                time.sleep(0.05)
+                with self.lock:
+                    self.active -= 1
+                return httpx.Response(200, request=httpx.Request("POST", url), text="ok")
+
+        rows = [
+            {"id": f"qa_{idx}", "question": f"问题{idx}", "cypher": "MATCH (n) RETURN n LIMIT 1", "answer": [], "difficulty": "L1"}
+            for idx in range(4)
+        ]
+
+        class TestSettings:
+            artifacts_dir = Path(".")
+            test_agent_host = "127.0.0.1"
+            test_agent_question_port = 8000
+            test_agent_golden_port = 8001
+            test_agent_dispatch_parallelism = 4
+
+        client = SlowDispatchClient()
+        with TemporaryDirectory() as tempdir, patch("app.integrations.qa_dispatcher.settings", TestSettings):
+            dispatcher = QADispatcher(client=client, log_root=Path(tempdir))
+            result = dispatcher.dispatch_release_rows(rows)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual([item["id"] for item in result["results"]], [row["id"] for row in rows])
+        self.assertGreater(client.max_active, 1)
 
     def test_result_summary_truncates_large_runtime_preview(self) -> None:
         sample = ValidatedSample(

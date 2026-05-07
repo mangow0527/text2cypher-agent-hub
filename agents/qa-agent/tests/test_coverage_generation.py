@@ -125,6 +125,25 @@ class CoverageGenerationTests(unittest.TestCase):
         self.assertEqual([spec.target_difficulty for spec in specs], ["L1", "L1", "L4", "L4", "L4", "L8"])
         self.assertEqual(len({spec.template_id for spec in specs if spec.target_difficulty == "L4"}), 2)
 
+    def test_l6_template_uses_null_safe_filter_instead_of_literal_value_filter(self) -> None:
+        specs = CoverageService().build_specs(
+            schema=self.schema,
+            limits=GenerationLimits(max_skeletons=16, max_candidates_per_skeleton=1, max_variants_per_question=1),
+            target_qa_count=1,
+            difficulty_targets={"L6": 1},
+            diversity_key="job_l6_runtime_safe",
+        )
+
+        candidates = GenerationService().instantiate_candidates_from_specs(
+            self.schema,
+            specs,
+            GenerationLimits(max_skeletons=16, max_candidates_per_skeleton=1, max_variants_per_question=1),
+        )
+
+        self.assertEqual(candidates[0].difficulty, "L6")
+        self.assertIn(" IS NOT NULL ", candidates[0].cypher)
+        self.assertNotIn(" = 'sample'", candidates[0].cypher)
+
     def test_output_config_uses_difficulty_target_sum_as_target_count(self) -> None:
         from app.domain.models import JobRequest
 
