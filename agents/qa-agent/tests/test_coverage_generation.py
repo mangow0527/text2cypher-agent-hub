@@ -23,6 +23,7 @@ from app.domain.models import (
 )
 from app.domain.validation.service import ValidationService
 from app.orchestrator.service import Orchestrator
+from app.domain.questioning.service import normalize_cypher, normalize_question
 
 
 class CoverageLLMGateway:
@@ -185,6 +186,25 @@ class CoverageGenerationTests(unittest.TestCase):
         )
 
         self.assertEqual(len(selected), 2)
+        self.assertEqual(meta["difficulty_shortfalls"], {"L1": 1})
+
+    def test_release_selection_never_uses_history_duplicates_to_fill_target(self) -> None:
+        historical = self._qa_sample("qa_l1_historical", "L1")
+        fresh = self._qa_sample("qa_l1_fresh", "L1")
+        history = {
+            "questions": {normalize_question(historical.question_canonical_zh)},
+            "cyphers": {normalize_cypher(historical.cypher)},
+        }
+
+        selected, meta = Orchestrator()._select_release_batch(
+            [historical, fresh],
+            history,
+            target_qa_count=2,
+            difficulty_targets={"L1": 2},
+        )
+
+        self.assertEqual([sample.id for sample in selected], ["qa_l1_fresh"])
+        self.assertEqual(meta["history_skipped_count"], 1)
         self.assertEqual(meta["difficulty_shortfalls"], {"L1": 1})
 
     def test_release_selection_rejects_empty_answers_even_with_difficulty_targets(self) -> None:

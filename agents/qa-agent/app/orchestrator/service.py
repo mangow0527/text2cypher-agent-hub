@@ -187,6 +187,7 @@ class Orchestrator:
 
             target_qa_count = job.request.output_config.target_qa_count
             difficulty_targets = dict(job.request.output_config.difficulty_targets)
+            history_signatures = self.release_history_store.load_signatures(exclude_paths={paths["releases"]})
             active_difficulty_targets = difficulty_targets or None
             attempt_count = self._target_completion_attempt_count(target_qa_count, difficulty_targets)
             aggregated_skeletons = []
@@ -268,7 +269,7 @@ class Orchestrator:
                     JobStatus.QUESTIONS_READY,
                     f"Generated QA samples (attempt {attempt}/{attempt_count})",
                     lambda current_validated=self._shortlist_validated_samples(
-                        list(aggregated_validated),
+                        self._filter_validated_against_history(list(aggregated_validated), history_signatures),
                         target_qa_count,
                         difficulty_targets,
                     ): self._select_best_by_question(
@@ -311,6 +312,7 @@ class Orchestrator:
                         job.request.output_config.split_gold_limit,
                         paths["releases"],
                         difficulty_targets,
+                        history_signatures,
                     ),
                 )
                 if (
@@ -452,9 +454,10 @@ class Orchestrator:
         gold_limit: int,
         release_path,
         difficulty_targets: dict[str, int] | None = None,
+        history: dict[str, set[str]] | None = None,
     ) -> tuple[list[QASample], dict]:
         deduped = self._select_best_by_question(samples)
-        history = self.release_history_store.load_signatures(exclude_paths={release_path})
+        history = history or self.release_history_store.load_signatures(exclude_paths={release_path})
         selected, selection_meta = self._select_release_batch(deduped, history, target_qa_count, difficulty_targets)
         output = sorted(selected, key=self._sample_sort_key, reverse=True)
 
@@ -488,6 +491,16 @@ class Orchestrator:
             seen.add(key)
             output.append(sample)
         return output
+
+    def _filter_validated_against_history(self, samples, history: dict[str, set[str]]):
+        history_cyphers = history.get("cyphers", set())
+        if not history_cyphers:
+            return samples
+        return [
+            sample
+            for sample in samples
+            if normalize_cypher(sample.candidate.cypher) not in history_cyphers
+        ]
 
     def _sample_quality(self, sample: QASample) -> tuple:
         generation_mode_score = {
@@ -704,17 +717,6 @@ class Orchestrator:
 
         if difficulty_targets:
             selected = self._select_release_batch_by_difficulty(fresh_pool, difficulty_targets)
-            if len(selected) < target_qa_count:
-                selected_keys = {
-                    (normalize_question(sample.question_canonical_zh), normalize_cypher(sample.cypher))
-                    for sample in selected
-                }
-                fallback = [
-                    sample
-                    for sample in repeated_pool
-                    if (normalize_question(sample.question_canonical_zh), normalize_cypher(sample.cypher)) not in selected_keys
-                ]
-                selected.extend(self._select_release_batch_by_difficulty(fallback, difficulty_targets, selected))
             selected = selected[:target_qa_count]
             selected_counts = self._difficulty_counts(selected)
             difficulty_shortfalls = {
@@ -734,17 +736,6 @@ class Orchestrator:
             }
 
         selected = self._greedy_diverse_pick(fresh_pool, target_qa_count)
-        if len(selected) < target_qa_count:
-            selected_keys = {
-                (normalize_question(sample.question_canonical_zh), normalize_cypher(sample.cypher))
-                for sample in selected
-            }
-            fallback = [
-                sample
-                for sample in repeated_pool
-                if (normalize_question(sample.question_canonical_zh), normalize_cypher(sample.cypher)) not in selected_keys
-            ]
-            selected.extend(self._greedy_diverse_pick(fallback, target_qa_count - len(selected), selected))
 
         return selected[:target_qa_count], {
             "requested_count": target_qa_count,
@@ -820,10 +811,22 @@ class Orchestrator:
         if target >= 20:
             limits.max_variants_per_question = min(limits.max_variants_per_question, 1)
         if request.mode.value == "online":
-            limits.max_skeletons = max(min(limits.max_skeletons, 8), target)
+            limits.max_skeletons = min(
+                max(limits.max_skeletons, target),
+                self._initial_cypher_pool_budget(target),
+            )
             limits.max_candidates_per_skeleton = 1
             limits.max_variants_per_question = min(limits.max_variants_per_question, 5)
         return limits
+
+    def _initial_cypher_pool_budget(self, target_qa_count: int) -> int:
+        if target_qa_count <= 1:
+            return 16
+        if target_qa_count <= 3:
+            return 16
+        if target_qa_count <= 10:
+            return target_qa_count + 8
+        return target_qa_count + 8
 
     def _effective_llm_config(self, request: JobRequest):
         llm_config = request.llm_config.model_copy(deep=True)
@@ -911,13 +914,13 @@ class Orchestrator:
         if max_skeletons <= 8:
             return max_skeletons
         if target_qa_count <= 1:
-            return min(max_skeletons, 3)
+            return min(max_skeletons, 8)
         if target_qa_count <= 3:
-            return min(max_skeletons, target_qa_count + 2)
+            return min(max_skeletons, max(8, target_qa_count + 5))
         if target_qa_count <= 5:
-            return min(max_skeletons, target_qa_count + 3)
+            return min(max_skeletons, max(10, target_qa_count + 5))
         if target_qa_count <= 10:
-            return min(max_skeletons, target_qa_count + 4)
+            return min(max_skeletons, target_qa_count + 8)
         return min(max_skeletons, target_qa_count + 8)
 
     def _should_enable_llm_cypher_enrichment(self, target_qa_count: int, mode: str) -> bool:

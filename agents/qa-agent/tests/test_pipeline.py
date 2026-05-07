@@ -1702,9 +1702,9 @@ class PipelineTest(unittest.TestCase):
 
     def test_query_plan_budget_stays_tight_for_small_targets(self) -> None:
         orchestrator = Orchestrator()
-        self.assertEqual(orchestrator._query_plan_target_count(1, 32), 3)
-        self.assertEqual(orchestrator._query_plan_target_count(2, 32), 4)
-        self.assertEqual(orchestrator._query_plan_target_count(5, 32), 8)
+        self.assertEqual(orchestrator._query_plan_target_count(1, 32), 8)
+        self.assertEqual(orchestrator._query_plan_target_count(2, 32), 8)
+        self.assertEqual(orchestrator._query_plan_target_count(5, 32), 10)
 
     def test_online_skeleton_budget_keeps_all_requested_difficulty_targets(self) -> None:
         schema_path = Path(__file__).parent / "fixtures" / "schema.json"

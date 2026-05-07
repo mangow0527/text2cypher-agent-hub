@@ -137,7 +137,17 @@ class BusinessStageTests(unittest.TestCase):
         orchestrator = Orchestrator()
 
         self.assertEqual(orchestrator._query_plan_target_count(1, 8), 8)
+        self.assertEqual(orchestrator._query_plan_target_count(1, 16), 8)
+        self.assertEqual(orchestrator._query_plan_target_count(10, 18), 18)
         self.assertEqual(orchestrator._query_plan_target_count(20, 64), 28)
+
+    def test_online_effective_limits_keeps_initial_cypher_buffer(self):
+        orchestrator = Orchestrator()
+        request = JobRequest(mode="online", schema_input={"schema": "x"}, output_config={"target_qa_count": 10})
+
+        limits = orchestrator._effective_limits(request)
+
+        self.assertGreater(limits.max_skeletons, request.output_config.target_qa_count)
 
     def test_effective_limits_reduce_variant_and_candidate_budgets_for_large_batch(self):
         orchestrator = Orchestrator()
