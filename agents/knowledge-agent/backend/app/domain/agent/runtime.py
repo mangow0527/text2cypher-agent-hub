@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.domain.agent.models import (
+    AgentAction,
     AgentConstraints,
     AgentDecision,
     AgentRun,
@@ -34,6 +35,76 @@ class RepairAgentRuntime:
 
     def create_run(self, qa_id: str, goal: str, root_cause: RootCause, constraints: AgentConstraints) -> AgentRun:
         return self.run_store.create(qa_id=qa_id, goal=goal, root_cause=root_cause, constraints=constraints)
+
+    def create_review_run_from_legacy_apply(
+        self,
+        qa_id: str,
+        suggestion: str,
+        knowledge_types: list[str] | None,
+    ) -> AgentRun:
+        root_cause = RootCause(
+            type="legacy_repair_apply",
+            summary=suggestion[:200],
+            suggested_fix=suggestion,
+            evidence=["Created from /api/knowledge/repairs/apply"],
+        )
+        constraints = AgentConstraints(
+            auto_apply=False,
+            max_steps=1,
+            allowed_tools=["propose_patch", "check_duplicate", "check_conflict"],
+            verification_required=True,
+        )
+        run = self.create_run(
+            qa_id=qa_id,
+            goal="Review legacy knowledge repair request before applying it.",
+            root_cause=root_cause,
+            constraints=constraints,
+        )
+        patches = self.repair_service.propose(suggestion, knowledge_types)
+        run.candidate_changes = [self._legacy_patch_to_candidate(patch) for patch in patches]
+        run.evidence.append(
+            {
+                "type": "legacy_repair_apply",
+                "knowledge_types": knowledge_types or [],
+                "schema_valid_candidate_count": len(run.candidate_changes),
+            }
+        )
+        run.trace.append(
+            AgentTraceEntry(
+                step=1,
+                action=AgentAction(
+                    action="tool_call",
+                    tool_name="propose_patch",
+                    arguments={"knowledge_types": knowledge_types or []},
+                    reason_summary="Legacy apply path generated schema-valid candidate patches for human review.",
+                ),
+                observation={"candidate_changes": [change.model_dump(mode="json") for change in run.candidate_changes]},
+            )
+        )
+        if run.candidate_changes:
+            run.status = AgentRunStatus.NEEDS_REVIEW
+            run.validation = ValidationSummary(
+                prompt_package_built=True,
+                before_after_improved=True,
+                remaining_risks=["Legacy apply path is gated by human approval before knowledge persistence."],
+            )
+            run.decision = AgentDecision(
+                action="human_review",
+                reason="Converted legacy repair apply request into an agent review run.",
+            )
+        else:
+            run.status = AgentRunStatus.FAILED
+            run.validation = ValidationSummary(
+                prompt_package_built=False,
+                before_after_improved=False,
+                remaining_risks=["No schema-valid candidate changes were produced."],
+            )
+            run.errors.append("No schema-valid candidate changes were produced.")
+            run.decision = AgentDecision(
+                action="reject",
+                reason="All proposed changes were rejected by schema-aware validation.",
+            )
+        return self.run_store.save(run)
 
     def list_runs(self, status: AgentRunStatus | str | None = None) -> list[AgentRun]:
         return self.run_store.list(status=status)
@@ -159,3 +230,19 @@ class RepairAgentRuntime:
             }
         )
         return self.run_store.save(run)
+
+    def _legacy_patch_to_candidate(self, patch: dict) -> CandidateChange:
+        doc_type = patch["doc_type"]
+        risk = "high" if doc_type == "system_prompt" else "medium" if doc_type == "cypher_syntax" else "low"
+        return CandidateChange(
+            operation=patch.get("operation", "add"),
+            doc_type=doc_type,
+            section=patch["section"],
+            target_key=patch["target_key"],
+            new_content=patch["new_content"],
+            rationale="Converted from legacy /api/knowledge/repairs/apply request.",
+            risk=risk,
+            confidence=0.9,
+            duplicate_checked=True,
+            conflict_checked=True,
+        )

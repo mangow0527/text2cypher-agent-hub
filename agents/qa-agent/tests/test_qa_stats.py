@@ -15,17 +15,20 @@ class QAStatsServiceTests(unittest.TestCase):
     def test_build_counts_generated_imported_and_difficulty_distribution(self) -> None:
         with TemporaryDirectory() as tempdir:
             root = Path(tempdir)
+            releases_root = root / "releases"
+            qa_root = root / "qa"
             self._write_jsonl(
-                root / "job_alpha.jsonl",
+                releases_root / "job_alpha.jsonl",
                 [
                     {"id": "qa_1", "difficulty": "L1"},
                     {"id": "qa_2", "difficulty": "L4"},
                 ],
             )
-            self._write_jsonl(root / "imp_beta.jsonl", [{"id": "qa_3", "difficulty": "L4"}])
-            (root / "job_bad.jsonl").write_text('{"difficulty":"L9"}\n{not json}\n', encoding="utf-8")
+            self._write_jsonl(qa_root / "imp_beta.jsonl", [{"id": "qa_3", "difficulty": "L4"}])
+            self._write_jsonl(qa_root / "job_alpha.jsonl", [{"id": "intermediate", "difficulty": "L8"}])
+            (releases_root / "job_bad.jsonl").write_text('{"difficulty":"L9"}\n{not json}\n', encoding="utf-8")
 
-            stats = QAStatsService(qa_root=root).build()
+            stats = QAStatsService(release_root=releases_root, qa_root=qa_root).build()
 
         self.assertEqual(stats["total_qa_pairs"], 3)
         self.assertEqual(stats["generated_qa_pairs"], 2)
@@ -41,12 +44,36 @@ class QAStatsServiceTests(unittest.TestCase):
                 self.assertEqual(example["difficulty"], definition["level"])
                 self.assertTrue(example["cypher"].startswith("MATCH "))
 
+    def test_build_counts_generated_qa_from_releases_not_intermediate_qa(self) -> None:
+        with TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            releases_root = root / "releases"
+            qa_root = root / "qa"
+            self._write_jsonl(releases_root / "job_alpha.jsonl", [{"id": "released", "difficulty": "L2"}])
+            self._write_jsonl(
+                qa_root / "job_alpha.jsonl",
+                [
+                    {"id": "intermediate_1", "difficulty": "L2"},
+                    {"id": "intermediate_2", "difficulty": "L3"},
+                    {"id": "intermediate_3", "difficulty": "L4"},
+                ],
+            )
+
+            stats = QAStatsService(release_root=releases_root, qa_root=qa_root).build()
+
+        self.assertEqual(stats["total_qa_pairs"], 1)
+        self.assertEqual(stats["generated_qa_pairs"], 1)
+        self.assertEqual(stats["difficulty_distribution"]["L2"], 1)
+        self.assertEqual(stats["difficulty_distribution"]["L3"], 0)
+        self.assertEqual(stats["files_processed"], 1)
+
     def test_qa_stats_endpoint_returns_service_payload(self) -> None:
         with TemporaryDirectory() as tempdir:
             root = Path(tempdir)
-            self._write_jsonl(root / "job_alpha.jsonl", [{"id": "qa_1", "difficulty": "L2"}])
+            releases_root = root / "releases"
+            self._write_jsonl(releases_root / "job_alpha.jsonl", [{"id": "qa_1", "difficulty": "L2"}])
             previous_service = api_main.qa_stats_service
-            api_main.qa_stats_service = QAStatsService(qa_root=root)
+            api_main.qa_stats_service = QAStatsService(release_root=releases_root, qa_root=root / "qa")
             try:
                 response = TestClient(api_main.app).get("/qa/stats")
             finally:
@@ -58,12 +85,12 @@ class QAStatsServiceTests(unittest.TestCase):
 
     def test_build_skips_hidden_files_and_counts_unreadable_files_as_invalid(self) -> None:
         with TemporaryDirectory() as tempdir:
-            root = Path(tempdir)
+            root = Path(tempdir) / "releases"
             self._write_jsonl(root / "job_alpha.jsonl", [{"id": "qa_1", "difficulty": "L3"}])
             (root / "._job_alpha.jsonl").write_bytes(b"\xa3\x10not-utf8")
             (root / "job_broken.jsonl").write_bytes(b"\xa3\x10not-utf8")
 
-            stats = QAStatsService(qa_root=root).build()
+            stats = QAStatsService(release_root=root, qa_root=Path(tempdir) / "qa").build()
 
         self.assertEqual(stats["total_qa_pairs"], 1)
         self.assertEqual(stats["generated_qa_pairs"], 1)
@@ -71,6 +98,7 @@ class QAStatsServiceTests(unittest.TestCase):
         self.assertEqual(stats["invalid_rows"], 1)
 
     def _write_jsonl(self, path: Path, rows: list[dict]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows),
             encoding="utf-8",

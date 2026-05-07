@@ -1632,6 +1632,48 @@ class PipelineTest(unittest.TestCase):
             self.assertFalse(report_path.exists())
             self.assertFalse(release_path.exists())
 
+    def test_job_delete_removes_job_artifacts_even_when_record_lacks_artifact_paths(self) -> None:
+        schema_path = Path(__file__).parent / "fixtures" / "schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+
+        gateway = UniqueQuestionGateway()
+        with TemporaryDirectory() as tempdir:
+            temp_root = Path(tempdir)
+            job_store = JobStore(root=temp_root / "job-reports")
+            artifact_store = ArtifactStore(root=temp_root / "artifacts")
+            orchestrator = Orchestrator(
+                job_store=job_store,
+                artifact_store=artifact_store,
+                schema_compatibility_service=SchemaCompatibilityService(graph_executor=FakeGraphExecutor()),
+                generation_service=GenerationService(model_gateway=gateway),
+                validation_service=ValidationService(graph_executor=FakeGraphExecutor()),
+                question_service=QuestionService(model_gateway=gateway),
+                roundtrip_service=RoundtripService(model_gateway=gateway),
+            )
+
+            completed = orchestrator.create_and_run_job(
+                JobRequest(
+                    mode="offline",
+                    schema_input=schema,
+                    output_config={"target_qa_count": 2},
+                    tugraph_source={"type": "inline"},
+                    tugraph_config={"base_url": None, "username": None, "password": None, "graph": None},
+                )
+            )
+            release_path = Path(completed.artifacts["releases"])
+            qa_path = Path(completed.artifacts["qa"])
+            self.assertTrue(release_path.exists())
+            self.assertTrue(qa_path.exists())
+
+            completed.artifacts = {}
+            job_store.save(completed)
+
+            orchestrator.delete_job(completed.job_id)
+
+            self.assertFalse(job_store.path_for(completed.job_id).exists())
+            self.assertFalse(release_path.exists())
+            self.assertFalse(qa_path.exists())
+
     def test_online_mode_uses_batched_question_generation_calls(self) -> None:
         schema_path = Path(__file__).parent / "fixtures" / "schema.json"
         schema = json.loads(schema_path.read_text(encoding="utf-8"))

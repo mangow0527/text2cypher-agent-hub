@@ -50,6 +50,15 @@ export interface RepairChange {
 export interface ApplyRepairResponse {
   status: "ok";
   changes: RepairChange[];
+  redispatch: {
+    trace_id: string;
+    qa_id: string;
+    status: string;
+    attempt: number;
+    max_attempts: number;
+    dispatch: Record<string, unknown>;
+  };
+  agent_run: AgentRun | null;
 }
 
 export type AgentRunStatus =

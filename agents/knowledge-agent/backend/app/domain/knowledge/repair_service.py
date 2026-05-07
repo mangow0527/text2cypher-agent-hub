@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from app.domain.knowledge.patcher import append_item_under_section
+from app.domain.knowledge.schema_validator import SchemaAwareValidator, SchemaValidationResult
 
 
 DOC_FILE_MAP = {
@@ -50,7 +51,7 @@ class RepairService:
             )
         analysis = self._parse_analysis(raw_response, suggestion, target_types)
         patches = self._build_patches_from_analysis(analysis, target_types)
-        return patches
+        return self._filter_schema_valid_patches(patches)
 
     def apply_candidates(self, patches: list[dict[str, str]], suggestion: str) -> list[dict[str, str]]:
         changes: list[dict[str, str]] = []
@@ -58,6 +59,10 @@ class RepairService:
             target_type = patch["doc_type"]
             filename = DOC_FILE_MAP[target_type]
             before = self.store.read_text(filename)
+            validation = self.validate_candidate_patch(patch)
+            if not validation.valid:
+                self._log_schema_invalid("knowledge_document_skipped_schema_invalid", patch, validation.errors)
+                continue
             if self._patch_already_present(before, patch["section"], patch["new_content"]):
                 if self.module_logs is not None:
                     self.module_logs.append(
@@ -99,6 +104,36 @@ class RepairService:
                 }
             )
         return changes
+
+    def validate_candidate_patch(self, patch: dict[str, Any]) -> SchemaValidationResult:
+        try:
+            validator = SchemaAwareValidator(self.store.read_schema())
+        except Exception:
+            return SchemaValidationResult(valid=True)
+        return validator.validate_content(str(patch.get("new_content") or ""))
+
+    def clean_schema_invalid_few_shots(self) -> int:
+        filename = DOC_FILE_MAP["few_shot"]
+        before = self.store.read_text(filename)
+        after, removed = self._remove_schema_invalid_few_shot_items(before)
+        if removed == 0:
+            return 0
+        self.store.write_versioned(
+            filename,
+            before,
+            after,
+            "schema-aware cleanup: removed invalid few-shot examples",
+            "few_shot",
+        )
+        if self.module_logs is not None:
+            self.module_logs.append(
+                module="repair",
+                level="warning",
+                operation="few_shot_schema_invalid_items_cleaned",
+                status="success",
+                response_body={"removed": removed},
+            )
+        return removed
 
     def _repair_analysis_prompt(self, suggestion: str, target_types: list[str]) -> str:
         return (
@@ -267,6 +302,69 @@ class RepairService:
                 }
             )
         return patches
+
+    def _filter_schema_valid_patches(self, patches: list[dict[str, str]]) -> list[dict[str, str]]:
+        valid_patches: list[dict[str, str]] = []
+        for patch in patches:
+            validation = self.validate_candidate_patch(patch)
+            if not validation.valid:
+                self._log_schema_invalid("repair_candidate_rejected_schema_invalid", patch, validation.errors)
+                continue
+            valid_patches.append(patch)
+        return valid_patches
+
+    def _remove_schema_invalid_few_shot_items(self, document: str) -> tuple[str, int]:
+        item_markers = list(re.finditer(r"(?m)^\[id:\s*[^\]]+\]\s*$", document))
+        if not item_markers:
+            return document, 0
+
+        try:
+            validator = SchemaAwareValidator(self.store.read_schema())
+        except Exception:
+            return document, 0
+
+        rebuilt_parts = [document[: item_markers[0].start()]]
+        removed = 0
+        for index, marker in enumerate(item_markers):
+            block_start = marker.start()
+            block_end = item_markers[index + 1].start() if index + 1 < len(item_markers) else len(document)
+            block = document[block_start:block_end]
+            validation = validator.validate_content(block)
+            if validation.valid:
+                rebuilt_parts.append(block)
+                continue
+            removed += 1
+            self._log_schema_invalid(
+                "few_shot_schema_invalid_item_removed",
+                {
+                    "doc_type": "few_shot",
+                    "section": "Reference Examples",
+                    "target_key": marker.group(0),
+                    "new_content": block,
+                },
+                validation.errors,
+            )
+
+        if removed == 0:
+            return document, 0
+        cleaned = re.sub(r"\n{3,}", "\n\n", "".join(rebuilt_parts)).rstrip() + "\n"
+        return cleaned, removed
+
+    def _log_schema_invalid(self, operation: str, patch: dict[str, Any], errors: list[str]) -> None:
+        if self.module_logs is None:
+            return
+        self.module_logs.append(
+            module="repair",
+            level="warning",
+            operation=operation,
+            status="skipped",
+            request_body={
+                "target_type": patch.get("doc_type"),
+                "section": patch.get("section"),
+                "target_key": patch.get("target_key"),
+                "errors": errors,
+            },
+        )
 
     def _patch_already_present(self, document: str, section: str, new_content: str) -> bool:
         section_text = self._extract_section_text(document, section)

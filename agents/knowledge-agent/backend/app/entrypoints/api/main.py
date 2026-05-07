@@ -77,8 +77,11 @@ knowledge_store.bootstrap_defaults()
 knowledge_tree_service = KnowledgeTreeService(knowledge_store)
 prompt_service = PromptService(knowledge_store)
 repair_service = RepairService(knowledge_store, ModelGateway(), module_logs=module_logs)
+try:
+    repair_service.clean_schema_invalid_few_shots()
+except Exception as exc:  # pragma: no cover - startup resilience
+    logger.warning("few_shot_schema_cleanup_failed error=%s", exc)
 qa_redispatch_gateway = QARedispatchGateway(module_logs=module_logs)
-repair_workflow_service = RepairWorkflowService(repair_service, module_logs=module_logs)
 agent_memory_manager = MemoryManager()
 agent_evaluator = RepairEvaluator()
 agent_tool_registry = ToolRegistry()
@@ -100,6 +103,11 @@ repair_agent_runtime = RepairAgentRuntime(
     agent_memory_manager,
     PolicyGuard(),
     repair_service,
+)
+repair_workflow_service = RepairWorkflowService(
+    repair_service,
+    module_logs=module_logs,
+    repair_agent_runtime=repair_agent_runtime,
 )
 
 
@@ -279,11 +287,13 @@ def apply_repair(request: ApplyRepairRequest) -> ApplyRepairResponse:
     )
     result = repair_workflow_service.apply(request.id, request.suggestion, request.knowledge_types)
     duration_ms = int((time.perf_counter() - started) * 1000)
+    agent_run = result.get("agent_run")
     logger.info(
-        "repair_applied id=%s knowledge_types=%s change_count=%s duration_ms=%s suggestion=%s",
+        "repair_applied id=%s knowledge_types=%s change_count=%s agent_run_id=%s duration_ms=%s suggestion=%s",
         request.id,
         request.knowledge_types or [],
         len(result["changes"]),
+        getattr(agent_run, "run_id", None),
         duration_ms,
         preview,
     )
@@ -298,6 +308,8 @@ def apply_repair(request: ApplyRepairRequest) -> ApplyRepairResponse:
             "change_count": len(result["changes"]),
             "redispatch_status": result["redispatch"]["status"],
             "attempt": result["redispatch"]["attempt"],
+            "agent_run_id": getattr(agent_run, "run_id", None),
+            "agent_run_status": getattr(getattr(agent_run, "status", None), "value", None),
         },
         duration_ms=duration_ms,
     )
@@ -319,7 +331,7 @@ def apply_repair(request: ApplyRepairRequest) -> ApplyRepairResponse:
             request_body={"id": request.id, "knowledge_types": request.knowledge_types or [], "suggestion": preview},
             response_body={"duration_ms": duration_ms, "threshold_ms": settings.slow_request_threshold_ms},
         )
-    return ApplyRepairResponse(status="ok", changes=result["changes"], redispatch=result["redispatch"])
+    return ApplyRepairResponse(status="ok", changes=result["changes"], redispatch=result["redispatch"], agent_run=agent_run)
 
 
 @app.post("/api/knowledge/agent/repair-runs", response_model=RepairAgentRunResponse)

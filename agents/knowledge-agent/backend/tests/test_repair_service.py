@@ -75,6 +75,33 @@ class GenericSuggestionGateway(ModelGateway):
 }"""
 
 
+class UserFewShotGateway(ModelGateway):
+    def __init__(self) -> None:
+        self.calls = []
+
+    def generate_text(self, prompt_name: str, model_config: dict, **kwargs) -> str:
+        self.calls.append({"prompt_name": prompt_name, "prompt": kwargs.get("prompt", "")})
+        return """{
+  "intent_summary": "补充用户姓名查询示例",
+  "canonical_question_pattern": "查询前10个用户的姓名",
+  "cypher_constraints": [
+    "用户姓名返回 User.name"
+  ],
+  "business_mapping": [],
+  "positive_example": {
+    "question": "查询前10个用户的姓名",
+    "cypher": "MATCH (u:User) RETURN u.name LIMIT 10",
+    "why": "展示用户姓名查询"
+  },
+  "negative_example": {
+    "question": "查询前10个用户的姓名",
+    "cypher": "MATCHH (u:User RETURN u.name LIMIT 10",
+    "why_not": "语法错误"
+  },
+  "target_docs": ["few_shot"]
+}"""
+
+
 class RepairServiceTest(unittest.TestCase):
     def test_apply_repair_updates_target_document(self) -> None:
         with TemporaryDirectory() as tmp_dir:
@@ -142,7 +169,7 @@ class RepairServiceTest(unittest.TestCase):
             self.assertEqual(store.read_text("few_shot.md"), few_shot_after_first)
             self.assertEqual(changes, [])
 
-    def test_apply_repair_accepts_generic_suggestion_without_schema_bindings(self) -> None:
+    def test_apply_repair_skips_schema_invalid_generic_few_shot(self) -> None:
         with TemporaryDirectory() as tmp_dir:
             store = KnowledgeStore(Path(tmp_dir))
             store.bootstrap_defaults()
@@ -155,7 +182,43 @@ class RepairServiceTest(unittest.TestCase):
             few_shot = store.read_text("few_shot.md")
             self.assertTrue(changes)
             self.assertIn("所属对象", business)
-            self.assertIn("MATCH (owner)-[:OWNS]->(resource) RETURN owner.id", few_shot)
+            self.assertNotIn("MATCH (owner)-[:OWNS]->(resource) RETURN owner.id", few_shot)
+
+    def test_apply_repair_rejects_user_few_shot_before_persisting(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            store = KnowledgeStore(Path(tmp_dir))
+            store.bootstrap_defaults()
+            gateway = UserFewShotGateway()
+            service = RepairService(store, gateway)
+
+            changes = service.apply("补充 User 查询示例", ["few_shot"])
+
+            few_shot = store.read_text("few_shot.md")
+            self.assertEqual(changes, [])
+            self.assertNotIn("User", few_shot)
+            self.assertNotIn("cypher_few_shot", few_shot)
+
+    def test_clean_schema_invalid_few_shots_removes_user_example(self) -> None:
+        with TemporaryDirectory() as tmp_dir:
+            store = KnowledgeStore(Path(tmp_dir))
+            store.bootstrap_defaults()
+            polluted = (
+                store.read_text("few_shot.md")
+                + "\n\n[id: cypher_few_shot]\n"
+                "Question: 查询前10个用户的姓名\n"
+                "Cypher: MATCH (u:User) RETURN u.name LIMIT 10\n"
+                "Anti-Pattern: MATCHH (u:User RETURN u.name LIMIT 10\n"
+            )
+            (Path(tmp_dir) / "few_shot.md").write_text(polluted, encoding="utf-8")
+            service = RepairService(store, FakeGateway())
+
+            removed = service.clean_schema_invalid_few_shots()
+
+            few_shot = store.read_text("few_shot.md")
+            self.assertEqual(removed, 1)
+            self.assertIn("tunnel_protocol_version", few_shot)
+            self.assertNotIn("cypher_few_shot", few_shot)
+            self.assertNotIn("User", few_shot)
 
     def test_propose_does_not_write_knowledge_documents(self) -> None:
         with TemporaryDirectory() as tmp_dir:

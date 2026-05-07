@@ -6,6 +6,18 @@ from typing import Iterable
 
 from app.config import settings
 
+JOB_ARTIFACT_DIRS = [
+    "schema",
+    "taxonomy",
+    "skeletons",
+    "instantiated",
+    "validated",
+    "qa",
+    "releases",
+    "reports",
+]
+JSON_JOB_ARTIFACTS = {"schema", "taxonomy", "reports"}
+
 
 class ArtifactStore:
     def __init__(self, root: Path | None = None) -> None:
@@ -13,21 +25,16 @@ class ArtifactStore:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def ensure_job_dirs(self, job_id: str) -> dict[str, Path]:
-        mapping = {}
-        for name in [
-            "schema",
-            "taxonomy",
-            "skeletons",
-            "instantiated",
-            "validated",
-            "qa",
-            "releases",
-            "reports",
-        ]:
-            path = self.root / name
-            path.mkdir(parents=True, exist_ok=True)
-            mapping[name] = path / f"{job_id}.{ 'json' if name in {'schema','taxonomy','reports'} else 'jsonl'}"
+        mapping = self.job_artifact_paths(job_id)
+        for path in mapping.values():
+            path.parent.mkdir(parents=True, exist_ok=True)
         return mapping
+
+    def job_artifact_paths(self, job_id: str) -> dict[str, Path]:
+        return {
+            name: self.root / name / f"{job_id}.{'json' if name in JSON_JOB_ARTIFACTS else 'jsonl'}"
+            for name in JOB_ARTIFACT_DIRS
+        }
 
     def ensure_import_dirs(self, import_id: str) -> dict[str, Path]:
         mapping = {}

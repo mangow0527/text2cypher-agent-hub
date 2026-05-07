@@ -99,7 +99,9 @@ class Orchestrator:
 
     def delete_job(self, job_id: str) -> None:
         job = self.job_store.get(job_id)
-        self.artifact_store.delete_paths(job.artifacts.values())
+        paths = {str(path) for path in self.artifact_store.job_artifact_paths(job_id).values()}
+        paths.update(job.artifacts.values())
+        self.artifact_store.delete_paths(paths)
         self.job_log_store.delete(job_id)
         self.job_store.delete(job_id)
 

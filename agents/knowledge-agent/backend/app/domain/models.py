@@ -146,3 +146,4 @@ class RedispatchResult(BaseModel):
 class ApplyRepairResponse(StatusResponse):
     changes: list[RepairChange] = Field(default_factory=list)
     redispatch: RedispatchResult
+    agent_run: Optional[AgentRun] = None

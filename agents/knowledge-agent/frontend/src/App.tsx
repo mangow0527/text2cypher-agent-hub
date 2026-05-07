@@ -195,6 +195,13 @@ export default function App() {
         knowledge_types: selectedTypes.length ? selectedTypes : undefined,
       });
       setChanges(response.changes);
+      if (response.agent_run) {
+        setAgentRunStatus(response.agent_run.status);
+        setSelectedAgentRun(response.agent_run);
+        setSelectedAgentRunId(response.agent_run.run_id);
+        await loadAgentRuns(response.agent_run.status, response.agent_run.run_id);
+        setAgentStatus(`已创建 Agent 修复审核任务：${response.agent_run.run_id}`);
+      }
     } catch (error) {
       setRepairError(error instanceof Error ? error.message : "应用修复失败");
     } finally {
@@ -202,7 +209,7 @@ export default function App() {
     }
   }
 
-  async function loadAgentRuns(status: AgentRunStatus) {
+  async function loadAgentRuns(status: AgentRunStatus, preferredRunId = "") {
     setAgentBusy(true);
     setAgentError("");
     setAgentStatus("");
@@ -210,6 +217,10 @@ export default function App() {
       const response = await listRepairAgentRuns(status);
       setAgentRuns(response.runs);
       setSelectedAgentRun((current) => {
+        const preferred = preferredRunId ? response.runs.find((run) => run.run_id === preferredRunId) : null;
+        if (preferred) {
+          return preferred;
+        }
         const refreshed = current ? response.runs.find((run) => run.run_id === current.run_id) : null;
         if (refreshed) {
           return refreshed;
@@ -217,6 +228,9 @@ export default function App() {
         return response.runs[0] ?? null;
       });
       setSelectedAgentRunId((current) => {
+        if (preferredRunId && response.runs.some((run) => run.run_id === preferredRunId)) {
+          return preferredRunId;
+        }
         if (current && response.runs.some((run) => run.run_id === current)) {
           return current;
         }

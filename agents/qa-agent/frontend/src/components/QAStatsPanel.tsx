@@ -20,7 +20,7 @@ export function QAStatsPanel({ stats }: { stats?: QAStats }) {
         <div>
           <div className="eyebrow">生成统计</div>
           <h3>QA 对总览</h3>
-          <p>统计当前 artifacts 中所有 QA JSONL，包含自动生成和手动导入。</p>
+          <p>统计已发布成功的 QA 对，包含自动生成和手动导入。</p>
         </div>
         <div className="qa-stats-meta">
           {stats?.latest_updated_at ? `更新 ${new Date(stats.latest_updated_at).toLocaleString()}` : "等待产物"}

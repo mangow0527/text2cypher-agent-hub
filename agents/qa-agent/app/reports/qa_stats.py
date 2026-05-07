@@ -135,7 +135,8 @@ DIFFICULTY_DEFINITIONS = [
 
 
 class QAStatsService:
-    def __init__(self, qa_root: Path | None = None) -> None:
+    def __init__(self, release_root: Path | None = None, qa_root: Path | None = None) -> None:
+        self.release_root = release_root or settings.artifacts_dir / "releases"
         self.qa_root = qa_root or settings.artifacts_dir / "qa"
 
     def build(self) -> dict[str, Any]:
@@ -145,13 +146,10 @@ class QAStatsService:
         invalid_rows = 0
         latest_updated_at: str | None = None
 
-        paths = []
-        if self.qa_root.exists():
-            paths = [path for path in sorted(self.qa_root.glob("*.jsonl")) if not path.name.startswith(".")]
-        for path in paths:
+        sources = self._stats_sources()
+        for path, source_type in sources:
             files_processed += 1
             latest_updated_at = self._latest_timestamp(latest_updated_at, path)
-            source_type = self._source_type(path)
 
             try:
                 with path.open(encoding="utf-8") as handle:
@@ -191,12 +189,28 @@ class QAStatsService:
             "latest_updated_at": latest_updated_at,
         }
 
-    def _source_type(self, path: Path) -> str:
-        if path.name.startswith("job_"):
-            return "generated"
-        if path.name.startswith("imp_"):
-            return "imported"
-        return "unknown"
+    def _stats_sources(self) -> list[tuple[Path, str]]:
+        sources: list[tuple[Path, str]] = []
+        seen: set[Path] = set()
+
+        for path in self._jsonl_paths(self.release_root):
+            sources.append((path, "generated" if path.name.startswith("job_") else "unknown"))
+            seen.add(path.resolve())
+
+        for path in self._jsonl_paths(self.qa_root):
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            if path.name.startswith("imp_"):
+                sources.append((path, "imported"))
+            elif not path.name.startswith("job_"):
+                sources.append((path, "unknown"))
+        return sources
+
+    def _jsonl_paths(self, root: Path) -> list[Path]:
+        if not root.exists():
+            return []
+        return [path for path in sorted(root.glob("*.jsonl")) if not path.name.startswith(".")]
 
     def _latest_timestamp(self, current: str | None, path: Path) -> str | None:
         try:
