@@ -40,10 +40,14 @@ GenerationFailureReason = Literal[
     "write_operation",
     "unsupported_call",
     "unsupported_start_clause",
+    "unauthorized_schema_reference",
+    "semantic_query_mismatch",
+    "semantic_parse_rejected",
     "generation_retry_exhausted",
 ]
 ServiceFailureReason = Literal[
     "knowledge_context_unavailable",
+    "semantic_contract_unaligned",
     "model_invocation_failed",
     "testing_agent_submission_failed",
 ]

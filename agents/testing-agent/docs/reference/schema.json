@@ -50,7 +50,7 @@
         "index": false
       },
       {
-        "name": "type",
+        "name": "elem_type",
         "type": "STRING",
         "optional": false,
         "unique": false,
@@ -156,7 +156,7 @@
         "index": false
       },
       {
-        "name": "type",
+        "name": "elem_type",
         "type": "STRING",
         "optional": false,
         "unique": false,
@@ -209,7 +209,7 @@
         "description": "Gold | Silver | Bronze | Best_Effort"
       },
       {
-        "name": "type",
+        "name": "elem_type",
         "type": "STRING",
         "optional": false,
         "unique": false,
@@ -262,7 +262,7 @@
         "description": "up | down | administratively_down"
       },
       {
-        "name": "type",
+        "name": "elem_type",
         "type": "STRING",
         "optional": false,
         "unique": false,
@@ -321,7 +321,7 @@
         "index": false
       },
       {
-        "name": "type",
+        "name": "elem_type",
         "type": "STRING",
         "optional": false,
         "unique": false,
@@ -403,7 +403,7 @@
         "index": false
       },
       {
-        "name": "type",
+        "name": "elem_type",
         "type": "STRING",
         "optional": false,
         "unique": false,

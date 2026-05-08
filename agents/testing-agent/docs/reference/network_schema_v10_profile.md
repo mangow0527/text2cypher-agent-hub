@@ -54,15 +54,9 @@ MATCH (n) RETURN n LIMIT 1
 
 ## 在系统中的使用方式
 
-Schema 画像被多个模块引用：
+物理 schema 的机器可读事实源是 `services/testing_agent/docs/reference/schema.json`；cypher-generator-agent 通过 `semantic_layer.yaml` 绑定业务语义与该物理 schema，并在生成前执行 Semantic Contract Alignment。
 
-### services/testing_agent/app/schema_profile.py
-定义 `NETWORK_SCHEMA_V10_CONTEXT`（完整 schema 字符串）和 `NETWORK_SCHEMA_V10_HINTS`（实体关键词映射）。
-
-### 当前 agent 边界
-- testing-agent 使用 schema 画像作为评测和排查参考。
-- cypher-generator-agent 的正式知识上下文来自 knowledge-agent，不在本地组装 `KnowledgeContext`。
-- repair-agent 消费 testing-agent 的 `IssueTicket`，不从本参考文档派生修复请求。
+这份 Markdown 只作为人工阅读参考，不参与生成、评测或 repair 流程。
 
 ## Schema 关键词参考表
 

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from functools import lru_cache
 from pathlib import Path
-from typing import Callable, Dict, Protocol
+from typing import Any, Callable, Dict, Protocol
 from uuid import uuid4
 
 import httpx
@@ -14,7 +15,8 @@ from .clients import (
     TestingAgentClient,
 )
 from .config import Settings, get_settings
-from .knowledge_context import FileKnowledgeContextProvider
+from .knowledge_context import KnowledgeDocsValidator
+from .knowledge_selection import RagKnowledgeSelector
 from .models import (
     GeneratedCypherSubmissionRequest,
     GenerationFailureReason,
@@ -23,22 +25,8 @@ from .models import (
     QAQuestionRequest,
 )
 from .outbox import DeliveryOutbox
-from .parser import parse_model_output
-from .preflight import run_preflight_check
-from .prompt_runtime import render_llm_prompt
-
-
-MAX_GENERATION_ATTEMPTS = 3
-
-
-class KnowledgeContextProvider(Protocol):
-    async def fetch_context(self, id: str, question: str) -> str:
-        ...
-
-
-class CypherModelInvoker(Protocol):
-    async def generate_from_prompt(self, *, task_id: str, question_text: str, llm_prompt: str) -> Dict[str, str]:
-        ...
+from .semantic_alignment import SemanticAlignmentReport, validate_default_semantic_alignment
+from .semantic_pipeline import SemanticPipeline, get_semantic_pipeline
 
 
 class GeneratedCypherSubmitter(Protocol):
@@ -49,170 +37,67 @@ class GeneratedCypherSubmitter(Protocol):
         ...
 
 
+class SemanticPipelineRunner(Protocol):
+    async def parse_with_fallback(
+        self,
+        *,
+        id: str | None = None,
+        question: str,
+        generation_run_id: str | None = None,
+    ) -> Any:
+        ...
+
+
 class CypherGeneratorAgentService:
     def __init__(
         self,
         *,
-        knowledge_context_provider: KnowledgeContextProvider,
-        llm_client: CypherModelInvoker,
         testing_client: GeneratedCypherSubmitter,
         generation_run_id_factory: Callable[[], str] | None = None,
-        readonly_call_whitelist: set[str] | None = None,
         delivery_outbox: DeliveryOutbox | None = None,
+        semantic_alignment_report_factory: Callable[[], SemanticAlignmentReport] | None = None,
+        semantic_pipeline: SemanticPipelineRunner | None = None,
     ) -> None:
-        self.knowledge_context_provider = knowledge_context_provider
-        self.llm_client = llm_client
         self.testing_client = testing_client
         self.generation_run_id_factory = generation_run_id_factory or (lambda: str(uuid4()))
-        self.readonly_call_whitelist = readonly_call_whitelist or set()
         self.delivery_outbox = delivery_outbox
+        self.semantic_alignment_report_factory = semantic_alignment_report_factory
+        self.semantic_pipeline = semantic_pipeline or get_semantic_pipeline()
         self._delivery_retry_lock = asyncio.Lock()
 
     async def ingest_question(self, request: QAQuestionRequest) -> GenerationRunResult:
         generation_run_id = self.generation_run_id_factory()
-        try:
-            ko_context = await self.knowledge_context_provider.fetch_context(id=request.id, question=request.question)
-        except Exception:
-            await self._submit_service_failure_report(
-                request=request,
-                generation_run_id=generation_run_id,
-                reason="knowledge_context_unavailable",
-                input_prompt_snapshot="",
-                last_llm_raw_output="",
-            )
-            return GenerationRunResult(
-                generation_run_id=generation_run_id,
-                generation_status="service_failed",
-                reason="knowledge_context_unavailable",
-            )
-        if not ko_context.strip():
-            await self._submit_service_failure_report(
-                request=request,
-                generation_run_id=generation_run_id,
-                reason="knowledge_context_unavailable",
-                input_prompt_snapshot="",
-                last_llm_raw_output="",
-            )
-            return GenerationRunResult(
-                generation_run_id=generation_run_id,
-                generation_status="service_failed",
-                reason="knowledge_context_unavailable",
-            )
-
-        last_reason: GenerationFailureReason | None = None
-        last_llm_raw_output = ""
-        last_prompt_snapshot = ""
-        last_parsed_cypher = ""
-        generation_failure_reasons: list[GenerationFailureReason] = []
-        for _generation_attempt_index in range(1, MAX_GENERATION_ATTEMPTS + 1):
-            llm_prompt = render_llm_prompt(
-                question=request.question,
-                ko_context=ko_context,
-                extra_constraint_reason=last_reason,
-            )
-            last_prompt_snapshot = llm_prompt
-            try:
-                raw_generation = await self.llm_client.generate_from_prompt(
-                    task_id=request.id,
-                    question_text=request.question,
-                    llm_prompt=llm_prompt,
-                )
-            except Exception:
+        if self.semantic_alignment_report_factory is not None:
+            alignment_report = self.semantic_alignment_report_factory()
+            if _alignment_report_blocks_generation(alignment_report):
                 await self._submit_service_failure_report(
                     request=request,
                     generation_run_id=generation_run_id,
-                    reason="model_invocation_failed",
-                    input_prompt_snapshot=llm_prompt,
+                    reason="semantic_contract_unaligned",
+                    input_prompt_snapshot=json.dumps(alignment_report.to_dict(), ensure_ascii=False, indent=2),
                     last_llm_raw_output="",
                 )
                 return GenerationRunResult(
                     generation_run_id=generation_run_id,
                     generation_status="service_failed",
-                    reason="model_invocation_failed",
+                    reason="semantic_contract_unaligned",
                 )
-
-            raw_output_value = raw_generation.get("raw_output")
-            if not isinstance(raw_output_value, str):
+            if _alignment_report_has_knowledge_context_unavailable(alignment_report):
                 await self._submit_service_failure_report(
                     request=request,
                     generation_run_id=generation_run_id,
-                    reason="model_invocation_failed",
-                    input_prompt_snapshot=llm_prompt,
+                    reason="knowledge_context_unavailable",
+                    input_prompt_snapshot=json.dumps(alignment_report.to_dict(), ensure_ascii=False, indent=2),
                     last_llm_raw_output="",
                 )
                 return GenerationRunResult(
                     generation_run_id=generation_run_id,
                     generation_status="service_failed",
-                    reason="model_invocation_failed",
+                    reason="knowledge_context_unavailable",
                 )
-            raw_output = raw_output_value
-            last_llm_raw_output = raw_output
-            parsed = parse_model_output(raw_output)
-            last_parsed_cypher = parsed.parsed_cypher
-            if parsed.reason is not None:
-                last_reason = parsed.reason
-                generation_failure_reasons.append(parsed.reason)
-                continue
-
-            preflight_check = run_preflight_check(
-                parsed.parsed_cypher,
-                readonly_call_whitelist=self.readonly_call_whitelist,
-            )
-            if not preflight_check.accepted:
-                last_reason = preflight_check.reason
-                if preflight_check.reason is not None:
-                    generation_failure_reasons.append(preflight_check.reason)
-                continue
-
-            submission = GeneratedCypherSubmissionRequest(
-                id=request.id,
-                question=request.question,
-                generation_run_id=generation_run_id,
-                generated_cypher=parsed.parsed_cypher,
-                input_prompt_snapshot=llm_prompt,
-                last_llm_raw_output=raw_output,
-                generation_retry_count=len(generation_failure_reasons),
-                generation_failure_reasons=generation_failure_reasons,
-            )
-            if not await self._deliver_or_outbox(
-                payload_type="GeneratedCypherSubmissionRequest",
-                payload=submission,
-            ):
-                return GenerationRunResult(
-                    generation_run_id=generation_run_id,
-                    generation_status="service_failed",
-                    reason="testing_agent_submission_failed",
-                )
-            return GenerationRunResult(
-                generation_run_id=generation_run_id,
-                generation_status="submitted_to_testing",
-            )
-
-        if last_reason is not None:
-            failure_report = GenerationRunFailureReport(
-                id=request.id,
-                question=request.question,
-                generation_run_id=generation_run_id,
-                generation_status="generation_failed",
-                failure_reason="generation_retry_exhausted",
-                last_generation_failure_reason=last_reason,
-                input_prompt_snapshot=last_prompt_snapshot,
-                last_llm_raw_output=last_llm_raw_output,
-                generation_retry_count=max(0, len(generation_failure_reasons) - 1),
-                generation_failure_reasons=generation_failure_reasons,
-                parsed_cypher=last_parsed_cypher or None,
-                gate_passed=False,
-            )
-            await self._deliver_or_outbox(
-                payload_type="GenerationRunFailureReport",
-                payload=failure_report,
-            )
-
-        return GenerationRunResult(
+        return await self._ingest_question_with_semantic_pipeline(
+            request=request,
             generation_run_id=generation_run_id,
-            generation_status="generation_failed",
-            reason="generation_retry_exhausted",
-            last_reason=last_reason,
         )
 
     async def retry_pending_deliveries(self) -> None:
@@ -297,26 +182,113 @@ class CypherGeneratorAgentService:
             payload=failure_report,
         )
 
+    async def _ingest_question_with_semantic_pipeline(
+        self,
+        *,
+        request: QAQuestionRequest,
+        generation_run_id: str,
+    ) -> GenerationRunResult:
+        try:
+            semantic_result = await self.semantic_pipeline.parse_with_fallback(
+                id=request.id,
+                question=request.question,
+                generation_run_id=generation_run_id,
+            )
+        except Exception:
+            await self._submit_service_failure_report(
+                request=request,
+                generation_run_id=generation_run_id,
+                reason="model_invocation_failed",
+                input_prompt_snapshot="",
+                last_llm_raw_output="",
+            )
+            return GenerationRunResult(
+                generation_run_id=generation_run_id,
+                generation_status="service_failed",
+                reason="model_invocation_failed",
+            )
+
+        snapshot = _semantic_result_snapshot(semantic_result)
+        generated_cypher = getattr(semantic_result, "generated_cypher", None)
+        preflight = getattr(semantic_result, "preflight", None)
+        if isinstance(generated_cypher, str) and generated_cypher.strip() and getattr(preflight, "accepted", False):
+            submission = GeneratedCypherSubmissionRequest(
+                id=request.id,
+                question=request.question,
+                generation_run_id=generation_run_id,
+                generated_cypher=generated_cypher,
+                input_prompt_snapshot=snapshot,
+                last_llm_raw_output=generated_cypher,
+                generation_retry_count=0,
+                generation_failure_reasons=[],
+            )
+            if not await self._deliver_or_outbox(
+                payload_type="GeneratedCypherSubmissionRequest",
+                payload=submission,
+            ):
+                return GenerationRunResult(
+                    generation_run_id=generation_run_id,
+                    generation_status="service_failed",
+                    reason="testing_agent_submission_failed",
+                )
+            return GenerationRunResult(
+                generation_run_id=generation_run_id,
+                generation_status="submitted_to_testing",
+            )
+
+        failure_reason = _semantic_generation_failure_reason(semantic_result)
+        failure_report = GenerationRunFailureReport(
+            id=request.id,
+            question=request.question,
+            generation_run_id=generation_run_id,
+            generation_status="generation_failed",
+            failure_reason=failure_reason,
+            input_prompt_snapshot=snapshot,
+            last_llm_raw_output=generated_cypher if isinstance(generated_cypher, str) else "",
+            generation_retry_count=0,
+            generation_failure_reasons=[failure_reason],
+            parsed_cypher=generated_cypher if isinstance(generated_cypher, str) and generated_cypher.strip() else None,
+            gate_passed=False,
+        )
+        if not await self._deliver_or_outbox(
+            payload_type="GenerationRunFailureReport",
+            payload=failure_report,
+        ):
+            return GenerationRunResult(
+                generation_run_id=generation_run_id,
+                generation_status="service_failed",
+                reason="testing_agent_submission_failed",
+            )
+        return GenerationRunResult(
+            generation_run_id=generation_run_id,
+            generation_status="generation_failed",
+            reason=failure_reason,
+        )
+
 
 def build_workflow_service(settings: Settings) -> CypherGeneratorAgentService:
     outbox_dir = settings.delivery_outbox_dir or str(Path(settings.data_dir) / "delivery_outbox")
     return CypherGeneratorAgentService(
-        knowledge_context_provider=FileKnowledgeContextProvider(knowledge_dir=settings.knowledge_docs_dir),
-        llm_client=CypherLLMClient(
-            llm_generator=OpenAIChatCompletionCypherGenerator(
-                base_url=settings.llm_base_url or "",
-                api_key=settings.llm_api_key or "",
-                model=settings.llm_model or "",
-                timeout_seconds=settings.request_timeout_seconds,
-                temperature=settings.llm_temperature,
-            ),
-        ),
         testing_client=TestingAgentClient(
             base_url=settings.testing_agent_url,
             timeout_seconds=settings.request_timeout_seconds,
         ),
-        readonly_call_whitelist=set(settings.readonly_call_whitelist),
         delivery_outbox=DeliveryOutbox(outbox_dir),
+        semantic_alignment_report_factory=lambda: validate_default_semantic_alignment(
+            knowledge_dir=settings.knowledge_docs_dir
+        ),
+        semantic_pipeline=SemanticPipeline(
+            llm_client=CypherLLMClient(
+                llm_generator=OpenAIChatCompletionCypherGenerator(
+                    base_url=settings.llm_base_url or "",
+                    api_key=settings.llm_api_key or "",
+                    model=settings.llm_model or "",
+                    timeout_seconds=settings.request_timeout_seconds,
+                    temperature=settings.llm_temperature,
+                ),
+            ),
+            knowledge_selector=_build_knowledge_selector(settings),
+        ),
     )
 
 
@@ -327,16 +299,31 @@ def get_workflow_service() -> CypherGeneratorAgentService:
 
 def get_generator_status() -> Dict[str, object]:
     settings = get_settings()
-    knowledge_context_provider = FileKnowledgeContextProvider(knowledge_dir=settings.knowledge_docs_dir)
+    knowledge_docs_validator = KnowledgeDocsValidator(knowledge_dir=settings.knowledge_docs_dir)
+    semantic_alignment = validate_default_semantic_alignment(knowledge_dir=settings.knowledge_docs_dir)
+    knowledge_context_source = settings.knowledge_context_source.lower()
     return {
         "llm_enabled": settings.llm_enabled,
         "llm_provider": settings.llm_provider,
         "llm_model": settings.llm_model,
-        "active_mode": "llm" if settings.llm_enabled else "disabled",
-        "knowledge_context_source": "file",
-        "knowledge_docs_dir_configured": knowledge_context_provider.is_available(),
+        "active_mode": "semantic_pipeline" if settings.llm_enabled else "disabled",
+        "knowledge_context_source": knowledge_context_source,
+        "knowledge_docs_dir_configured": knowledge_docs_validator.is_available(),
+        "knowledge_selection_configured": knowledge_context_source == "rag",
+        "rag_service_url": settings.rag_service_url if knowledge_context_source == "rag" else None,
+        "semantic_alignment": semantic_alignment.to_dict(),
         "testing_agent_configured": bool(settings.testing_agent_url),
     }
+
+
+def _build_knowledge_selector(settings: Settings) -> RagKnowledgeSelector | None:
+    if settings.knowledge_context_source.lower() != "rag":
+        return None
+    return RagKnowledgeSelector(
+        base_url=settings.rag_service_url,
+        limit=settings.rag_retrieval_limit,
+        timeout_seconds=settings.rag_request_timeout_seconds,
+    )
 
 
 def _is_non_retryable_http_error(exc: Exception) -> bool:
@@ -344,3 +331,28 @@ def _is_non_retryable_http_error(exc: Exception) -> bool:
         return False
     status_code = exc.response.status_code
     return 400 <= status_code < 500
+
+
+def _alignment_report_blocks_generation(report: SemanticAlignmentReport) -> bool:
+    if report.accepted:
+        return False
+    context_unavailable_codes = {"knowledge_context_unavailable"}
+    return any(diagnostic.code not in context_unavailable_codes for diagnostic in report.diagnostics)
+
+
+def _alignment_report_has_knowledge_context_unavailable(report: SemanticAlignmentReport) -> bool:
+    return any(diagnostic.code == "knowledge_context_unavailable" for diagnostic in report.diagnostics)
+
+
+def _semantic_result_snapshot(semantic_result: object) -> str:
+    to_dict = getattr(semantic_result, "to_dict", None)
+    payload = to_dict() if callable(to_dict) else semantic_result
+    return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+
+
+def _semantic_generation_failure_reason(semantic_result: object) -> GenerationFailureReason:
+    preflight = getattr(semantic_result, "preflight", None)
+    reason = getattr(preflight, "reason", None)
+    if reason in set(GenerationFailureReason.__args__):
+        return reason
+    return "semantic_parse_rejected"

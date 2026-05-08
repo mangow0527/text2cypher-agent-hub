@@ -337,9 +337,9 @@ Why Not: `WHERE` 位置错误，Cypher 过滤应位于 `MATCH` / `RETURN` 之间
 ```text
 [id: network_element_port_count_few_shot]
 Question: 统计每种网络设备类型的数量
-Cypher: MATCH (n:NetworkElement) RETURN n.type AS group_key, count(n) AS total
+Cypher: MATCH (n:NetworkElement) RETURN n.elem_type AS group_key, count(n) AS total
 Why: Cypher 通过 `RETURN` 隐式分组，不使用 `GROUP BY`。
-Anti-Pattern: MATCH (n:NetworkElement) RETURN n.type, count(n) GROUP BY n.type
+Anti-Pattern: MATCH (n:NetworkElement) RETURN n.elem_type, count(n) GROUP BY n.elem_type
 Why Not: Cypher 不支持 `GROUP BY`。
 ```
 
@@ -348,7 +348,7 @@ Why Not: Cypher 不支持 `GROUP BY`。
 ```text
 [id: tunnel_type_count_few_shot]
 Question: 按类型统计隧道的数量
-Cypher: MATCH (t:Tunnel) RETURN t.type AS group_key, count(t) AS total
+Cypher: MATCH (t:Tunnel) RETURN t.elem_type AS group_key, count(t) AS total
 Why: “按类型统计数量”属于典型分组聚合，返回聚合行。
 ```
 
@@ -362,7 +362,7 @@ Why: 无分组字段时直接返回总计数。
 ### 建议补充错误 few-shot
 
 ```text
-Anti-Pattern: MATCH (t:Tunnel) RETURN t.type, count(t) GROUP BY t.type
+Anti-Pattern: MATCH (t:Tunnel) RETURN t.elem_type, count(t) GROUP BY t.elem_type
 Why Not: TuGraph Cypher 不支持 `GROUP BY`。
 ```
 
@@ -454,7 +454,7 @@ Why Not: “最长”意味着降序，不是升序。
 - `business_knowledge.md`
   - `名称 -> name`
   - `ID -> id`
-  - `类型 -> type`
+  - `类型 -> elem_type`
 - `cypher_syntax.md`
   - `RETURN` 只返回题目需要的属性字段
 
@@ -529,7 +529,7 @@ Why: 这是“关系 + 过滤 + 字段投影”的复合问题，需要同时满
 ```text
 [id: tunnel_type_count_filtered_few_shot]
 Question: 按类型统计带宽大于100的隧道数量
-Cypher: MATCH (t:Tunnel) WHERE t.bandwidth > 100 RETURN t.type AS group_key, count(t) AS total
+Cypher: MATCH (t:Tunnel) WHERE t.bandwidth > 100 RETURN t.elem_type AS group_key, count(t) AS total
 Why: 这是“过滤 + 聚合”复合问题，应先过滤再聚合。
 ```
 

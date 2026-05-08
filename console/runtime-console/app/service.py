@@ -400,26 +400,176 @@ class RuntimeResultsService:
     ) -> dict[str, Any]:
         source = submission or generation_failure or {}
         generated_cypher = (submission or {}).get("generated_cypher") or ""
+        parsed_cypher = generated_cypher or (generation_failure or {}).get("parsed_cypher")
         generation_status = source.get("generation_status")
         gate_passed = (
             bool(generated_cypher)
             if submission is not None and submission.get("generation_status") == "generated"
             else bool((generation_failure or source).get("gate_passed"))
         )
+        prompt_snapshot = source.get("input_prompt_snapshot") or ""
+        snapshot = self._decode_generation_snapshot(prompt_snapshot)
         return {
             "question": source.get("question", ""),
             "difficulty": (golden or {}).get("difficulty"),
+            "golden_cypher": (golden or {}).get("cypher"),
+            "generated_cypher": parsed_cypher,
             "generation_run_id": source.get("generation_run_id"),
-            "prompt_markdown": source.get("input_prompt_snapshot") or "",
+            "prompt_markdown": prompt_snapshot,
             "last_llm_raw_output": source.get("last_llm_raw_output") or "",
-            "parsed_cypher": generated_cypher or (generation_failure or {}).get("parsed_cypher"),
+            "parsed_cypher": parsed_cypher,
             "gate_passed": gate_passed,
             "failure_reason": source.get("failure_reason") or (generation_failure or {}).get("failure_reason"),
             "last_failure_reason": source.get("last_generation_failure_reason") or (generation_failure or {}).get("last_generation_failure_reason"),
             "retry_count": int(source.get("generation_retry_count") or (generation_failure or {}).get("generation_retry_count") or 0),
             "failure_reasons": source.get("generation_failure_reasons") or (generation_failure or {}).get("generation_failure_reasons") or [],
             "generation_status": generation_status,
+            "chain_summary": self._generation_chain_summary(
+                snapshot=snapshot,
+                generation_status=str(generation_status or ""),
+                failure_reason=source.get("failure_reason") or (generation_failure or {}).get("failure_reason"),
+                gate_passed=gate_passed,
+            ),
+            "llm_prompts": self._generation_llm_prompts(snapshot),
         }
+
+    def _decode_generation_snapshot(self, prompt_snapshot: Any) -> dict[str, Any]:
+        if isinstance(prompt_snapshot, dict):
+            return prompt_snapshot
+        if not isinstance(prompt_snapshot, str) or not prompt_snapshot.strip():
+            return {}
+        try:
+            parsed = json.loads(prompt_snapshot)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _generation_llm_prompts(self, snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        raw_prompts = snapshot.get("llm_prompts") if isinstance(snapshot.get("llm_prompts"), dict) else {}
+
+        def prompt_item(key: str, title_zh: str) -> dict[str, Any]:
+            raw_prompt = raw_prompts.get(key)
+            prompt = raw_prompt.strip() if isinstance(raw_prompt, str) else ""
+            return {
+                "key": key,
+                "title_zh": title_zh,
+                "triggered": bool(prompt),
+                "prompt": prompt,
+                "empty_label_zh": "本次未触发",
+            }
+
+        return {
+            "intent_recognition_fallback": prompt_item(
+                "intent_recognition_fallback",
+                "意图识别 LLM 兜底提示词",
+            ),
+            "cypher_generation_fallback": prompt_item(
+                "cypher_generation_fallback",
+                "Renderer 失败后的 Cypher 兜底提示词",
+            ),
+        }
+
+    def _generation_chain_summary(
+        self,
+        *,
+        snapshot: dict[str, Any],
+        generation_status: str,
+        failure_reason: Any,
+        gate_passed: bool,
+    ) -> dict[str, Any]:
+        intent = snapshot.get("intent") if isinstance(snapshot.get("intent"), dict) else {}
+        validation = snapshot.get("validation") if isinstance(snapshot.get("validation"), dict) else {}
+        selected_knowledge = snapshot.get("selected_knowledge") if isinstance(snapshot.get("selected_knowledge"), dict) else {}
+        preflight = snapshot.get("preflight") if isinstance(snapshot.get("preflight"), dict) else {}
+        generation_mode = str(snapshot.get("generation_mode") or "")
+        preflight_accepted = preflight.get("accepted")
+        return {
+            "generation_status": {
+                "value": generation_status or None,
+                "label_zh": self._generation_status_label(generation_status),
+            },
+            "generation_mode": {
+                "value": generation_mode or None,
+                "label_zh": self._generation_mode_label(generation_mode),
+            },
+            "gate": {
+                "accepted": gate_passed,
+                "label_zh": "生成门禁通过" if gate_passed else "生成门禁未通过",
+            },
+            "failure_reason": {
+                "value": failure_reason,
+                "label_zh": self._generation_failure_label(str(failure_reason or "")),
+            },
+            "intent": {
+                "primary_intent": intent.get("primary_intent"),
+                "secondary_intent": intent.get("secondary_intent"),
+                "source": intent.get("source"),
+                "decision": intent.get("decision"),
+                "decision_label_zh": self._intent_decision_label(str(intent.get("decision") or "")),
+                "confidence": intent.get("confidence"),
+            },
+            "validation": {
+                "accepted": validation.get("accepted"),
+                "label_zh": self._accepted_label(validation.get("accepted"), accepted="语义校验通过", rejected="语义校验未通过"),
+                "diagnostics": validation.get("diagnostics") or [],
+            },
+            "knowledge": {
+                "source": selected_knowledge.get("source"),
+                "source_label_zh": self._knowledge_source_label(str(selected_knowledge.get("source") or "")),
+                "selection_trace": selected_knowledge.get("selection_trace") or [],
+            },
+            "preflight": {
+                "accepted": preflight_accepted,
+                "label_zh": self._accepted_label(preflight_accepted, accepted="预检通过", rejected="预检未通过"),
+                "reason": preflight.get("reason"),
+                "reason_label_zh": self._generation_failure_label(str(preflight.get("reason") or "")),
+            },
+        }
+
+    def _generation_status_label(self, value: str) -> str:
+        return {
+            "generated": "生成成功",
+            "generation_failed": "生成失败",
+            "service_failed": "服务失败",
+        }.get(value, "未记录")
+
+    def _generation_mode_label(self, value: str) -> str:
+        return {
+            "deterministic_renderer": "确定性渲染器",
+            "controlled_llm_fallback": "受控大模型兜底",
+        }.get(value, "未记录")
+
+    def _generation_failure_label(self, value: str) -> str:
+        return {
+            "semantic_parse_rejected": "语义解析未通过",
+            "semantic_query_mismatch": "生成结果与语义查询规格不一致",
+            "generation_retry_exhausted": "生成重试次数耗尽",
+            "unbalanced_brackets": "括号未闭合",
+            "no_cypher_found": "未找到 Cypher",
+            "model_invocation_failed": "模型调用失败",
+            "testing_agent_submission_failed": "提交 testing-agent 失败",
+        }.get(value, "无" if not value else value)
+
+    def _intent_decision_label(self, value: str) -> str:
+        return {
+            "accept": "已接受",
+            "fallback_embedding": "转入向量召回",
+            "fallback_llm": "需要大模型兜底",
+            "clarify": "需要澄清",
+        }.get(value, "未记录")
+
+    def _knowledge_source_label(self, value: str) -> str:
+        return {
+            "rag": "RAG 知识选择",
+            "file": "本地知识文件",
+        }.get(value, "未记录")
+
+    def _accepted_label(self, value: Any, *, accepted: str, rejected: str) -> str:
+        if value is True:
+            return accepted
+        if value is False:
+            return rejected
+        return "未记录"
 
     def _build_testing_section(
         self,

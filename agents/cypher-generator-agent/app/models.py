@@ -17,11 +17,15 @@ GenerationFailureReason = Literal[
     "write_operation",
     "unsupported_call",
     "unsupported_start_clause",
+    "unauthorized_schema_reference",
+    "semantic_query_mismatch",
+    "semantic_parse_rejected",
     "generation_retry_exhausted",
 ]
 
 ServiceFailureReason = Literal[
     "knowledge_context_unavailable",
+    "semantic_contract_unaligned",
     "model_invocation_failed",
     "testing_agent_submission_failed",
 ]
@@ -33,6 +37,16 @@ GenerationReportStatus = Literal["generation_failed", "service_failed"]
 class QAQuestionRequest(BaseModel):
     id: str = Field(..., description="QA sample identifier provided by qa-agent.")
     question: str = Field(..., description="Natural language question to generate Cypher for.")
+
+
+class IntentRecognitionRequest(BaseModel):
+    question: str = Field(..., description="Natural language question to recognize intent for.")
+
+
+class SemanticParseRequest(BaseModel):
+    id: Optional[str] = Field(default=None, description="Optional QA sample identifier for traceability.")
+    question: str = Field(..., description="Natural language question to parse into semantic plan and Cypher.")
+    generation_run_id: Optional[str] = Field(default=None, description="Optional generation run identifier for traceability.")
 
 
 class PreflightCheck(BaseModel):

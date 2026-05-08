@@ -1,0 +1,72 @@
+{"id":"eval_001","question":"列出当前网络中的所有服务","expected_primary_intent":"record_retrieval_query","expected_secondary_intent":"entity_list_query","difficulty":"L1"}
+{"id":"eval_002","question":"有哪些隧道资源可以查询","expected_primary_intent":"record_retrieval_query","expected_secondary_intent":"entity_list_query","difficulty":"L1"}
+{"id":"eval_003","question":"查看设备 Device_A 的完整配置信息","expected_primary_intent":"record_retrieval_query","expected_secondary_intent":"entity_detail_query","difficulty":"L1"}
+{"id":"eval_004","question":"查询 ID 为 svc_001 的服务详情","expected_primary_intent":"record_retrieval_query","expected_secondary_intent":"entity_detail_query","difficulty":"L1"}
+{"id":"eval_005","question":"返回所有链路的名称和管理状态","expected_primary_intent":"record_retrieval_query","expected_secondary_intent":"attribute_projection_query","difficulty":"L1"}
+{"id":"eval_006","question":"查询端口的速率和运行状态字段","expected_primary_intent":"record_retrieval_query","expected_secondary_intent":"attribute_projection_query","difficulty":"L1"}
+{"id":"eval_007","question":"查询服务 S 使用了哪些隧道","expected_primary_intent":"record_retrieval_query","expected_secondary_intent":"related_record_query","difficulty":"L2"}
+{"id":"eval_008","question":"设备 A 连接的端口有哪些","expected_primary_intent":"record_retrieval_query","expected_secondary_intent":"related_record_query","difficulty":"L2"}
+{"id":"eval_009","question":"查询服务 S 和隧道 T 之间的使用关系属性","expected_primary_intent":"relationship_path_query","expected_secondary_intent":"relationship_detail_query","difficulty":"L2"}
+{"id":"eval_010","question":"查看端口 P 与光纤 F 的连接关系详情","expected_primary_intent":"relationship_path_query","expected_secondary_intent":"relationship_detail_query","difficulty":"L2"}
+{"id":"eval_011","question":"查询服务 S 到端口 P 的完整经过路径","expected_primary_intent":"relationship_path_query","expected_secondary_intent":"path_trace_query","difficulty":"L2"}
+{"id":"eval_012","question":"展示隧道 T 经过的网络设备顺序","expected_primary_intent":"relationship_path_query","expected_secondary_intent":"path_trace_query","difficulty":"L2"}
+{"id":"eval_013","question":"设备 A 三跳内可以到达哪些设备","expected_primary_intent":"relationship_path_query","expected_secondary_intent":"reachable_entity_query","difficulty":"L2"}
+{"id":"eval_014","question":"业务 S 可以到达哪些端口","expected_primary_intent":"relationship_path_query","expected_secondary_intent":"reachable_entity_query","difficulty":"L2"}
+{"id":"eval_015","question":"列出设备 A 到设备 B 的所有可达路径","expected_primary_intent":"relationship_path_query","expected_secondary_intent":"path_enumeration_query","difficulty":"L3"}
+{"id":"eval_016","question":"查询服务 S 到端口 P 的全部候选路径","expected_primary_intent":"relationship_path_query","expected_secondary_intent":"path_enumeration_query","difficulty":"L3"}
+{"id":"eval_017","question":"查看设备 A 周围两跳拓扑","expected_primary_intent":"relationship_path_query","expected_secondary_intent":"topology_subgraph_query","difficulty":"L2"}
+{"id":"eval_018","question":"展示业务 S 关联的完整资源拓扑","expected_primary_intent":"relationship_path_query","expected_secondary_intent":"topology_subgraph_query","difficulty":"L2"}
+{"id":"eval_019","question":"统计服务使用的隧道数量","expected_primary_intent":"metric_query","expected_secondary_intent":"count_metric_query","difficulty":"L1"}
+{"id":"eval_020","question":"一共有多少个端口","expected_primary_intent":"metric_query","expected_secondary_intent":"count_metric_query","difficulty":"L1"}
+{"id":"eval_021","question":"查询链路的最大带宽","expected_primary_intent":"metric_query","expected_secondary_intent":"numeric_metric_query","difficulty":"L1"}
+{"id":"eval_022","question":"统计端口平均速率","expected_primary_intent":"metric_query","expected_secondary_intent":"numeric_metric_query","difficulty":"L1"}
+{"id":"eval_023","question":"返回服务数量和平均带宽","expected_primary_intent":"metric_query","expected_secondary_intent":"multi_metric_query","difficulty":"L2"}
+{"id":"eval_024","question":"查询端口总数、up 端口数量和 down 端口数量","expected_primary_intent":"metric_query","expected_secondary_intent":"multi_metric_query","difficulty":"L2"}
+{"id":"eval_025","question":"按厂商统计设备数量","expected_primary_intent":"breakdown_query","expected_secondary_intent":"single_dimension_breakdown_query","difficulty":"L1"}
+{"id":"eval_026","question":"统计每种端口状态下的端口数","expected_primary_intent":"breakdown_query","expected_secondary_intent":"single_dimension_breakdown_query","difficulty":"L1"}
+{"id":"eval_027","question":"按厂商和设备类型统计设备数量","expected_primary_intent":"breakdown_query","expected_secondary_intent":"multi_dimension_breakdown_query","difficulty":"L2"}
+{"id":"eval_028","question":"按省份和厂商统计网元数量","expected_primary_intent":"breakdown_query","expected_secondary_intent":"multi_dimension_breakdown_query","difficulty":"L2"}
+{"id":"eval_029","question":"按服务等级统计服务数量和平均带宽","expected_primary_intent":"breakdown_query","expected_secondary_intent":"multi_metric_breakdown_query","difficulty":"L2"}
+{"id":"eval_030","question":"按厂商统计设备总数和 down 设备数量","expected_primary_intent":"breakdown_query","expected_secondary_intent":"multi_metric_breakdown_query","difficulty":"L2"}
+{"id":"eval_031","question":"查询带宽最高的前 5 条链路","expected_primary_intent":"ranking_query","expected_secondary_intent":"attribute_ranking_query","difficulty":"L2"}
+{"id":"eval_032","question":"找出时延最低的 10 个隧道","expected_primary_intent":"ranking_query","expected_secondary_intent":"attribute_ranking_query","difficulty":"L2"}
+{"id":"eval_033","question":"统计设备数量最多的前 3 个厂商","expected_primary_intent":"ranking_query","expected_secondary_intent":"metric_ranking_query","difficulty":"L2"}
+{"id":"eval_034","question":"查询使用隧道数量最多的服务","expected_primary_intent":"ranking_query","expected_secondary_intent":"metric_ranking_query","difficulty":"L2"}
+{"id":"eval_035","question":"查询端口利用率最高的前 10 个端口","expected_primary_intent":"ranking_query","expected_secondary_intent":"derived_metric_ranking_query","difficulty":"L2"}
+{"id":"eval_036","question":"找出故障率最高的前 5 条链路","expected_primary_intent":"ranking_query","expected_secondary_intent":"derived_metric_ranking_query","difficulty":"L2"}
+{"id":"eval_037","question":"比较服务 A 和服务 B 的带宽","expected_primary_intent":"comparison_query","expected_secondary_intent":"attribute_comparison_query","difficulty":"L2"}
+{"id":"eval_038","question":"隧道 T1 和 T2 哪个时延更高","expected_primary_intent":"comparison_query","expected_secondary_intent":"attribute_comparison_query","difficulty":"L2"}
+{"id":"eval_039","question":"比较服务 A 和服务 B 使用的隧道数量","expected_primary_intent":"comparison_query","expected_secondary_intent":"metric_comparison_query","difficulty":"L2"}
+{"id":"eval_040","question":"比较 VendorA 和 VendorB 的设备数量","expected_primary_intent":"comparison_query","expected_secondary_intent":"metric_comparison_query","difficulty":"L2"}
+{"id":"eval_041","question":"对比核心网和接入网设备的端口状态分布","expected_primary_intent":"comparison_query","expected_secondary_intent":"segment_comparison_query","difficulty":"L2"}
+{"id":"eval_042","question":"比较 Gold 和 Silver 服务的平均带宽","expected_primary_intent":"comparison_query","expected_secondary_intent":"segment_comparison_query","difficulty":"L2"}
+{"id":"eval_043","question":"比较本周和上周的新增隧道数","expected_primary_intent":"comparison_query","expected_secondary_intent":"period_comparison_query","difficulty":"L2"}
+{"id":"eval_044","question":"对比本月和上月故障链路数量","expected_primary_intent":"comparison_query","expected_secondary_intent":"period_comparison_query","difficulty":"L2"}
+{"id":"eval_045","question":"过去 7 天每天新增隧道数是多少","expected_primary_intent":"trend_query","expected_secondary_intent":"time_series_metric_query","difficulty":"L2"}
+{"id":"eval_046","question":"按小时统计端口 down 数量","expected_primary_intent":"trend_query","expected_secondary_intent":"time_series_metric_query","difficulty":"L2"}
+{"id":"eval_047","question":"查看端口状态最近 7 天的变化趋势","expected_primary_intent":"trend_query","expected_secondary_intent":"state_trend_query","difficulty":"L2"}
+{"id":"eval_048","question":"查询链路状态历史变化","expected_primary_intent":"trend_query","expected_secondary_intent":"state_trend_query","difficulty":"L2"}
+{"id":"eval_049","question":"本月故障链路数环比变化是多少","expected_primary_intent":"trend_query","expected_secondary_intent":"period_over_period_query","difficulty":"L2"}
+{"id":"eval_050","question":"统计服务数量同比增长率","expected_primary_intent":"trend_query","expected_secondary_intent":"period_over_period_query","difficulty":"L2"}
+{"id":"eval_051","question":"down 端口占全部端口的比例是多少","expected_primary_intent":"composition_query","expected_secondary_intent":"scalar_ratio_query","difficulty":"L2"}
+{"id":"eval_052","question":"MPLS-TE 隧道占全部隧道的比例","expected_primary_intent":"composition_query","expected_secondary_intent":"scalar_ratio_query","difficulty":"L2"}
+{"id":"eval_053","question":"按厂商统计设备占比","expected_primary_intent":"composition_query","expected_secondary_intent":"share_breakdown_query","difficulty":"L2"}
+{"id":"eval_054","question":"查看不同端口状态的构成","expected_primary_intent":"composition_query","expected_secondary_intent":"share_breakdown_query","difficulty":"L2"}
+{"id":"eval_055","question":"查询端口利用率","expected_primary_intent":"composition_query","expected_secondary_intent":"coverage_utilization_query","difficulty":"L2"}
+{"id":"eval_056","question":"查询业务资源使用率","expected_primary_intent":"composition_query","expected_secondary_intent":"coverage_utilization_query","difficulty":"L2"}
+{"id":"eval_057","question":"查询服务 A 使用但服务 B 未使用的隧道","expected_primary_intent":"set_operation_query","expected_secondary_intent":"set_difference_query","difficulty":"L3"}
+{"id":"eval_058","question":"查询未被任何服务使用的隧道","expected_primary_intent":"set_operation_query","expected_secondary_intent":"set_difference_query","difficulty":"L2"}
+{"id":"eval_059","question":"查询服务 A 和服务 B 共同使用的隧道","expected_primary_intent":"set_operation_query","expected_secondary_intent":"set_intersection_query","difficulty":"L2"}
+{"id":"eval_060","question":"查询两个业务都经过的网元","expected_primary_intent":"set_operation_query","expected_secondary_intent":"set_intersection_query","difficulty":"L2"}
+{"id":"eval_061","question":"查询服务 A 或服务 B 使用的全部隧道","expected_primary_intent":"set_operation_query","expected_secondary_intent":"set_union_query","difficulty":"L2"}
+{"id":"eval_062","question":"查询业务 A 和业务 B 涉及的全部网元","expected_primary_intent":"set_operation_query","expected_secondary_intent":"set_union_query","difficulty":"L2"}
+{"id":"eval_063","question":"查询经过故障端口所在设备集合的业务","expected_primary_intent":"set_operation_query","expected_secondary_intent":"set_membership_filter_query","difficulty":"L3"}
+{"id":"eval_064","question":"查询使用高带宽隧道集合中任意隧道的服务","expected_primary_intent":"set_operation_query","expected_secondary_intent":"set_membership_filter_query","difficulty":"L3"}
+{"id":"eval_065","question":"是否存在名称为 Device_A 的设备","expected_primary_intent":"existence_query","expected_secondary_intent":"entity_existence_query","difficulty":"L1"}
+{"id":"eval_066","question":"系统里有没有 ID 为 Tunnel_001 的隧道","expected_primary_intent":"existence_query","expected_secondary_intent":"entity_existence_query","difficulty":"L1"}
+{"id":"eval_067","question":"服务 A 是否使用了隧道 B","expected_primary_intent":"existence_query","expected_secondary_intent":"relationship_existence_query","difficulty":"L2"}
+{"id":"eval_068","question":"设备 A 是否连接了端口 P","expected_primary_intent":"existence_query","expected_secondary_intent":"relationship_existence_query","difficulty":"L2"}
+{"id":"eval_069","question":"设备 A 到设备 B 之间是否存在连接路径","expected_primary_intent":"existence_query","expected_secondary_intent":"path_existence_query","difficulty":"L2"}
+{"id":"eval_070","question":"业务 S 是否能到达端口 P","expected_primary_intent":"existence_query","expected_secondary_intent":"path_existence_query","difficulty":"L2"}
+{"id":"eval_071","question":"是否有状态为 down 的链路","expected_primary_intent":"existence_query","expected_secondary_intent":"condition_satisfaction_query","difficulty":"L1"}
+{"id":"eval_072","question":"有没有服务等级为 Gold 的业务","expected_primary_intent":"existence_query","expected_secondary_intent":"condition_satisfaction_query","difficulty":"L1"}

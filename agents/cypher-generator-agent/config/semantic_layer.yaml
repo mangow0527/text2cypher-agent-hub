@@ -1,0 +1,304 @@
+version: 1
+entities:
+  - name: network_element
+    label: NetworkElement
+    alias: ne
+    synonyms: [网元, 网络设备, 设备, 路由器, 交换机, 防火墙]
+  - name: protocol
+    label: Protocol
+    alias: proto
+    synonyms: [协议, 网络协议]
+  - name: tunnel
+    label: Tunnel
+    alias: t
+    synonyms: [隧道, tunnel]
+  - name: service
+    label: Service
+    alias: s
+    synonyms: [服务, 业务]
+  - name: port
+    label: Port
+    alias: p
+    synonyms: [端口, 接口]
+  - name: fiber
+    label: Fiber
+    alias: f
+    synonyms: [光纤, 纤芯]
+  - name: link
+    label: Link
+    alias: l
+    synonyms: [链路, 连接]
+
+relationships:
+  - name: has_port
+    from: network_element
+    edge: HAS_PORT
+    to: port
+    direction: out
+    synonyms: [拥有端口, 包含端口]
+  - name: fiber_src
+    from: fiber
+    edge: FIBER_SRC
+    to: port
+    direction: out
+    synonyms: [光纤源端]
+  - name: fiber_dst
+    from: fiber
+    edge: FIBER_DST
+    to: port
+    direction: out
+    synonyms: [光纤目的端]
+  - name: link_src
+    from: link
+    edge: LINK_SRC
+    to: port
+    direction: out
+    synonyms: [链路源端]
+  - name: link_dst
+    from: link
+    edge: LINK_DST
+    to: port
+    direction: out
+    synonyms: [链路目的端]
+  - name: tunnel_src
+    from: tunnel
+    edge: TUNNEL_SRC
+    to: network_element
+    direction: out
+    synonyms: [隧道源端, 源网元]
+  - name: tunnel_dst
+    from: tunnel
+    edge: TUNNEL_DST
+    to: network_element
+    direction: out
+    synonyms: [隧道目的端, 目的网元]
+  - name: tunnel_proto
+    from: tunnel
+    edge: TUNNEL_PROTO
+    to: protocol
+    direction: out
+    synonyms: [隧道协议, 使用协议]
+  - name: path_through
+    from: tunnel
+    edge: PATH_THROUGH
+    to: network_element
+    direction: out
+    synonyms: [经过, 路径经过, 穿过]
+  - name: service_uses_tunnel
+    from: service
+    edge: SERVICE_USES_TUNNEL
+    to: tunnel
+    direction: out
+    synonyms: [使用, 承载于, 依赖隧道]
+
+properties:
+  - name: service_name
+    owner: service
+    property: name
+    synonyms: [服务名称, 业务名称]
+  - name: service_id
+    owner: service
+    property: id
+  - name: service_qos
+    owner: service
+    property: quality_of_service
+    synonyms: [QoS, 服务等级, 服务质量]
+  - name: service_type
+    owner: service
+    property: elem_type
+    synonyms: [服务类型, 业务类型]
+  - name: service_bandwidth
+    owner: service
+    property: bandwidth
+    synonyms: [服务带宽, 业务带宽]
+  - name: service_latency
+    owner: service
+    property: latency
+    synonyms: [服务时延, 业务时延]
+  - name: tunnel_name
+    owner: tunnel
+    property: name
+    synonyms: [隧道名称]
+  - name: tunnel_id
+    owner: tunnel
+    property: id
+  - name: tunnel_latency
+    owner: tunnel
+    property: latency
+    synonyms: [隧道时延, 时延]
+  - name: tunnel_bandwidth
+    owner: tunnel
+    property: bandwidth
+    synonyms: [隧道带宽, 带宽]
+  - name: tunnel_type
+    owner: tunnel
+    property: elem_type
+    synonyms: [隧道类型]
+  - name: tunnel_ietf_standard
+    owner: tunnel
+    property: ietf_standard
+  - name: network_element_name
+    owner: network_element
+    property: name
+    synonyms: [设备名称, 网元名称]
+  - name: network_element_id
+    owner: network_element
+    property: id
+  - name: network_element_vendor
+    owner: network_element
+    property: vendor
+    synonyms: [厂商, 设备厂商]
+  - name: network_element_type
+    owner: network_element
+    property: elem_type
+    synonyms: [设备类型, 网元类型]
+  - name: network_element_location
+    owner: network_element
+    property: location
+    synonyms: [位置, 地点]
+  - name: network_element_ip_address
+    owner: network_element
+    property: ip_address
+  - name: network_element_model
+    owner: network_element
+    property: model
+  - name: network_element_software_version
+    owner: network_element
+    property: software_version
+  - name: port_id
+    owner: port
+    property: id
+  - name: port_name
+    owner: port
+    property: name
+  - name: port_status
+    owner: port
+    property: status
+    synonyms: [端口状态]
+  - name: port_type
+    owner: port
+    property: elem_type
+    synonyms: [端口类型, 接口类型]
+  - name: port_speed
+    owner: port
+    property: speed
+  - name: port_mac_address
+    owner: port
+    property: mac_address
+  - name: port_vlan_id
+    owner: port
+    property: vlan_id
+  - name: link_id
+    owner: link
+    property: id
+  - name: link_name
+    owner: link
+    property: name
+  - name: link_status
+    owner: link
+    property: status
+    synonyms: [链路状态]
+  - name: link_admin_status
+    owner: link
+    property: admin_status
+  - name: link_type
+    owner: link
+    property: elem_type
+    synonyms: [链路类型]
+  - name: link_bandwidth
+    owner: link
+    property: bandwidth
+  - name: link_latency
+    owner: link
+    property: latency
+    synonyms: [链路时延]
+  - name: link_mtu
+    owner: link
+    property: mtu
+  - name: link_protocol
+    owner: link
+    property: protocol
+  - name: link_vlan_id
+    owner: link
+    property: vlan_id
+  - name: fiber_id
+    owner: fiber
+    property: id
+  - name: fiber_name
+    owner: fiber
+    property: name
+  - name: fiber_length
+    owner: fiber
+    property: length
+    synonyms: [光纤长度, 长度]
+  - name: fiber_type
+    owner: fiber
+    property: elem_type
+    synonyms: [光纤类型]
+  - name: fiber_location
+    owner: fiber
+    property: location
+  - name: fiber_wavelength
+    owner: fiber
+    property: wavelength
+  - name: fiber_bandwidth_capacity
+    owner: fiber
+    property: bandwidth_capacity
+  - name: protocol_name
+    owner: protocol
+    property: name
+    synonyms: [协议名称]
+  - name: protocol_id
+    owner: protocol
+    property: id
+  - name: protocol_version
+    owner: protocol
+    property: version
+  - name: protocol_standard
+    owner: protocol
+    property: standard
+  - name: protocol_ietf_category
+    owner: protocol
+    property: ietf_category
+
+metrics:
+  - name: service_count
+    owner: service
+    aggregation: count
+    expression: count(s)
+    synonyms: [服务数量, 业务数量]
+  - name: tunnel_count
+    owner: tunnel
+    aggregation: count
+    expression: count(t)
+    synonyms: [隧道数量]
+  - name: avg_tunnel_latency
+    owner: tunnel
+    property: latency
+    aggregation: avg
+    expression: avg(t.latency)
+    synonyms: [平均隧道时延, 平均时延]
+  - name: max_tunnel_bandwidth
+    owner: tunnel
+    property: bandwidth
+    aggregation: max
+    expression: max(t.bandwidth)
+    synonyms: [最大隧道带宽, 最大带宽]
+
+path_patterns:
+  - name: service_to_tunnel
+    relationships: [service_uses_tunnel]
+  - name: tunnel_path_through_network_element
+    relationships: [path_through]
+
+value_mappings:
+  - name: service_qos_values
+    owner: service
+    property: quality_of_service
+    values:
+      金牌: Gold
+      Gold: Gold
+      银牌: Silver
+      Silver: Silver
+      铜牌: Bronze
+      Bronze: Bronze

@@ -13,7 +13,12 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     testing_agent_url: str = "http://127.0.0.1:8003"
-    knowledge_docs_dir: str = "/root/multi-agent/knowledge-agent/backend/knowledge"
+    knowledge_docs_dir: str = "knowledge"
+    knowledge_context_source: str = "file"
+    rag_service_url: str = "http://127.0.0.1:8004"
+    rag_retrieval_limit: int = 12
+    rag_request_timeout_seconds: float = 60.0
+    rag_fallback_to_file: bool = False
     service_public_base_url: str = "http://127.0.0.1:8000"
     data_dir: str = "data/cypher_generator_agent"
     delivery_outbox_dir: Optional[str] = None

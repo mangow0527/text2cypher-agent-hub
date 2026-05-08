@@ -62,6 +62,33 @@ function codeBlock(value) {
   return `<pre>${escapeHtml(pretty(value))}</pre>`;
 }
 
+function emptyCypherText(value) {
+  return value ? value : '未生成可评测 Cypher';
+}
+
+function renderCgaLlmPrompt(item, fallbackTitle) {
+  const title = item?.title_zh || fallbackTitle;
+  const body = item?.triggered ? item.prompt : (item?.empty_label_zh || '本次未触发');
+  return `
+    <h3>${escapeHtml(title)}</h3>
+    ${codeBlock(body)}
+  `;
+}
+
+function renderCgaLlmPrompts(prompts = {}) {
+  return [
+    renderCgaLlmPrompt(prompts.intent_recognition_fallback, '意图识别 LLM 兜底提示词'),
+    renderCgaLlmPrompt(prompts.cypher_generation_fallback, 'Renderer 失败后的 Cypher 兜底提示词'),
+  ].join('');
+}
+
+function chainMetric(label, item, valueKey = 'label_zh') {
+  const value = item && typeof item === 'object' ? item[valueKey] : item;
+  const raw = item && typeof item === 'object' ? item.value || item.reason || item.decision || item.source : null;
+  const rawText = raw ? `（原始值：${raw}）` : '';
+  return metricCard(label, `${value || '未记录'}${rawText}`);
+}
+
 function renderOverview(detail) {
   const summary = detail.summary || {};
   taskMeta.textContent = `${summary.id || detail.id} · ${summary.question || '未提供问题文本'}`;
@@ -77,28 +104,44 @@ function renderOverview(detail) {
 }
 
 function renderCypherGenerator(section) {
+  const chain = section.chain_summary || {};
+  const intent = chain.intent || {};
+  const validation = chain.validation || {};
+  const knowledge = chain.knowledge || {};
+  const preflight = chain.preflight || {};
   return `
     <details class="pipeline-step" open>
       <summary>
         <span>cypher-generator-agent</span>
         <span class="status-pill tone-${tone(section.generation_status)}">${escapeHtml(section.generation_status || 'unknown')}</span>
       </summary>
+      <h3>生成对照</h3>
+      <h3>自然语言问题</h3>
+      ${codeBlock(section.question || '未提供')}
+      <h3>标准 Cypher</h3>
+      ${codeBlock(section.golden_cypher)}
+      <h3>生成 Cypher</h3>
+      ${codeBlock(emptyCypherText(section.generated_cypher || section.parsed_cypher))}
+      <h3>LLM 调用提示词</h3>
+      ${renderCgaLlmPrompts(section.llm_prompts || {})}
+      <h3>生成链路摘要</h3>
       <div class="field-grid">
-        ${metricCard('输入自然语言问题', section.question || '未提供')}
-        ${metricCard('难度', section.difficulty || '未标注')}
+        ${chainMetric('生成状态', chain.generation_status)}
+        ${chainMetric('生成方式', chain.generation_mode)}
+        ${chainMetric('生成门禁', chain.gate)}
+        ${chainMetric('失败原因', chain.failure_reason)}
+        ${metricCard('意图识别', `${intent.decision_label_zh || '未记录'} · ${intent.source || '未知来源'} · 置信度 ${intent.confidence ?? '未记录'}`)}
+        ${metricCard('意图类型', [intent.primary_intent, intent.secondary_intent].filter(Boolean).join(' / ') || '未记录')}
+        ${metricCard('语义校验', validation.label_zh || '未记录')}
+        ${metricCard('知识选择', `${knowledge.source_label_zh || '未记录'} · ${(knowledge.selection_trace || []).length} 条 trace`)}
+        ${metricCard('预检结果', `${preflight.label_zh || '未记录'}${preflight.reason_label_zh ? ` · ${preflight.reason_label_zh}` : ''}`)}
         ${metricCard('生成运行 ID', section.generation_run_id || '未提供')}
-        ${metricCard('门禁是否通过', section.gate_passed ? '通过' : '未通过', section.gate_passed)}
-        ${metricCard('失败原因', section.failure_reason || '无')}
         ${metricCard('最后失败原因', section.last_failure_reason || '无')}
         ${metricCard('重试次数', section.retry_count ?? 0)}
         ${metricCard('历史失败原因', (section.failure_reasons || []).join(', ') || '无')}
       </div>
-      <h3>发给大模型的完整提示词</h3>
+      <h3>SemanticQuerySpec / 原始语义快照</h3>
       ${codeBlock(section.prompt_markdown)}
-      <h3>大模型原始输出</h3>
-      ${codeBlock(section.last_llm_raw_output)}
-      <h3>parser 后 Cypher</h3>
-      ${codeBlock(section.parsed_cypher)}
     </details>
   `;
 }

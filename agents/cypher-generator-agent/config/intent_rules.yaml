@@ -1,0 +1,858 @@
+version: 3
+domain: nl2cypher_chatbi
+description: >
+  第一阶段意图识别规则种子。规则层只覆盖关键词非常明确、类别边界稳定的问题；
+  未命中、低置信或多规则冲突时，应进入 embedding 阶段。
+
+defaults:
+  source: rule
+  decision: accept
+  no_match_decision: fallback_embedding
+  conflict_decision: fallback_llm
+
+rules:
+  - rule_id: rule_path_existence
+    primary_intent: existence_query
+    secondary_intent: path_existence_query
+    confidence: 0.97
+    include_any:
+      - 是否存在
+      - 有没有
+      - 是否有
+      - 能否
+      - 能不能
+      - 是否能
+    include_any_secondary:
+      - 路径
+      - 可达
+      - 到达
+      - 连通
+      - 经过
+
+  - rule_id: rule_relationship_existence
+    primary_intent: existence_query
+    secondary_intent: relationship_existence_query
+    confidence: 0.965
+    include_any:
+      - 是否
+      - 有没有
+      - 是否有
+    include_any_secondary:
+      - 使用
+      - 连接
+      - 关联
+      - 拥有
+      - 属于
+    exclude_any:
+      - 路径
+      - 可达
+      - 到达
+      - 共同
+      - 未使用
+      - 数量
+
+  - rule_id: rule_condition_satisfaction
+    primary_intent: existence_query
+    secondary_intent: condition_satisfaction_query
+    confidence: 0.962
+    include_any:
+      - 是否有
+      - 有没有
+      - 是否存在
+      - 是否满足
+    include_any_secondary:
+      - 状态为
+      - 大于
+      - 小于
+      - 超过
+      - 低于
+      - down
+      - up
+      - Gold
+      - 故障
+
+  - rule_id: rule_entity_existence
+    primary_intent: existence_query
+    secondary_intent: entity_existence_query
+    confidence: 0.96
+    include_any:
+      - 是否存在
+      - 有没有
+      - 是否有
+    include_any_secondary:
+      - 服务
+      - 业务
+      - 隧道
+      - 网元
+      - 设备
+      - 端口
+      - 链路
+      - 资源
+    exclude_any:
+      - 使用
+      - 连接
+      - 关联
+      - 经过
+      - 到达
+      - 路径
+      - 状态为
+      - 大于
+      - 小于
+      - 超过
+      - 低于
+
+  - rule_id: rule_set_difference
+    primary_intent: set_operation_query
+    secondary_intent: set_difference_query
+    confidence: 0.955
+    include_any:
+      - 未使用
+      - 未被
+      - 未被任何
+      - 未经过
+      - 没有的
+      - 不包含
+      - 只使用
+      - 独有
+      - 差异
+      - 差集
+
+  - rule_id: rule_set_intersection
+    primary_intent: set_operation_query
+    secondary_intent: set_intersection_query
+    confidence: 0.95
+    include_any:
+      - 共同
+      - 都经过
+      - 都使用
+      - 都连接
+      - 交集
+      - 相同对象
+      - 相同节点
+      - 相同端口
+      - 相同隧道
+
+  - rule_id: rule_set_union
+    primary_intent: set_operation_query
+    secondary_intent: set_union_query
+    confidence: 0.94
+    include_any:
+      - 任一
+      - 合并
+      - 并集
+      - 全部合并
+      - 所有涉及
+      - 涉及的全部
+      - 使用的全部
+    include_any_secondary:
+      - 服务 A
+      - 服务 B
+      - 业务 A
+      - 业务 B
+      - 两个
+      - 多个
+      - 或
+
+  - rule_id: rule_set_membership_filter
+    primary_intent: set_operation_query
+    secondary_intent: set_membership_filter_query
+    confidence: 0.93
+    include_any:
+      - 集合
+      - 任意
+      - 所在设备
+      - 所在网元
+      - 关联到
+    include_any_secondary:
+      - 使用
+      - 经过
+      - 关联
+      - 连接
+
+  - rule_id: rule_period_over_period
+    primary_intent: trend_query
+    secondary_intent: period_over_period_query
+    confidence: 0.94
+    include_any:
+      - 同比
+      - 环比
+      - 增长率
+      - 较上月
+      - 较上周
+      - 较去年
+      - 变化率
+    exclude_any:
+      - 最高
+      - 最低
+      - 最多
+      - 最少
+      - 前
+      - 排名
+
+  - rule_id: rule_time_series_metric
+    primary_intent: trend_query
+    secondary_intent: time_series_metric_query
+    confidence: 0.92
+    include_any:
+      - 按天
+      - 按日
+      - 按月
+      - 按年
+      - 按小时
+      - 每天
+      - 每月
+      - 每小时
+      - 最近 7 天每天
+      - 时间序列
+    include_any_secondary:
+      - 统计
+      - 数量
+      - 平均
+      - 总数
+      - 新增
+      - 故障
+    exclude_any:
+      - 同比
+      - 环比
+
+  - rule_id: rule_state_trend
+    primary_intent: trend_query
+    secondary_intent: state_trend_query
+    confidence: 0.91
+    include_any:
+      - 状态变化
+      - 变化趋势
+      - 历史变化
+      - 在线状态变化
+    include_any_secondary:
+      - 状态
+      - 在线
+      - down
+      - up
+      - 链路
+      - 端口
+      - 设备
+
+  - rule_id: rule_derived_metric_ranking
+    primary_intent: ranking_query
+    secondary_intent: derived_metric_ranking_query
+    confidence: 0.93
+    include_any:
+      - 利用率最高
+      - 利用率最低
+      - 覆盖率最高
+      - 覆盖率最低
+      - 故障率最高
+      - 增长率最高
+      - 占比最高
+      - 占比最低
+
+  - rule_id: rule_metric_ranking
+    primary_intent: ranking_query
+    secondary_intent: metric_ranking_query
+    confidence: 0.925
+    include_any:
+      - 数量最多
+      - 数量最少
+      - 个数最多
+      - 个数最少
+      - 最多的前
+      - 最少的前
+      - 排名前
+      - top
+      - Top
+    include_any_secondary:
+      - 数量
+      - 个数
+      - 服务
+      - 业务
+      - 设备
+      - 厂商
+      - 端口
+      - 隧道
+
+  - rule_id: rule_attribute_ranking
+    primary_intent: ranking_query
+    secondary_intent: attribute_ranking_query
+    confidence: 0.92
+    include_any:
+      - 最高
+      - 最低
+      - 最大
+      - 最小
+      - 最长
+      - 最短
+      - 降序
+      - 升序
+      - 从高到低
+      - 从低到高
+      - 排在第一位
+    include_any_secondary:
+      - 带宽
+      - 时延
+      - 延迟
+      - 长度
+      - ID
+      - 名称
+      - 速率
+    exclude_any:
+      - 数量
+      - 个数
+      - 占比
+      - 利用率
+      - 覆盖率
+      - 增长率
+
+  - rule_id: rule_period_comparison
+    primary_intent: comparison_query
+    secondary_intent: period_comparison_query
+    confidence: 0.91
+    include_any:
+      - 比较本月和上月
+      - 比较今天和昨天
+      - 对比本周和上周
+      - 本月和上月
+      - 今天和昨天
+      - 本周和上周
+    exclude_any:
+      - 同比
+      - 环比
+      - 增长率
+
+  - rule_id: rule_segment_comparison
+    primary_intent: comparison_query
+    secondary_intent: segment_comparison_query
+    confidence: 0.9
+    include_any:
+      - 比较不同
+      - 对比不同
+      - 对比核心网和接入网
+      - 比较核心网和接入网
+      - 比较 Gold 和 Silver
+      - Gold 和 Silver
+    include_any_secondary:
+      - 分布
+      - 平均
+      - 状态
+      - 版本
+      - 带宽
+
+  - rule_id: rule_metric_comparison
+    primary_intent: comparison_query
+    secondary_intent: metric_comparison_query
+    confidence: 0.895
+    include_any:
+      - 比较
+      - 对比
+      - 哪个数量更多
+      - 哪个更多
+      - 谁更多
+      - 谁更少
+    include_any_secondary:
+      - 数量
+      - 个数
+      - 平均
+      - 总数
+      - 使用的隧道数量
+    exclude_any:
+      - 共同
+      - 差异
+      - 未使用
+
+  - rule_id: rule_attribute_comparison
+    primary_intent: comparison_query
+    secondary_intent: attribute_comparison_query
+    confidence: 0.89
+    include_any:
+      - 比较
+      - 对比
+      - 是否相同
+      - 是否一致
+      - 是否不同
+      - 哪个更高
+      - 哪个更低
+      - 哪个更大
+      - 哪个更小
+    include_any_secondary:
+      - 带宽
+      - 时延
+      - 延迟
+      - 速率
+      - 版本
+      - 厂商
+      - 类型
+      - 状态
+      - 服务等级
+    exclude_any:
+      - 共同
+      - 差异
+      - 数量
+      - 个数
+
+  - rule_id: rule_scalar_ratio
+    primary_intent: composition_query
+    secondary_intent: scalar_ratio_query
+    confidence: 0.9
+    include_any:
+      - 占全部
+      - 占所有
+      - 占比是多少
+      - 比例是多少
+      - 的比例
+    exclude_any:
+      - 各
+      - 每个
+      - 最高
+      - 最低
+      - 排名
+
+  - rule_id: rule_share_breakdown
+    primary_intent: composition_query
+    secondary_intent: share_breakdown_query
+    confidence: 0.89
+    include_any:
+      - 各厂商设备占比
+      - 各服务等级
+      - 各组占比
+      - 按厂商统计设备占比
+      - 按厂商
+      - 构成占比
+      - 占比构成
+      - 不同端口状态的构成
+    include_any_secondary:
+      - 占比
+      - 构成
+      - 比例
+    exclude_any:
+      - 路径
+      - 形成
+      - 构成的路径
+
+  - rule_id: rule_coverage_utilization
+    primary_intent: composition_query
+    secondary_intent: coverage_utilization_query
+    confidence: 0.88
+    include_any:
+      - 利用率
+      - 覆盖率
+      - 使用率
+    exclude_any:
+      - 最高
+      - 最低
+      - 排名
+      - 前
+
+  - rule_id: rule_multi_metric_breakdown
+    primary_intent: breakdown_query
+    secondary_intent: multi_metric_breakdown_query
+    confidence: 0.88
+    include_any:
+      - 按
+      - 各
+      - 每个
+    include_any_secondary:
+      - 和平均
+      - 和最大
+      - 以及
+      - 及其中
+      - 其中
+      - 同时
+      - 总数和
+      - 数量和
+    exclude_any:
+      - 最高
+      - 最低
+      - 前
+      - 占比
+      - 利用率
+
+  - rule_id: rule_multi_dimension_breakdown
+    primary_intent: breakdown_query
+    secondary_intent: multi_dimension_breakdown_query
+    confidence: 0.875
+    include_any:
+      - 按厂商和
+      - 按业务类型和
+      - 按省份和
+      - 按设备类型和
+      - 按服务等级和
+      - 按端口状态和
+      - 按隧道类型和
+    include_any_secondary:
+      - 统计
+      - 数量
+      - 个数
+      - 总数
+    exclude_any:
+      - 数量和
+      - 总数和
+      - 以及
+      - 最高
+      - 最低
+      - 前
+      - 占比
+
+  - rule_id: rule_single_dimension_breakdown
+    primary_intent: breakdown_query
+    secondary_intent: single_dimension_breakdown_query
+    confidence: 0.87
+    include_any:
+      - 按
+      - 各
+      - 每个
+      - 每种
+      - 每类
+      - 分别统计
+      - 分布
+      - 分组统计
+    include_any_secondary:
+      - 统计
+      - 数量
+      - 个数
+      - 总数
+      - 分别
+      - 多少
+    exclude_any:
+      - 最高
+      - 最低
+      - 最多
+      - 最少
+      - 前
+      - 占比
+      - 构成
+      - 比例
+
+  - rule_id: rule_multi_metric
+    primary_intent: metric_query
+    secondary_intent: multi_metric_query
+    confidence: 0.922
+    include_any:
+      - 数量和平均
+      - 数量、最大
+      - 数量、平均
+      - 数量、平均带宽
+      - 数量、最大带宽和平均
+      - 总数和
+      - 总数、up
+      - 总数、up 端口数量
+      - 端口总数和
+      - 端口总数、up
+    exclude_any:
+      - 按
+      - 各
+      - 每个
+      - 前
+      - 最高
+      - 占比
+
+  - rule_id: rule_count_metric
+    primary_intent: metric_query
+    secondary_intent: count_metric_query
+    confidence: 0.855
+    include_any:
+      - 总共有多少
+      - 一共有多少
+      - 共有多少
+      - 共有多少条
+      - 共有多少个
+      - 有多少个
+      - 总数量
+      - 总数
+      - 去重数量
+      - 不同厂商数量
+      - 使用的隧道数量
+      - 服务使用的隧道数量
+      - 连接的端口数量
+      - 拥有的端口数量
+    exclude_any:
+      - 按
+      - 各
+      - 每个
+      - 每种
+      - 分别
+      - 最高
+      - 最多
+      - 占比
+      - 比较
+
+  - rule_id: rule_numeric_metric
+    primary_intent: metric_query
+    secondary_intent: numeric_metric_query
+    confidence: 0.921
+    include_any:
+      - 平均
+      - 求和
+      - 总带宽
+      - 平均带宽
+      - 最大时延
+      - 最小时延
+      - 最大延迟
+      - 最小延迟
+      - 最大带宽
+      - 最小带宽
+      - 最大速率
+      - 最小速率
+      - 最大长度
+      - 最小长度
+    exclude_any:
+      - 按
+      - 各
+      - 每个
+      - 最高
+      - 最低
+      - 前
+      - 比较
+
+  - rule_id: rule_path_enumeration
+    primary_intent: relationship_path_query
+    secondary_intent: path_enumeration_query
+    confidence: 0.86
+    include_any:
+      - 所有路径
+      - 全部路径
+      - 多条路径
+      - 候选路径
+      - 路径列表
+      - 所有可达路径
+    exclude_any:
+      - 是否
+      - 有没有
+
+  - rule_id: rule_topology_subgraph
+    primary_intent: relationship_path_query
+    secondary_intent: topology_subgraph_query
+    confidence: 0.855
+    include_any:
+      - 周边拓扑
+      - 局部拓扑
+      - 资源拓扑
+      - 链路拓扑
+      - 拓扑子图
+      - 完整资源拓扑
+
+  - rule_id: rule_reachable_entity
+    primary_intent: relationship_path_query
+    secondary_intent: reachable_entity_query
+    confidence: 0.85
+    include_any:
+      - 可达
+      - 可以到达
+      - 能到达
+      - 能访问
+    include_any_secondary:
+      - 哪些
+      - 所有
+      - 资源
+      - 设备
+      - 网元
+      - 端口
+    exclude_any:
+      - 是否
+      - 有没有
+      - 路径
+
+  - rule_id: rule_path_trace
+    primary_intent: relationship_path_query
+    secondary_intent: path_trace_query
+    confidence: 0.845
+    include_any:
+      - 完整路径
+      - 路径详情
+      - 路径明细
+      - 经过顺序
+      - 网络设备顺序
+      - 服务到端口的路径
+      - 完整经过路径
+      - 经过路径
+      - 业务路径
+      - 链路明细
+      - 形成的路径
+      - 构成的路径
+      - 所构成的路径
+      - 最多返回 5 条路径
+      - 最多返回5条路径
+      - 经过端口连接到
+    exclude_any:
+      - 所有路径
+      - 全部路径
+      - 是否
+      - 有没有
+
+  - rule_id: rule_relationship_detail
+    primary_intent: relationship_path_query
+    secondary_intent: relationship_detail_query
+    confidence: 0.84
+    include_any:
+      - 关系详情
+      - 关系属性
+      - 连接关系
+      - 使用关系
+      - 链路关系
+      - 关联关系
+    exclude_any:
+      - 是否
+      - 有没有
+      - 路径
+      - 拓扑
+
+  - rule_id: rule_related_record
+    primary_intent: record_retrieval_query
+    secondary_intent: related_record_query
+    confidence: 0.835
+    include_any:
+      - 服务所使用
+      - 服务使用的
+      - 使用了哪些
+      - 使用哪些
+      - 业务使用隧道对应
+      - 链路及其目的端口
+      - 设备连接的端口
+      - 设备A连接的端口
+      - 设备B连接的端口
+      - 网元拥有的端口
+      - 光纤连接的目的端口
+      - 端口关联的隧道
+    include_any_secondary:
+      - 服务
+      - 业务
+      - 隧道
+      - 网元
+      - 设备
+      - 端口
+      - 链路
+      - ID
+      - 名称
+      - 状态
+      - 厂商
+      - 版本
+    exclude_any:
+      - 是否
+      - 有没有
+      - 完整路径
+      - 所有路径
+      - 路径详情
+      - 路径明细
+      - 拓扑
+      - 共同
+      - 未使用
+      - 未被
+      - 统计
+      - 总数
+      - 数量
+      - 多少
+      - 分别
+      - 每种
+      - 不同
+      - 按
+
+  - rule_id: rule_attribute_projection
+    primary_intent: record_retrieval_query
+    secondary_intent: attribute_projection_query
+    confidence: 0.83
+    include_any:
+      - 查询所有服务的 ID
+      - 查询所有服务的ID
+      - 所有服务的 ID
+      - 所有服务的ID
+      - 查询所有端口的名称
+      - 所有端口的名称
+      - 查询所有隧道的 ID
+      - 查询所有隧道的ID
+      - 返回所有链路的名称
+      - 查询隧道的时延值
+      - Gold 服务的 ID
+      - Gold服务的ID
+      - 厂商为 VendorA 的网元名称
+      - 字段
+    exclude_any:
+      - 使用
+      - 连接
+      - 关联
+      - 对应
+      - 挂着
+      - 下面
+      - 经过
+      - 路径
+      - 拓扑
+      - 是否
+      - 有没有
+      - 降序
+      - 升序
+      - 从高到低
+      - 从低到高
+      - 排在第一位
+      - 统计
+      - 数量
+      - 总数
+      - 多少
+      - 平均
+      - 最大
+      - 最小
+      - 占比
+      - 比例
+
+  - rule_id: rule_entity_detail
+    primary_intent: record_retrieval_query
+    secondary_intent: entity_detail_query
+    confidence: 0.825
+    include_any:
+      - 详细信息
+      - 详情
+      - 完整信息
+      - 完整配置
+      - 详细配置
+      - 节点信息
+    include_any_secondary:
+      - 服务
+      - 业务
+      - 隧道
+      - 网元
+      - 设备
+      - 端口
+      - 链路
+    exclude_any:
+      - 关系
+      - 路径
+      - 拓扑
+      - 使用
+      - 连接
+      - 关联
+      - 对应
+      - 经过
+      - 穿过
+
+  - rule_id: rule_entity_list
+    primary_intent: record_retrieval_query
+    secondary_intent: entity_list_query
+    confidence: 0.82
+    include_any:
+      - 查询所有
+      - 列出所有
+      - 查看所有
+      - 列出当前网络中的所有
+    include_any_secondary:
+      - 服务
+      - 业务
+      - 隧道
+      - 网元
+      - 设备
+      - 端口
+      - 链路
+      - 记录
+    exclude_any:
+      - ID
+      - 名称
+      - 状态
+      - 类型
+      - 厂商
+      - 版本
+      - 使用
+      - 连接
+      - 关联
+      - 对应
+      - 经过
+      - 路径
+      - 拓扑
+      - 统计
+      - 数量
+      - 占比

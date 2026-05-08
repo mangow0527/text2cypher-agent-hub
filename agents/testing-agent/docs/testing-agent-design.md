@@ -84,7 +84,7 @@ testing-agent 接收该请求后，会向 cypher-generator-agent 返回接收回
 | `id` | 问题标识，用于和 golden answer、运行中心任务对齐 |
 | `question` | 原始自然语言问题 |
 | `generation_run_id` | cypher-generator-agent 本次执行标识 |
-| `input_prompt_snapshot` | 最后一次生成尝试使用的完整 LLM 输入快照 |
+| `input_prompt_snapshot` | 生成证据快照；semantic pipeline 主链路中保存语义解析 trace，受控 LLM fallback 或直接 LLM 路径中保存 prompt |
 | `last_llm_raw_output` | 最后一次生成尝试的大模型原始输出；如果模型调用从未成功，可为空 |
 | `generation_status` | `generation_failed` 或 `service_failed` |
 | `failure_reason` | 固定失败原因，来自 cypher-generator-agent 的 `GenerationFailure.reason` 或 `ServiceFailure.reason` |
@@ -96,8 +96,8 @@ testing-agent 接收该请求后，会向 cypher-generator-agent 返回接收回
 
 testing-agent 接收该报告后，必须先按 `generation_status` 区分工程失败与生成失败：
 
-- 工程失败：`service_failed` 表示本轮没有完成一次有效生成尝试，例如 `knowledge_context_unavailable`、`model_invocation_failed`。testing-agent 只落盘为生成阶段工程失败，不构造正式评测 attempt，不进入 grammar、TuGraph execution、strict compare、semantic review 或 repair-agent。`testing_agent_submission_failed` 表示 cypher-generator-agent 到 testing-agent 的同步投递失败；该失败不应丢失，cypher-generator-agent 必须把待提交 payload 保存在本地可靠投递 outbox，并在 testing-agent 恢复后继续补投。testing-agent 自身只在补投成功送达后负责落盘。
-- 生成失败：`generation_failed` 表示 LLM 已经基于当前 prompt 尝试生成，但输出没有通过 cypher-generator-agent 门禁，例如 `no_cypher_found`、`wrapped_in_markdown`、`contains_explanation`、`multiple_statements`、`unbalanced_brackets`、`unclosed_string`、`write_operation`、`unsupported_call`、`unsupported_start_clause`。testing-agent 必须把它转成一次正式失败 attempt，进入 testing 流程评分。
+- 工程失败：`service_failed` 表示本轮没有完成一次有效生成尝试，例如 `knowledge_context_unavailable`、`semantic_contract_unaligned`、`model_invocation_failed`。testing-agent 只落盘为生成阶段工程失败，不构造正式评测 attempt，不进入 grammar、TuGraph execution、strict compare、semantic review 或 repair-agent。`testing_agent_submission_failed` 表示 cypher-generator-agent 到 testing-agent 的同步投递失败；该失败不应丢失，cypher-generator-agent 必须把待提交 payload 保存在本地可靠投递 outbox，并在 testing-agent 恢复后继续补投。testing-agent 自身只在补投成功送达后负责落盘。
+- 生成失败：`generation_failed` 表示模型输出、确定性 renderer 输出或 semantic pipeline 结果没有通过 cypher-generator-agent 门禁，例如 `no_cypher_found`、`wrapped_in_markdown`、`contains_explanation`、`multiple_statements`、`unbalanced_brackets`、`unclosed_string`、`write_operation`、`unsupported_call`、`unsupported_start_clause`、`unauthorized_schema_reference`、`semantic_query_mismatch`、`semantic_parse_rejected`。testing-agent 必须把它转成一次正式失败 attempt，进入 testing 流程评分。
 - `generation_retry_exhausted` 是生成失败的汇总状态，应结合 `last_generation_failure_reason` 与 `generation_failure_reasons` 展示和判断。
 
 生成失败 attempt 的评分边界：

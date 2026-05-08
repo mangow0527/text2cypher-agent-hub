@@ -1,0 +1,330 @@
+version: 3
+domain: nl2cypher_chatbi
+description: >
+  第三阶段 LLM 意图识别资产。当前文件不用于规则匹配或向量召回，
+  而是在 rule 与 embedding 都不能稳定判断时，提供分类原则、易混边界和带理由示例。
+
+output_contract:
+  required_fields:
+    - primary_intent
+    - secondary_intent
+    - confidence
+    - source
+    - decision
+  source: llm
+  decision_values:
+    - accept
+    - clarify
+
+global_decision_principles:
+  - intent 描述用户最终想得到的答案形态，不承载业务对象、属性名、指标名、关系名和值。
+  - 优先判断最终返回目标：明细、关系路径、指标、分组、排名、对比、趋势、占比构成、集合操作、存在性。
+  - 路径跳数、关系链、过滤条件、聚合函数、排序截断、时间粒度和返回字段属于结构特征或 slot。
+  - 如果用户期望是/否、有/无、能/不能的布尔答案，优先归 existence_query。
+  - 如果用户表达共同、只属于、未使用、差异、任一、全部合并等集合语义，优先归 set_operation_query。
+  - 如果用户要求时间序列、趋势、同比、环比或变化率，归 trend_query。
+  - 如果用户要求最高、最低、最多、最少、前 N、后 N 或排名，归 ranking_query。
+  - 如果用户要求占比、比例、构成、利用率或覆盖率，归 composition_query。
+  - 如果用户按维度分组统计，归 breakdown_query；路径只是数据获取方式。
+
+confusable_boundaries:
+  - boundary_id: record_attribute_vs_related_record
+    left: record_retrieval_query.attribute_projection_query
+    right: record_retrieval_query.related_record_query
+    decision_rule: >
+      如果只查询单类实体自身字段，归 attribute_projection_query；
+      如果从一个实体沿关系找到目标实体并返回目标实体或属性，归 related_record_query。
+    examples:
+      - question: 查询所有服务的 ID 和名称
+        correct: record_retrieval_query.attribute_projection_query
+      - question: 查询服务所使用隧道的 ID 和名称
+        correct: record_retrieval_query.related_record_query
+
+  - boundary_id: related_record_vs_relationship_path
+    left: record_retrieval_query.related_record_query
+    right: relationship_path_query.path_trace_query
+    decision_rule: >
+      如果只是为了取相关实体或字段而经过关系，归 related_record_query；
+      如果用户要求完整路径、路径顺序、链路明细或路径对象，归 relationship_path_query。
+    examples:
+      - question: 查询服务所使用的隧道
+        correct: record_retrieval_query.related_record_query
+      - question: 查询服务到端口的完整路径
+        correct: relationship_path_query.path_trace_query
+
+  - boundary_id: metric_vs_breakdown
+    left: metric_query.count_metric_query
+    right: breakdown_query.single_dimension_breakdown_query
+    decision_rule: >
+      如果最终只有一个或少量指标值，归 metric_query；
+      如果按维度返回多行维度-指标表，归 breakdown_query。
+    examples:
+      - question: 网络元素总共有多少个
+        correct: metric_query.count_metric_query
+      - question: 按厂商统计设备数量
+        correct: breakdown_query.single_dimension_breakdown_query
+
+  - boundary_id: breakdown_vs_ranking
+    left: breakdown_query.single_dimension_breakdown_query
+    right: ranking_query.metric_ranking_query
+    decision_rule: >
+      如果只要求各组统计结果，归 breakdown_query；
+      如果要求最多、最少、前 N 或后 N，归 ranking_query。
+    examples:
+      - question: 按厂商统计设备数量
+        correct: breakdown_query.single_dimension_breakdown_query
+      - question: 统计设备数量最多的前 3 个厂商
+        correct: ranking_query.metric_ranking_query
+
+  - boundary_id: composition_vs_ranking
+    left: composition_query.share_breakdown_query
+    right: ranking_query.derived_metric_ranking_query
+    decision_rule: >
+      如果最终返回占比或构成表，归 composition_query；
+      如果按占比、利用率、覆盖率、增长率排序取重点对象，归 ranking_query。
+    examples:
+      - question: 查询各厂商设备占比
+        correct: composition_query.share_breakdown_query
+      - question: 查询端口利用率最高的前 10 个端口
+        correct: ranking_query.derived_metric_ranking_query
+
+  - boundary_id: comparison_vs_set_operation
+    left: comparison_query.attribute_comparison_query
+    right: set_operation_query.set_intersection_query
+    decision_rule: >
+      如果比较属性值、指标值或群体统计，归 comparison_query；
+      如果比较共同成员、差异成员或集合合并，归 set_operation_query。
+    examples:
+      - question: 网元 A 和网元 B 的厂商是否一致
+        correct: comparison_query.attribute_comparison_query
+      - question: 查询服务 A 和服务 B 共同使用的隧道
+        correct: set_operation_query.set_intersection_query
+
+  - boundary_id: period_comparison_vs_trend
+    left: comparison_query.period_comparison_query
+    right: trend_query.period_over_period_query
+    decision_rule: >
+      如果只比较两个明确时间段的数值，归 period_comparison_query；
+      如果要求同比、环比、变化率或周期变化，归 period_over_period_query。
+    examples:
+      - question: 比较本月和上月的故障链路数量
+        correct: comparison_query.period_comparison_query
+      - question: 查询本月链路故障数环比变化
+        correct: trend_query.period_over_period_query
+
+few_shot_reasoning_examples:
+  - id: llm_entity_list_001
+    question: 网络中有哪些设备
+    primary_intent: record_retrieval_query
+    secondary_intent: entity_list_query
+    reason: 用户要求返回设备实体列表，最终答案是明细对象集合。
+
+  - id: llm_entity_detail_001
+    question: 查询某服务的详细配置
+    primary_intent: record_retrieval_query
+    secondary_intent: entity_detail_query
+    reason: 用户要求服务实体详情，不是指定字段投影或统计。
+
+  - id: llm_attribute_projection_001
+    question: Gold 服务的 ID 和 QoS
+    primary_intent: record_retrieval_query
+    secondary_intent: attribute_projection_query
+    reason: Gold 是过滤条件，ID 和 QoS 是服务自身属性。
+
+  - id: llm_related_record_001
+    question: 查询业务使用隧道对应源网元的厂商
+    primary_intent: record_retrieval_query
+    secondary_intent: related_record_query
+    reason: 问题沿业务到隧道再到源网元取厂商字段，最终返回关联明细。
+
+  - id: llm_relationship_detail_001
+    question: 查询设备与端口之间的连接关系详情
+    primary_intent: relationship_path_query
+    secondary_intent: relationship_detail_query
+    reason: 用户要求返回关系本身的信息，图关系是答案的一部分。
+
+  - id: llm_path_trace_001
+    question: 查询服务到端口的完整路径
+    primary_intent: relationship_path_query
+    secondary_intent: path_trace_query
+    reason: 用户要求完整路径，最终答案是路径结构或路径明细。
+
+  - id: llm_reachable_entity_001
+    question: 查询网元 A 可达的所有网元
+    primary_intent: relationship_path_query
+    secondary_intent: reachable_entity_query
+    reason: 用户要从网元 A 出发能到达的实体集合。
+
+  - id: llm_path_enumeration_001
+    question: 查询设备 A 到设备 B 之间的所有路径
+    primary_intent: relationship_path_query
+    secondary_intent: path_enumeration_query
+    reason: 用户明确要求所有路径或路径集合。
+
+  - id: llm_topology_subgraph_001
+    question: 查询设备 A 周边两跳拓扑
+    primary_intent: relationship_path_query
+    secondary_intent: topology_subgraph_query
+    reason: 用户要求局部拓扑子图，通常包含节点和关系。
+
+  - id: llm_count_metric_001
+    question: 网络元素总共有多少个
+    primary_intent: metric_query
+    secondary_intent: count_metric_query
+    reason: 用户只要求一个数量指标。
+
+  - id: llm_numeric_metric_001
+    question: 查询服务平均带宽
+    primary_intent: metric_query
+    secondary_intent: numeric_metric_query
+    reason: 用户要求平均值这一数值聚合指标。
+
+  - id: llm_multi_metric_001
+    question: 统计端口总数和 up 端口数量
+    primary_intent: metric_query
+    secondary_intent: multi_metric_query
+    reason: 用户要求多个并列指标，但没有按维度分组。
+
+  - id: llm_single_dimension_breakdown_001
+    question: 按厂商统计设备数量
+    primary_intent: breakdown_query
+    secondary_intent: single_dimension_breakdown_query
+    reason: 用户按一个维度分组，并返回一个数量指标。
+
+  - id: llm_multi_dimension_breakdown_001
+    question: 按厂商和设备类型统计设备数量
+    primary_intent: breakdown_query
+    secondary_intent: multi_dimension_breakdown_query
+    reason: 用户按多个维度组合分组，并返回一个指标。
+
+  - id: llm_multi_metric_breakdown_001
+    question: 按服务等级统计服务数量和平均带宽
+    primary_intent: breakdown_query
+    secondary_intent: multi_metric_breakdown_query
+    reason: 用户按服务等级分组，并要求每组返回多个指标。
+
+  - id: llm_attribute_ranking_001
+    question: 查询延迟最高的前 5 个隧道
+    primary_intent: ranking_query
+    secondary_intent: attribute_ranking_query
+    reason: 用户按隧道自身延迟属性排序取前 N。
+
+  - id: llm_metric_ranking_001
+    question: 查询隧道数量最多的前 5 个服务
+    primary_intent: ranking_query
+    secondary_intent: metric_ranking_query
+    reason: 用户先计算每个服务的隧道数量，再按该指标排序。
+
+  - id: llm_derived_metric_ranking_001
+    question: 查询端口利用率最高的前 10 个端口
+    primary_intent: ranking_query
+    secondary_intent: derived_metric_ranking_query
+    reason: 用户按利用率这一派生指标排序取前 N。
+
+  - id: llm_attribute_comparison_001
+    question: 网元 A 和网元 B 的厂商是否一致
+    primary_intent: comparison_query
+    secondary_intent: attribute_comparison_query
+    reason: 用户比较两个对象的属性一致性。
+
+  - id: llm_metric_comparison_001
+    question: 比较服务 A 和服务 B 使用的隧道数量
+    primary_intent: comparison_query
+    secondary_intent: metric_comparison_query
+    reason: 用户比较两个对象对应的数量指标。
+
+  - id: llm_segment_comparison_001
+    question: 比较 Gold 和 Silver 服务的平均带宽
+    primary_intent: comparison_query
+    secondary_intent: segment_comparison_query
+    reason: 用户比较两个业务分组的平均指标。
+
+  - id: llm_period_comparison_001
+    question: 比较本月和上月的故障链路数量
+    primary_intent: comparison_query
+    secondary_intent: period_comparison_query
+    reason: 用户比较两个明确时间段的指标值。
+
+  - id: llm_time_series_metric_001
+    question: 按天统计链路故障数量
+    primary_intent: trend_query
+    secondary_intent: time_series_metric_query
+    reason: 用户要求按时间粒度展开指标序列。
+
+  - id: llm_state_trend_001
+    question: 查询端口状态最近 7 天变化
+    primary_intent: trend_query
+    secondary_intent: state_trend_query
+    reason: 用户要求状态随时间变化的趋势。
+
+  - id: llm_period_over_period_001
+    question: 查询本月链路故障数环比变化
+    primary_intent: trend_query
+    secondary_intent: period_over_period_query
+    reason: 用户要求环比变化，属于周期变化或变化率。
+
+  - id: llm_scalar_ratio_001
+    question: 查询 up 端口占全部端口的比例
+    primary_intent: composition_query
+    secondary_intent: scalar_ratio_query
+    reason: 用户要求一个整体比例值。
+
+  - id: llm_share_breakdown_001
+    question: 查询各厂商设备占比
+    primary_intent: composition_query
+    secondary_intent: share_breakdown_query
+    reason: 用户按厂商维度返回构成占比表。
+
+  - id: llm_coverage_utilization_001
+    question: 查询端口利用率
+    primary_intent: composition_query
+    secondary_intent: coverage_utilization_query
+    reason: 用户要求利用率这一派生指标。
+
+  - id: llm_set_difference_001
+    question: 查询服务 A 使用但服务 B 未使用的隧道
+    primary_intent: set_operation_query
+    secondary_intent: set_difference_query
+    reason: 用户要求两个服务关联隧道集合的差集。
+
+  - id: llm_set_intersection_001
+    question: 查询服务 A 和服务 B 共同使用的隧道
+    primary_intent: set_operation_query
+    secondary_intent: set_intersection_query
+    reason: 用户要求两个服务关联隧道集合的交集。
+
+  - id: llm_set_union_001
+    question: 查询服务 A 或服务 B 使用的全部隧道
+    primary_intent: set_operation_query
+    secondary_intent: set_union_query
+    reason: 用户要求合并两个服务关联的隧道集合。
+
+  - id: llm_set_membership_filter_001
+    question: 查询经过故障端口所在设备集合的业务
+    primary_intent: set_operation_query
+    secondary_intent: set_membership_filter_query
+    reason: 用户先形成故障端口所在设备集合，再用集合成员关系过滤业务。
+
+  - id: llm_entity_existence_001
+    question: 是否存在 ID 为 svc-mpls-vpn-1001 的服务
+    primary_intent: existence_query
+    secondary_intent: entity_existence_query
+    reason: 用户判断实体是否存在，期望布尔答案。
+
+  - id: llm_relationship_existence_001
+    question: 服务 A 是否使用了隧道 B
+    primary_intent: existence_query
+    secondary_intent: relationship_existence_query
+    reason: 用户判断两个对象之间是否存在使用关系。
+
+  - id: llm_path_existence_001
+    question: 设备 A 和设备 B 之间是否存在连接路径
+    primary_intent: existence_query
+    secondary_intent: path_existence_query
+    reason: 用户判断两个对象之间是否存在路径或可达关系。
+
+  - id: llm_condition_satisfaction_001
+    question: 是否有状态为 down 的端口
+    primary_intent: existence_query
+    secondary_intent: condition_satisfaction_query
+    reason: 用户判断是否存在满足状态条件的记录。

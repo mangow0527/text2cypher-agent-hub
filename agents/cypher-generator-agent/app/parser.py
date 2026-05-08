@@ -25,7 +25,7 @@ def parse_model_output(raw_output: str) -> ParsedModelOutput:
     if _starts_with_supported_clause(content) and _contains_explanation_after_cypher(content):
         return ParsedModelOutput(parsed_cypher="", parse_summary="contains_explanation", reason="contains_explanation")
     if _starts_with_supported_clause(content):
-        return ParsedModelOutput(parsed_cypher=content, parse_summary="direct_cypher")
+        return ParsedModelOutput(parsed_cypher=content, parse_summary="cypher_only")
     if _contains_cypher_line(content):
         return ParsedModelOutput(parsed_cypher="", parse_summary="contains_explanation", reason="contains_explanation")
     return ParsedModelOutput(parsed_cypher="", parse_summary="no_cypher_found", reason="no_cypher_found")

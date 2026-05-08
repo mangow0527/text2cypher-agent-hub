@@ -6,7 +6,8 @@ from fastapi import FastAPI
 from fastapi.responses import Response
 import uvicorn
 
-from .models import QAQuestionRequest
+from .intent_recognition import get_hybrid_intent_recognizer
+from .models import IntentRecognitionRequest, QAQuestionRequest, SemanticParseRequest
 from .config import get_settings
 from .service import get_generator_status, get_workflow_service
 
@@ -34,6 +35,22 @@ async def generator_status() -> Dict[str, object]:
 async def ingest_question(request: QAQuestionRequest) -> Response:
     await get_workflow_service().ingest_question(request)
     return Response(status_code=204)
+
+
+@app.post("/api/v1/intents/recognize")
+async def recognize_intent(request: IntentRecognitionRequest) -> Dict[str, object]:
+    result = get_hybrid_intent_recognizer().recognize(request.question)
+    return result.to_dict()
+
+
+@app.post("/api/v1/semantic/parse")
+async def parse_semantics(request: SemanticParseRequest) -> Dict[str, object]:
+    result = await get_workflow_service().semantic_pipeline.parse_with_fallback(
+        id=request.id,
+        question=request.question,
+        generation_run_id=request.generation_run_id,
+    )
+    return result.to_dict()
 
 
 if __name__ == "__main__":

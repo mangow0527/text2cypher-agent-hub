@@ -1,0 +1,380 @@
+version: 3
+domain: nl2cypher_chatbi
+name_zh: NL2Cypher ChatBI 意图分类
+description: >
+  NL2Cypher ChatBI 场景下的意图分类体系。intent 描述用户最终想得到的答案形态；
+  业务对象、属性、指标、关系和值由 slot、schema linking 和 metric linking 承接；
+  路径、跳数、过滤、聚合函数、排序、limit、时间粒度等由结构特征承接。
+
+output_schema:
+  required_fields:
+    - primary_intent
+    - secondary_intent
+    - confidence
+    - source
+    - decision
+  source_values:
+    - rule
+    - embedding
+    - llm
+  decision_values:
+    - accept
+    - fallback_embedding
+    - fallback_llm
+    - clarify
+
+auxiliary_features:
+  answer_type:
+    description: 返回结果类型。
+    values: [record, attribute_table, relation, path, subgraph, scalar, metric_table, boolean]
+  requires_path:
+    description: 是否需要图关系或路径匹配。
+    values: [true, false]
+  hop_count:
+    description: 查询路径跳数。
+    values: [0, 1, 2, 3, variable]
+  relation_chain_type:
+    description: 关系链类型。
+    values: [none, direct, fixed_chain, variable_chain]
+  filter_level:
+    description: 过滤条件所在位置。
+    values: [none, record_filter, relation_filter, path_filter, post_aggregate_filter, set_filter]
+  aggregation_functions:
+    description: 聚合函数。
+    values: [count, count_distinct, sum, avg, max, min]
+  group_by:
+    description: 是否分组。
+    values: [true, false]
+  order_limit:
+    description: 排序截断类型。
+    values: [none, order_only, limit_only, topn, bottomn]
+  time_grain:
+    description: 时间粒度。
+    values: [none, hour, day, week, month, year]
+  comparison_target_type:
+    description: 对比对象类型。
+    values: [none, entity, segment, metric, period]
+  derived_metric_type:
+    description: 派生指标类型。
+    values: [none, ratio, share, coverage, utilization, growth_rate]
+  set_operation_type:
+    description: 集合操作类型。
+    values: [none, difference, intersection, union, membership_filter]
+  path_return_type:
+    description: 路径返回类型。
+    values: [none, trace, reachable_entities, path_list, subgraph]
+
+classification_priority:
+  - existence_query
+  - set_operation_query
+  - trend_query
+  - ranking_query
+  - comparison_query
+  - composition_query
+  - breakdown_query
+  - metric_query
+  - relationship_path_query
+  - record_retrieval_query
+
+intents:
+  - primary_intent: record_retrieval_query
+    name_zh: 明细/清单查询
+    description: 返回实体、资源、记录或属性明细，不以统计值、路径结构或布尔判断为最终答案。
+    secondary_intents:
+      - secondary_intent: entity_list_query
+        name_zh: 实体列表查询
+        description: 返回实体、资源或记录列表。
+        examples:
+          - 查询所有服务
+          - 查看前 5 条链路记录
+          - 网络中有哪些设备
+      - secondary_intent: entity_detail_query
+        name_zh: 实体详情查询
+        description: 返回实体完整信息或较完整字段集合。
+        examples:
+          - 查看前 5 条隧道的详细信息
+          - 查询 ID 为 sample 的网元信息
+          - 查询某服务的详细配置
+      - secondary_intent: attribute_projection_query
+        name_zh: 属性投影查询
+        description: 返回实体的指定属性。
+        examples:
+          - 查询所有服务的 ID 和名称
+          - 查询前 5 条链路的编号、名称和状态
+          - 查询隧道的时延值
+      - secondary_intent: related_record_query
+        name_zh: 关联明细查询
+        description: 沿关系或固定路径返回相关实体或属性明细，但不把图结构本身作为答案。
+        examples:
+          - 查询服务所使用的隧道
+          - 查询链路及其目的端口信息
+          - 查询业务使用隧道对应源网元的厂商
+
+  - primary_intent: relationship_path_query
+    name_zh: 关系/路径查询
+    description: 返回关系、路径、可达结果或拓扑结构，图结构本身是答案的一部分。
+    secondary_intents:
+      - secondary_intent: relationship_detail_query
+        name_zh: 关系详情查询
+        description: 返回边、关系对象或关系属性。
+        examples:
+          - 查询服务和隧道之间的使用关系
+          - 查询设备与端口之间的连接关系详情
+          - 查询链路关系的属性信息
+      - secondary_intent: path_trace_query
+        name_zh: 路径明细查询
+        description: 返回确定路径、路径顺序、节点链路明细或路径对象。
+        examples:
+          - 查询服务到端口的完整路径
+          - 查询隧道经过的网络设备顺序
+          - 查询业务经过隧道和网元到达端口的路径详情
+      - secondary_intent: reachable_entity_query
+        name_zh: 可达实体查询
+        description: 返回从某实体出发可到达的实体集合。
+        examples:
+          - 查询设备 A 最多 3 跳可以到达哪些设备
+          - 查询网元 A 可达的所有网元
+          - 查询某业务可以到达哪些端口
+      - secondary_intent: path_enumeration_query
+        name_zh: 路径枚举查询
+        description: 返回两个实体之间的所有路径或多条候选路径。
+        examples:
+          - 查询设备 A 到设备 B 之间的所有路径
+          - 查询网元 A 到网元 B 最多 3 跳的路径
+          - 查询服务 S 到端口 P 的所有可达路径
+      - secondary_intent: topology_subgraph_query
+        name_zh: 拓扑子图查询
+        description: 返回局部拓扑子图，通常包含节点和关系。
+        examples:
+          - 查询设备 A 周边两跳拓扑
+          - 查询网元 A 附近的链路拓扑
+          - 查询某业务关联的完整资源拓扑
+
+  - primary_intent: metric_query
+    name_zh: 指标查询
+    description: 返回一个或少量聚合指标，不按维度分组。
+    secondary_intents:
+      - secondary_intent: count_metric_query
+        name_zh: 数量指标查询
+        description: 返回数量、总数或去重数量。
+        examples:
+          - 网络元素总共有多少个
+          - 链路一共有多少条
+          - 统计不同厂商数量
+      - secondary_intent: numeric_metric_query
+        name_zh: 数值指标查询
+        description: 返回求和、平均、最大、最小等数值指标。
+        examples:
+          - 查询服务平均带宽
+          - 查询隧道最大时延
+          - 统计所有服务总带宽
+      - secondary_intent: multi_metric_query
+        name_zh: 多指标查询
+        description: 同一问题返回多个并列指标，可包含带条件的子集指标。
+        examples:
+          - 查询服务数量和平均带宽
+          - 返回链路数量、最大带宽和平均带宽
+          - 统计端口总数和 up 端口数量
+
+  - primary_intent: breakdown_query
+    name_zh: 分布/分组查询
+    description: 按一个或多个维度分组，返回维度到指标的表格。
+    secondary_intents:
+      - secondary_intent: single_dimension_breakdown_query
+        name_zh: 单维单指标分组查询
+        description: 按一个维度分组，返回一个指标。
+        examples:
+          - 按厂商统计设备数量
+          - 统计各端口状态的端口数量
+          - 按隧道类型统计隧道数量
+      - secondary_intent: multi_dimension_breakdown_query
+        name_zh: 多维单指标分组查询
+        description: 按多个维度组合分组，返回一个指标。
+        examples:
+          - 按厂商和设备类型统计设备数量
+          - 按业务类型和服务等级统计服务数量
+          - 按省份和厂商统计网元数量
+      - secondary_intent: multi_metric_breakdown_query
+        name_zh: 多指标分组查询
+        description: 按维度分组后返回多个指标，可包含条件子集指标。
+        examples:
+          - 按服务等级统计服务数量和平均带宽
+          - 按服务等级统计服务数量及其中使用 MPLS-TE 隧道的数量
+          - 按厂商统计设备总数和 down 设备数量
+
+  - primary_intent: ranking_query
+    name_zh: 排名查询
+    description: 按属性、指标或派生指标排序，返回最高、最低、最多、最少、前 N 或后 N。
+    secondary_intents:
+      - secondary_intent: attribute_ranking_query
+        name_zh: 属性排名查询
+        description: 按实体或关系自身属性排序。
+        examples:
+          - 查询延迟最高的前 5 个隧道
+          - 查询长度最长的前 5 条光纤
+          - 按 ID 降序找出最大的 1 个网元
+      - secondary_intent: metric_ranking_query
+        name_zh: 指标排名查询
+        description: 先计算数量、求和、平均、最大、最小等指标，再按指标排序。
+        examples:
+          - 查询隧道数量最多的前 5 个服务
+          - 统计设备数量最多的前 3 个厂商
+          - 查询关联端口最多的前 10 台设备
+      - secondary_intent: derived_metric_ranking_query
+        name_zh: 派生指标排名查询
+        description: 按占比、利用率、覆盖率、增长率等派生指标排序。
+        examples:
+          - 查询端口利用率最高的前 10 个端口
+          - 查询故障率最高的前 5 条链路
+          - 查询增长率最高的业务类型
+
+  - primary_intent: comparison_query
+    name_zh: 对比查询
+    description: 明确比较两个或多个对象、集合、指标、分组或时间段。
+    secondary_intents:
+      - secondary_intent: attribute_comparison_query
+        name_zh: 属性对比查询
+        description: 比较对象属性值或属性一致性。
+        examples:
+          - 比较服务 A 和服务 B 的带宽
+          - 网元 A 和网元 B 的厂商是否一致
+          - 查询隧道 T1 和 T2 哪个时延更高
+      - secondary_intent: metric_comparison_query
+        name_zh: 指标对比查询
+        description: 比较两个或多个对象、集合或分组的指标。
+        examples:
+          - 比较 VendorA 和 VendorB 的设备数量
+          - 比较服务 A 和服务 B 使用的隧道数量
+          - 查询 Gold 和 Silver 服务哪个数量更多
+      - secondary_intent: segment_comparison_query
+        name_zh: 分组/群体对比查询
+        description: 比较两个业务分组、资源分组或筛选群体。
+        examples:
+          - 比较 Gold 和 Silver 服务的平均带宽
+          - 比较不同厂商设备的软件版本分布
+          - 对比核心网和接入网设备的端口状态分布
+      - secondary_intent: period_comparison_query
+        name_zh: 时间段对比查询
+        description: 比较两个明确时间段的指标或状态。
+        examples:
+          - 比较本月和上月的故障链路数量
+          - 比较今天和昨天的端口 up 数量
+          - 对比本周和上周的新增隧道数
+
+  - primary_intent: trend_query
+    name_zh: 趋势查询
+    description: 按时间维度返回变化趋势、时间序列或周期变化。
+    secondary_intents:
+      - secondary_intent: time_series_metric_query
+        name_zh: 时间序列指标查询
+        description: 按时间粒度返回指标序列。
+        examples:
+          - 按天统计链路故障数量
+          - 按月统计新增隧道数量
+          - 最近 7 天每天的端口 down 数量
+      - secondary_intent: state_trend_query
+        name_zh: 状态变化趋势查询
+        description: 返回状态随时间变化。
+        examples:
+          - 查询端口状态最近 7 天变化
+          - 查看设备在线状态变化趋势
+          - 查询链路状态历史变化
+      - secondary_intent: period_over_period_query
+        name_zh: 同比/环比查询
+        description: 返回周期对比或变化率。
+        examples:
+          - 查询本月链路故障数环比变化
+          - 统计服务数量同比增长率
+          - 本周新增隧道数较上周变化多少
+
+  - primary_intent: composition_query
+    name_zh: 占比/构成查询
+    description: 返回比例、占比、构成、覆盖率、利用率等派生指标。
+    secondary_intents:
+      - secondary_intent: scalar_ratio_query
+        name_zh: 单值比例查询
+        description: 返回两个量之间的单个比例值。
+        examples:
+          - 查询 up 端口占全部端口的比例
+          - 查询 MPLS-TE 隧道占全部隧道的比例
+          - 故障链路占所有链路的比例是多少
+      - secondary_intent: share_breakdown_query
+        name_zh: 构成占比查询
+        description: 按维度返回各组占比。
+        examples:
+          - 查询各厂商设备占比
+          - 查询各服务等级的业务占比
+          - 查看不同端口状态的构成
+      - secondary_intent: coverage_utilization_query
+        name_zh: 覆盖率/利用率查询
+        description: 返回覆盖率、利用率、使用率等派生指标。
+        examples:
+          - 查询端口利用率
+          - 查询隧道覆盖率
+          - 查询业务资源使用率
+
+  - primary_intent: set_operation_query
+    name_zh: 集合操作查询
+    description: 对两个或多个集合做差集、交集、并集，或用集合成员关系过滤目标。
+    secondary_intents:
+      - secondary_intent: set_difference_query
+        name_zh: 集合差集查询
+        description: 查询属于集合 A 但不属于集合 B 的对象。
+        examples:
+          - 查询服务 A 使用但服务 B 未使用的隧道
+          - 查询网元 A 有但网元 B 没有的端口
+          - 查询业务 A 经过但业务 B 未经过的网元
+      - secondary_intent: set_intersection_query
+        name_zh: 集合交集查询
+        description: 查询同时属于多个集合的对象。
+        examples:
+          - 查询服务 A 和服务 B 共同使用的隧道
+          - 查询两个业务都经过的网元
+          - 查询网元 A 和网元 B 共同连接的设备
+      - secondary_intent: set_union_query
+        name_zh: 集合并集查询
+        description: 合并多个集合并返回去重结果。
+        examples:
+          - 查询服务 A 或服务 B 使用的全部隧道
+          - 查询业务 A 和业务 B 涉及的全部网元
+          - 查询两个厂商设备关联的所有端口
+      - secondary_intent: set_membership_filter_query
+        name_zh: 集合成员过滤查询
+        description: 先得到一个集合，再用集合成员关系过滤目标。
+        examples:
+          - 查询经过故障端口所在设备集合的业务
+          - 查询关联到 VendorA 网元集合的服务
+          - 查询使用高带宽隧道集合中任意隧道的服务
+
+  - primary_intent: existence_query
+    name_zh: 存在性查询
+    description: 判断实体、关系、路径或条件是否存在，最终回答通常是布尔语义。
+    secondary_intents:
+      - secondary_intent: entity_existence_query
+        name_zh: 实体存在性查询
+        description: 判断实体或资源是否存在。
+        examples:
+          - 是否存在 ID 为 svc-mpls-vpn-1001 的服务
+          - 系统里有没有名称为 Tunnel_001 的隧道
+          - 是否存在 IP 为 10.0.0.1 的网元设备
+      - secondary_intent: relationship_existence_query
+        name_zh: 关系存在性查询
+        description: 判断两个对象之间是否存在关系。
+        examples:
+          - 服务 A 是否使用了隧道 B
+          - 设备 A 是否连接了端口 P
+          - 隧道 T 是否关联了源端网元 N
+      - secondary_intent: path_existence_query
+        name_zh: 路径存在性查询
+        description: 判断两个对象之间是否存在路径或可达关系。
+        examples:
+          - 设备 A 和设备 B 之间是否存在连接路径
+          - 业务 S 是否能到达端口 P
+          - 服务 A 是否能经过隧道到达网元 B
+      - secondary_intent: condition_satisfaction_query
+        name_zh: 条件满足性查询
+        description: 判断是否存在满足条件的记录或对象。
+        examples:
+          - 是否有状态为 down 的端口
+          - 是否存在带宽大于 1000 的链路
+          - 有没有服务等级为 Gold 的业务
