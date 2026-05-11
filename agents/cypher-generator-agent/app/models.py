@@ -98,6 +98,8 @@ class CgaGenerationNonSuccessReport(BaseModel):
     def validate_non_success_status(self) -> "CgaGenerationNonSuccessReport":
         generation_reasons = set(GenerationFailureReason.__args__)
         service_reasons = set(ServiceFailureReason.__args__)
+        if self.gate_passed:
+            raise ValueError(f"{self.generation_status} reports must not set gate_passed=true")
         if self.generation_status == "generation_failed":
             if self.failure_reason not in generation_reasons:
                 raise ValueError("generation_failed requires GenerationFailure reason")

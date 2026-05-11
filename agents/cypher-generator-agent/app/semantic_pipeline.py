@@ -18,7 +18,8 @@ from .business_slot_schema import (
 from .cypher_renderer import CypherRenderer
 from .intent_recognition import IntentRecognitionResult, get_hybrid_intent_recognizer
 from .knowledge_selection import KnowledgeSelector, SelectedKnowledgeContext
-from .models import PreflightCheck
+from .logical_planner import LogicalQueryPlan, LogicalQueryPlanner, SchemaPathPlan
+from .models import GenerationFailureReason, PreflightCheck
 from .config import get_settings
 from .parser import parse_model_output
 from .prompt_runtime import render_controlled_semantic_prompt, render_intent_recognition_fallback_prompt
@@ -27,6 +28,7 @@ from .semantic_cypher_preflight import run_semantic_cypher_preflight
 from .semantic_layer import get_default_semantic_layer
 from .semantic_query import SemanticQueryBuilder, SemanticQuerySpec
 from .semantic_validation import SemanticDiagnostic, SemanticValidationResult, SemanticValidator
+from .semantic_view_matching import SemanticMatchResult, SemanticViewMatcher, SemanticViewMatchingTrace
 from .slot_matching import SlotMatcher
 
 
@@ -59,28 +61,45 @@ class SemanticParseResult:
     semantic_query: SemanticQuerySpec | None
     generated_cypher: str | None
     preflight: object | None
+    semantic_view_matching: SemanticViewMatchingTrace | None = None
+    logical_plan: LogicalQueryPlan | None = None
+    schema_path_planning: SchemaPathPlan | None = None
     selected_knowledge: SelectedKnowledgeContext | None = None
+    clarification: dict[str, object] | None = None
     llm_prompts: dict[str, str | None] = field(default_factory=_empty_llm_prompts)
     llm_responses: dict[str, str | None] = field(default_factory=_empty_llm_responses)
 
     def to_dict(self) -> dict[str, object]:
+        generation = _generation_trace(
+            generation_mode=self.generation_mode,
+            generated_cypher=self.generated_cypher,
+            llm_prompts=self.llm_prompts,
+            llm_responses=self.llm_responses,
+        )
         return {
+            "schema_version": "cga_trace_v2",
             "id": self.id,
             "question": self.question,
             "generation_run_id": self.generation_run_id,
+            "generation_status": _trace_generation_status(self),
+            "service_context": _service_context_trace(self.semantic_view_matching is not None),
+            "intent_recognition": _intent_trace(self.intent, self.llm_prompts, self.llm_responses),
+            "semantic_view_matching": (
+                self.semantic_view_matching.to_dict() if self.semantic_view_matching is not None else None
+            ),
+            "logical_query_plan": self.logical_plan.to_dict() if self.logical_plan is not None else None,
+            "schema_path_planning": (
+                self.schema_path_planning.to_dict() if self.schema_path_planning is not None else None
+            ),
+            "knowledge_selection": self.selected_knowledge.to_dict() if self.selected_knowledge is not None else None,
+            "generation": generation,
+            "clarification": self.clarification,
             "generation_mode": self.generation_mode,
             "intent": self.intent.to_dict(),
-            "slots": _to_dict(self.slots),
-            "business_slots": self.business_slots.to_dict() if self.business_slots is not None else None,
-            "slot_completeness": self.slot_completeness.to_dict(),
-            "linked_semantics": self.linked_semantics.to_dict() if self.linked_semantics is not None else None,
             "validation": self.validation.to_dict(),
             "semantic_query": self.semantic_query.to_dict() if self.semantic_query is not None else None,
-            "selected_knowledge": self.selected_knowledge.to_dict() if self.selected_knowledge is not None else None,
             "generated_cypher": self.generated_cypher,
             "preflight": _to_dict(self.preflight),
-            "llm_prompts": dict(self.llm_prompts or _empty_llm_prompts()),
-            "llm_responses": dict(self.llm_responses or _empty_llm_responses()),
         }
 
 
@@ -109,6 +128,8 @@ class SemanticPipeline:
         self.renderer = renderer or CypherRenderer()
         self.llm_client = llm_client
         self.knowledge_selector = knowledge_selector
+        self.semantic_view_matcher = SemanticViewMatcher(self.semantic_layer)
+        self.logical_planner = LogicalQueryPlanner(self.semantic_layer)
 
     def parse(
         self,
@@ -200,9 +221,22 @@ class SemanticPipeline:
                     ],
                 ),
                 semantic_query=None,
+                semantic_view_matching=None,
+                logical_plan=None,
+                schema_path_planning=None,
                 generated_cypher=None,
                 preflight=None,
             )
+
+        view_result = self._try_semantic_view_pipeline(
+            id=id,
+            question=question,
+            generation_run_id=generation_run_id,
+            intent=intent,
+            empty_slots=empty_slots,
+        )
+        if view_result is not None:
+            return view_result
 
         slots = self.slot_matcher.match(question)
         try:
@@ -228,6 +262,9 @@ class SemanticPipeline:
                     ],
                 ),
                 semantic_query=None,
+                semantic_view_matching=None,
+                logical_plan=None,
+                schema_path_planning=None,
                 generated_cypher=None,
                 preflight=None,
             )
@@ -261,6 +298,9 @@ class SemanticPipeline:
                     ],
                 ),
                 semantic_query=None,
+                semantic_view_matching=None,
+                logical_plan=None,
+                schema_path_planning=None,
                 generated_cypher=None,
                 preflight=None,
             )
@@ -279,6 +319,9 @@ class SemanticPipeline:
                 linked_semantics=linked,
                 validation=validation,
                 semantic_query=None,
+                semantic_view_matching=None,
+                logical_plan=None,
+                schema_path_planning=None,
                 generated_cypher=None,
                 preflight=None,
             )
@@ -299,6 +342,80 @@ class SemanticPipeline:
             linked_semantics=linked,
             validation=validation,
             semantic_query=semantic_query,
+            semantic_view_matching=None,
+            logical_plan=None,
+            schema_path_planning=None,
+        )
+
+    def _try_semantic_view_pipeline(
+        self,
+        *,
+        id: str | None,
+        question: str,
+        generation_run_id: str | None,
+        intent: IntentRecognitionResult,
+        empty_slots: object,
+    ) -> "SemanticParseResult | _SemanticPipelineContext | None":
+        if intent.primary_intent not in {
+            "record_retrieval_query",
+            "metric_query",
+            "breakdown_query",
+            "ranking_query",
+            "existence_query",
+        }:
+            return None
+        matching = self.semantic_view_matcher.match(question)
+        if matching.result.needs_clarification:
+            clarification = _clarification_payload(matching.result)
+            return SemanticParseResult(
+                id=id,
+                question=question,
+                generation_run_id=generation_run_id,
+                generation_mode=None,
+                intent=intent,
+                slots=empty_slots,
+                business_slots=None,
+                slot_completeness=BusinessSlotCompletenessResult.not_applicable(),
+                linked_semantics=None,
+                validation=SemanticValidationResult(
+                    accepted=False,
+                    diagnostics=[
+                        SemanticDiagnostic(
+                            code="clarification_required",
+                            message="Semantic view matching requires a user clarification.",
+                        )
+                    ],
+                ),
+                semantic_query=None,
+                semantic_view_matching=matching,
+                logical_plan=None,
+                schema_path_planning=None,
+                generated_cypher=None,
+                preflight=None,
+                clarification=clarification,
+            )
+        if not matching.result.accepted:
+            return None
+        planning = self.logical_planner.plan(
+            question=question,
+            intent_result=intent,
+            semantic_match=matching.result,
+            generation_run_id=generation_run_id,
+        )
+        return _SemanticPipelineContext(
+            id=id,
+            question=question,
+            generation_run_id=generation_run_id,
+            intent=intent,
+            slots=empty_slots,
+            business_slots=None,
+            slot_completeness=BusinessSlotCompletenessResult.not_applicable(),
+            linked_semantics=None,
+            validation=SemanticValidationResult(accepted=True),
+            semantic_query=planning.semantic_query,
+            semantic_view_matching=matching,
+            logical_plan=planning.logical_plan,
+            schema_path_planning=planning.schema_path_plan,
         )
 
     async def _select_knowledge(self, context: "_SemanticPipelineContext") -> SelectedKnowledgeContext | None:
@@ -329,13 +446,14 @@ class SemanticPipeline:
         llm_client = self.llm_client or _get_default_llm_client()
         prompt = render_controlled_semantic_prompt(
             question=context.question,
-            semantic_query_json=context.semantic_query.to_json(),
+            semantic_query_json=_render_fallback_plan_context(context),
             renderer_error=renderer_error,
             selected_knowledge_context=(
                 context.selected_knowledge.prompt_context
                 if context.selected_knowledge is not None and context.selected_knowledge.prompt_context.strip()
                 else None
             ),
+            extra_constraint_reason=_fallback_extra_constraint_reason(renderer_error),
         )
         llm_prompts = {
             **(context.llm_prompts or _empty_llm_prompts()),
@@ -449,6 +567,9 @@ class _SemanticPipelineContext:
     linked_semantics: LinkedSemantics | None
     validation: SemanticValidationResult
     semantic_query: SemanticQuerySpec
+    semantic_view_matching: SemanticViewMatchingTrace | None = None
+    logical_plan: LogicalQueryPlan | None = None
+    schema_path_planning: SchemaPathPlan | None = None
     selected_knowledge: SelectedKnowledgeContext | None = None
     llm_prompts: dict[str, str | None] = field(default_factory=_empty_llm_prompts)
     llm_responses: dict[str, str | None] = field(default_factory=_empty_llm_responses)
@@ -492,6 +613,9 @@ class _SemanticPipelineContext:
             linked_semantics=self.linked_semantics,
             validation=self.validation,
             semantic_query=self.semantic_query,
+            semantic_view_matching=self.semantic_view_matching,
+            logical_plan=self.logical_plan,
+            schema_path_planning=self.schema_path_planning,
             selected_knowledge=self.selected_knowledge,
             generated_cypher=generated_cypher,
             preflight=preflight,
@@ -594,6 +718,152 @@ def _intent_llm_rejected_result(
         llm_prompts=llm_prompts,
         llm_responses=llm_responses,
     )
+
+
+def _intent_trace(
+    intent: IntentRecognitionResult,
+    llm_prompts: dict[str, str | None],
+    llm_responses: dict[str, str | None],
+) -> dict[str, object]:
+    fallback_prompt = llm_prompts.get("intent_recognition_fallback")
+    fallback_response = llm_responses.get("intent_recognition_fallback")
+    return {
+        "result": intent.to_dict(),
+        "diagnostics": {
+            "llm_primary_attempts": [],
+            "llm_secondary_attempts": [
+                {
+                    "stage": "legacy_single_step_fallback",
+                    "prompt": fallback_prompt,
+                    "raw_output": fallback_response,
+                }
+            ]
+            if fallback_prompt or fallback_response
+            else [],
+        },
+    }
+
+
+def _trace_generation_status(result: SemanticParseResult) -> str:
+    if result.clarification:
+        return "clarification_required"
+    if result.generated_cypher:
+        return "generated"
+    return "generation_failed"
+
+
+def _service_context_trace(uses_semantic_view: bool) -> dict[str, object]:
+    settings = get_settings()
+    rag_endpoint = f"{settings.rag_service_url.rstrip('/')}/api/v1/retrieve"
+    return {
+        "active_mode": "semantic_view_pipeline" if uses_semantic_view else "semantic_pipeline_compat",
+        "model": settings.llm_model,
+        "knowledge_context_source": settings.knowledge_context_source,
+        "semantic_view_version": "semantic_layer.yaml",
+        "rag_source": rag_endpoint if settings.knowledge_context_source == "rag" else settings.knowledge_docs_dir,
+    }
+
+
+def _generation_trace(
+    *,
+    generation_mode: str | None,
+    generated_cypher: str | None,
+    llm_prompts: dict[str, str | None],
+    llm_responses: dict[str, str | None],
+) -> dict[str, object]:
+    fallback_prompt = llm_prompts.get("cypher_generation_fallback")
+    fallback_response = llm_responses.get("cypher_generation_fallback")
+    fallback_triggered = bool(fallback_prompt or fallback_response)
+    return {
+        "renderer": {
+            "family": generation_mode,
+            "accepted": bool(generated_cypher) and not fallback_triggered,
+            "cypher": generated_cypher if generation_mode == "deterministic_renderer" else None,
+            "generated_cypher": generated_cypher if generation_mode == "deterministic_renderer" else None,
+            "failure_reason": None if generated_cypher else "no_cypher_found",
+        },
+        "cypher_fallback_llm": (
+            {
+                "stage": "generation.cypher_fallback",
+                "prompt": fallback_prompt,
+                "raw_output": fallback_response,
+                "accepted": bool(generated_cypher),
+            }
+            if fallback_triggered
+            else None
+        ),
+        "parser": {
+            "parsed_cypher": generated_cypher,
+            "parse_summary": "cypher_only" if generated_cypher else None,
+        },
+    }
+
+
+def _render_fallback_plan_context(context: "_SemanticPipelineContext") -> str:
+    if context.logical_plan is None:
+        return context.semantic_query.to_json()
+    lines: list[str] = []
+    logical_plan = context.logical_plan
+    lines.append(f"答案形态：{logical_plan.answer_shape}")
+    entity_lines = [
+        f"- {entity.name} 使用变量 {entity.alias}，对应点标签 {entity.label}。"
+        for entity in context.semantic_query.entities
+    ]
+    if entity_lines:
+        lines.append("\n实体：")
+        lines.extend(entity_lines)
+    path_items = (
+        context.schema_path_planning.selected_paths
+        if context.schema_path_planning is not None
+        else ()
+    )
+    if path_items:
+        lines.append("\n已选路径：")
+        for path in path_items:
+            lines.append(f"- {path.get('cypher_pattern')}")
+    if context.semantic_query.filters:
+        lines.append("\n过滤：")
+        for item in context.semantic_query.filters:
+            lines.append(f"- {item.left} {item.operator} {json.dumps(item.value, ensure_ascii=False)}。")
+    return_items = [*context.semantic_query.projections, *context.semantic_query.dimensions]
+    if context.semantic_query.metrics:
+        metric_lines = [f"- {item.expression} AS {item.output_alias}。" for item in context.semantic_query.metrics]
+    else:
+        metric_lines = []
+    if return_items or metric_lines:
+        lines.append("\n返回字段：")
+        lines.extend(f"- {item.expression} AS {item.output_alias}。" for item in return_items)
+        lines.extend(metric_lines)
+    if context.semantic_query.order_by:
+        lines.append("\n排序：")
+        lines.extend(f"- {item.expression} {item.direction}。" for item in context.semantic_query.order_by)
+    lines.append(f"\n数量限制：{context.semantic_query.limit if context.semantic_query.limit is not None else '无'}")
+    return "\n".join(lines)
+
+
+def _fallback_extra_constraint_reason(renderer_error: str) -> GenerationFailureReason | None:
+    prefix = "semantic preflight failed:"
+    if prefix not in renderer_error:
+        return None
+    reason = renderer_error.split(prefix, 1)[1].strip()
+    if reason == "semantic_query_mismatch":
+        return "logical_plan_mismatch"
+    if reason in set(GenerationFailureReason.__args__):
+        return reason  # type: ignore[return-value]
+    return "logical_plan_mismatch"
+
+
+def _clarification_payload(match_result: SemanticMatchResult) -> dict[str, object]:
+    return {
+        "source_stage": "semantic_view_matching",
+        "reason_code": match_result.clarification_type or "semantic_ambiguity",
+        "question_zh": match_result.clarification_question or "请补充问题中的业务语义。",
+        "expected_answer_type": "single_choice" if match_result.clarification_options else "free_text",
+        "options": [
+            {"id": str(option.get("value", "")), "label": str(option.get("label", ""))}
+            for option in match_result.clarification_options
+        ],
+    }
 
 
 def _to_dict(value: object | None) -> object | None:

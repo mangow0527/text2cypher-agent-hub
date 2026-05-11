@@ -413,6 +413,8 @@ class RuntimeResultsService:
         )
         prompt_snapshot = source.get("input_prompt_snapshot") or ""
         snapshot = self._decode_generation_snapshot(prompt_snapshot)
+        trace_schema_version = snapshot.get("schema_version") if self._is_cga_trace_v2(snapshot) else None
+        failure_reason = source.get("failure_reason") or (generation_failure or {}).get("failure_reason")
         return {
             "question": source.get("question", ""),
             "difficulty": (golden or {}).get("difficulty"),
@@ -422,13 +424,21 @@ class RuntimeResultsService:
             "prompt_markdown": prompt_snapshot,
             "parsed_cypher": parsed_cypher,
             "gate_passed": gate_passed,
-            "failure_reason": source.get("failure_reason") or (generation_failure or {}).get("failure_reason"),
+            "failure_reason": failure_reason,
             "clarification": source.get("clarification") or (generation_failure or {}).get("clarification"),
             "generation_status": generation_status,
+            "trace_schema_version": trace_schema_version,
+            "trace_layers": self._generation_trace_layers(
+                snapshot=snapshot,
+                source=source,
+                generation_status=str(generation_status or ""),
+                failure_reason=failure_reason,
+                gate_passed=gate_passed,
+            ),
             "chain_summary": self._generation_chain_summary(
                 snapshot=snapshot,
                 generation_status=str(generation_status or ""),
-                failure_reason=source.get("failure_reason") or (generation_failure or {}).get("failure_reason"),
+                failure_reason=failure_reason,
                 gate_passed=gate_passed,
             ),
             "llm_prompts": self._generation_llm_prompts(snapshot),
@@ -445,7 +455,274 @@ class RuntimeResultsService:
             return {}
         return parsed if isinstance(parsed, dict) else {}
 
+    def _is_cga_trace_v2(self, snapshot: dict[str, Any]) -> bool:
+        return snapshot.get("schema_version") == "cga_trace_v2"
+
+    def _trace_object(self, value: Any) -> dict[str, Any]:
+        return value if isinstance(value, dict) else {}
+
+    def _trace_field(self, label_zh: str, value: Any) -> dict[str, Any]:
+        return {
+            "label_zh": label_zh,
+            "value": "未记录" if value is None or value == "" else value,
+        }
+
+    def _trace_count(self, value: Any) -> str:
+        return f"{len(value)} 条" if isinstance(value, list) else "0 条"
+
+    def _trace_text(self, value: Any) -> str:
+        if isinstance(value, str):
+            return value.strip()
+        if value is None:
+            return ""
+        return json.dumps(value, ensure_ascii=False, indent=2)
+
+    def _semantic_view_trace(
+        self,
+        semantic_view_matching: dict[str, Any],
+        semantic_result: dict[str, Any],
+    ) -> dict[str, Any]:
+        raw_trace = semantic_result.get("trace")
+        trace = dict(raw_trace) if isinstance(raw_trace, dict) else {}
+        raw_stages = semantic_view_matching.get("stages")
+        if isinstance(raw_stages, dict):
+            trace = {**raw_stages, **trace}
+        attempts = semantic_view_matching.get("llm_disambiguation_attempts")
+        if "llm_disambiguation_attempts" not in trace and attempts is not None:
+            trace["llm_disambiguation_attempts"] = attempts
+        candidate_trace = semantic_result.get("candidate_trace")
+        if "candidate_generation" not in trace and isinstance(candidate_trace, list):
+            trace["candidate_generation"] = candidate_trace
+        return trace
+
+    def _logical_plan_path_refs(self, logical_query_plan: dict[str, Any]) -> list[Any]:
+        path_refs = logical_query_plan.get("path_refs")
+        if isinstance(path_refs, list):
+            return path_refs
+        schema_path_ref = logical_query_plan.get("schema_path_ref")
+        if schema_path_ref:
+            return [schema_path_ref]
+        trace_refs = logical_query_plan.get("trace_refs")
+        if isinstance(trace_refs, list):
+            return [item for item in trace_refs if isinstance(item, str) and item.startswith("schema_path:")]
+        return []
+
+    def _selected_schema_path_id(self, schema_path_planning: dict[str, Any]) -> str | None:
+        selected_path = schema_path_planning.get("selected_path")
+        if isinstance(selected_path, dict):
+            path_id = selected_path.get("id") or selected_path.get("path_id")
+            return str(path_id) if path_id else None
+        selected_paths = schema_path_planning.get("selected_paths")
+        if isinstance(selected_paths, list) and selected_paths:
+            first = selected_paths[0]
+            if isinstance(first, dict):
+                path_id = first.get("id") or first.get("path_id")
+                return str(path_id) if path_id else None
+        path_id = schema_path_planning.get("path_id")
+        return str(path_id) if path_id else None
+
+    def _generation_trace_layers(
+        self,
+        *,
+        snapshot: dict[str, Any],
+        source: dict[str, Any],
+        generation_status: str,
+        failure_reason: Any,
+        gate_passed: bool,
+    ) -> list[dict[str, Any]]:
+        if not self._is_cga_trace_v2(snapshot):
+            return []
+
+        service_context = self._trace_object(snapshot.get("service_context"))
+        intent_recognition = self._trace_object(snapshot.get("intent_recognition"))
+        intent_result = self._trace_object(intent_recognition.get("result"))
+        intent_diagnostics = self._trace_object(intent_recognition.get("diagnostics"))
+        semantic_view_matching = self._trace_object(snapshot.get("semantic_view_matching"))
+        semantic_result = self._trace_object(semantic_view_matching.get("result"))
+        semantic_trace = self._semantic_view_trace(semantic_view_matching, semantic_result)
+        logical_query_plan = self._trace_object(snapshot.get("logical_query_plan") or snapshot.get("logical_plan"))
+        schema_path_planning = self._trace_object(snapshot.get("schema_path_planning"))
+        knowledge_selection = self._trace_object(snapshot.get("knowledge_selection"))
+        generation = self._trace_object(snapshot.get("generation"))
+        renderer = self._trace_object(generation.get("renderer"))
+        parser = self._trace_object(generation.get("parser"))
+        preflight = self._trace_object(snapshot.get("preflight"))
+        clarification = self._trace_object(snapshot.get("clarification"))
+        delivery = self._trace_object(snapshot.get("delivery"))
+        cypher_fallback_llm = generation.get("cypher_fallback_llm")
+
+        return [
+            {
+                "key": "orchestration",
+                "title_zh": "服务编排层",
+                "fields": [
+                    self._trace_field("自然语言问题", snapshot.get("question") or source.get("question")),
+                    self._trace_field(
+                        "生成运行 ID",
+                        snapshot.get("generation_run_id") or source.get("generation_run_id"),
+                    ),
+                    self._trace_field("生成状态", snapshot.get("generation_status") or generation_status),
+                    self._trace_field("运行模式", service_context.get("active_mode")),
+                    self._trace_field("模型", service_context.get("model")),
+                    self._trace_field("语义视图版本", service_context.get("semantic_view_version")),
+                    self._trace_field(
+                        "RAG 来源",
+                        service_context.get("rag_source") or service_context.get("knowledge_context_source"),
+                    ),
+                ],
+                "raw": {
+                    "question": snapshot.get("question") or source.get("question"),
+                    "generation_run_id": snapshot.get("generation_run_id") or source.get("generation_run_id"),
+                    "generation_status": snapshot.get("generation_status") or generation_status,
+                    "service_context": service_context,
+                },
+            },
+            {
+                "key": "intent_recognition",
+                "title_zh": "意图识别层",
+                "fields": [
+                    self._trace_field("一级意图", intent_result.get("primary_intent")),
+                    self._trace_field("二级意图", intent_result.get("secondary_intent")),
+                    self._trace_field("来源", intent_result.get("source")),
+                    self._trace_field(
+                        "判定结果",
+                        self._intent_decision_label(str(intent_result.get("decision") or "")),
+                    ),
+                    self._trace_field("置信度", intent_result.get("confidence")),
+                    self._trace_field("规则命中", intent_diagnostics.get("rule_hit")),
+                    self._trace_field(
+                        "向量召回候选",
+                        self._trace_count(intent_diagnostics.get("embedding_candidates")),
+                    ),
+                    self._trace_field(
+                        "一级 LLM 调用",
+                        self._trace_count(intent_diagnostics.get("llm_primary_attempts")),
+                    ),
+                    self._trace_field(
+                        "二级 LLM 调用",
+                        self._trace_count(intent_diagnostics.get("llm_secondary_attempts")),
+                    ),
+                ],
+                "raw": intent_recognition,
+            },
+            {
+                "key": "semantic_view_matching",
+                "title_zh": "语义视图匹配层",
+                "fields": [
+                    self._trace_field(
+                        "匹配实体",
+                        self._trace_count(semantic_result.get("matched_entities") or semantic_result.get("entities")),
+                    ),
+                    self._trace_field("过滤条件", self._trace_count(semantic_result.get("filters"))),
+                    self._trace_field(
+                        "路径语义",
+                        self._trace_count(semantic_result.get("path_semantics") or semantic_result.get("paths")),
+                    ),
+                    self._trace_field(
+                        "返回对象",
+                        self._trace_count(semantic_result.get("return_objects") or semantic_result.get("returns")),
+                    ),
+                    self._trace_field("置信度", semantic_result.get("confidence")),
+                    self._trace_field(
+                        "歧义",
+                        semantic_result.get("ambiguity")
+                        or semantic_result.get("clarification_type")
+                        or semantic_result.get("rejection_reason")
+                        or "无",
+                    ),
+                    self._trace_field("候选生成", self._trace_count(semantic_trace.get("candidate_generation"))),
+                    self._trace_field("候选打分", self._trace_count(semantic_trace.get("candidate_scores"))),
+                    self._trace_field(
+                        "LLM 消歧调用",
+                        self._trace_count(semantic_trace.get("llm_disambiguation_attempts")),
+                    ),
+                ],
+                "raw": semantic_view_matching,
+            },
+            {
+                "key": "planning",
+                "title_zh": "规划层",
+                "fields": [
+                    self._trace_field("答案形态", logical_query_plan.get("answer_shape")),
+                    self._trace_field(
+                        "操作数",
+                        self._trace_count(logical_query_plan.get("operations") or logical_query_plan.get("operators")),
+                    ),
+                    self._trace_field("路径引用", self._trace_count(self._logical_plan_path_refs(logical_query_plan))),
+                    self._trace_field(
+                        "选中 Schema 路径",
+                        self._selected_schema_path_id(schema_path_planning),
+                    ),
+                    self._trace_field(
+                        "候选路径",
+                        self._trace_count(schema_path_planning.get("candidate_paths") or schema_path_planning.get("selected_paths")),
+                    ),
+                    self._trace_field("拒绝路径", self._trace_count(schema_path_planning.get("rejected_paths"))),
+                    self._trace_field(
+                        "知识来源",
+                        self._knowledge_source_label(str(knowledge_selection.get("source") or "")),
+                    ),
+                    self._trace_field(
+                        "选中知识",
+                        self._trace_count(knowledge_selection.get("selected_items") or knowledge_selection.get("fragments")),
+                    ),
+                    self._trace_field("过滤知识", self._trace_count(knowledge_selection.get("rejected_items"))),
+                ],
+                "raw": {
+                    "logical_query_plan": logical_query_plan,
+                    "schema_path_planning": schema_path_planning,
+                    "knowledge_selection": knowledge_selection,
+                },
+            },
+            {
+                "key": "generation",
+                "title_zh": "生成与提交层",
+                "fields": [
+                    self._trace_field("渲染器类型", renderer.get("family")),
+                    self._trace_field(
+                        "渲染器结果",
+                        self._accepted_label(
+                            renderer.get("accepted"),
+                            accepted="渲染成功",
+                            rejected="渲染未通过",
+                        ),
+                    ),
+                    self._trace_field(
+                        "兜底 LLM",
+                        "已触发" if isinstance(cypher_fallback_llm, dict) else "本次未触发",
+                    ),
+                    self._trace_field("解析结果", parser.get("parse_summary")),
+                    self._trace_field(
+                        "预检结果",
+                        self._accepted_label(
+                            preflight.get("accepted"),
+                            accepted="预检通过",
+                            rejected="预检未通过",
+                        ),
+                    ),
+                    self._trace_field(
+                        "失败原因",
+                        self._generation_failure_label(
+                            str(failure_reason or preflight.get("reason") or renderer.get("failure_reason") or "")
+                        ),
+                    ),
+                    self._trace_field("生成门禁", "生成门禁通过" if gate_passed else "生成门禁未通过"),
+                    self._trace_field("澄清问题", clarification.get("question_zh")),
+                    self._trace_field("投递状态", delivery.get("status")),
+                ],
+                "raw": {
+                    "generation": generation,
+                    "preflight": preflight,
+                    "clarification": clarification or None,
+                    "delivery": delivery,
+                },
+            },
+        ]
+
     def _generation_llm_prompts(self, snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        if self._is_cga_trace_v2(snapshot):
+            return self._generation_llm_prompts_v2(snapshot)
+
         raw_prompts = snapshot.get("llm_prompts") if isinstance(snapshot.get("llm_prompts"), dict) else {}
         raw_responses = snapshot.get("llm_responses") if isinstance(snapshot.get("llm_responses"), dict) else {}
 
@@ -478,6 +755,90 @@ class RuntimeResultsService:
             ),
         }
 
+    def _generation_llm_prompts_v2(self, snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        intent_recognition = self._trace_object(snapshot.get("intent_recognition"))
+        intent_diagnostics = self._trace_object(intent_recognition.get("diagnostics"))
+        semantic_view_matching = self._trace_object(snapshot.get("semantic_view_matching"))
+        semantic_result = self._trace_object(semantic_view_matching.get("result"))
+        semantic_trace = self._semantic_view_trace(semantic_view_matching, semantic_result)
+        generation = self._trace_object(snapshot.get("generation"))
+        return {
+            "intent_primary_classification": self._llm_prompt_item_from_attempts(
+                "intent_primary_classification",
+                "意图识别：一级分类 LLM 判定",
+                "意图识别：一级分类 LLM 原始返回",
+                intent_diagnostics.get("llm_primary_attempts"),
+            ),
+            "intent_secondary_classification": self._llm_prompt_item_from_attempts(
+                "intent_secondary_classification",
+                "意图识别：二级分类 LLM 判定",
+                "意图识别：二级分类 LLM 原始返回",
+                intent_diagnostics.get("llm_secondary_attempts"),
+            ),
+            "semantic_view_disambiguation": self._llm_prompt_item_from_attempts(
+                "semantic_view_disambiguation",
+                "语义视图匹配：受控 LLM 消歧",
+                "语义视图匹配：受控 LLM 消歧原始返回",
+                semantic_trace.get("llm_disambiguation_attempts"),
+            ),
+            "cypher_generation_fallback": self._llm_prompt_item_from_attempts(
+                "cypher_generation_fallback",
+                "Renderer 失败后的 Cypher 兜底生成",
+                "Cypher 兜底生成 LLM 原始返回",
+                generation.get("cypher_fallback_llm"),
+            ),
+        }
+
+    def _llm_prompt_item_from_attempts(
+        self,
+        key: str,
+        title_zh: str,
+        raw_output_title_zh: str,
+        raw_attempts: Any,
+    ) -> dict[str, Any]:
+        if isinstance(raw_attempts, list):
+            attempts = [attempt for attempt in raw_attempts if isinstance(attempt, dict)]
+        elif isinstance(raw_attempts, dict):
+            attempts = [raw_attempts]
+        else:
+            attempts = []
+
+        normalized_attempts = []
+        for index, attempt in enumerate(attempts, start=1):
+            normalized_attempts.append(
+                {
+                    "call_id": attempt.get("call_id") or f"{key}-{index}",
+                    "stage": attempt.get("stage"),
+                    "model": attempt.get("model"),
+                    "prompt": self._trace_text(attempt.get("prompt_markdown") or attempt.get("prompt")),
+                    "raw_output": self._trace_text(
+                        attempt.get("raw_output") or attempt.get("raw_text") or attempt.get("output")
+                    ),
+                    "parsed_output": attempt.get("parsed_output"),
+                    "accepted": attempt.get("accepted"),
+                    "rejected_reason": attempt.get("rejected_reason"),
+                }
+            )
+        selected = next(
+            (
+                attempt
+                for attempt in reversed(normalized_attempts)
+                if attempt.get("prompt") or attempt.get("raw_output")
+            ),
+            None,
+        )
+        return {
+            "key": key,
+            "title_zh": title_zh,
+            "raw_output_title_zh": raw_output_title_zh,
+            "triggered": bool(normalized_attempts),
+            "prompt": selected.get("prompt") if selected else "",
+            "raw_output": selected.get("raw_output") if selected else "",
+            "attempts": normalized_attempts,
+            "empty_label_zh": "本次未触发",
+            "empty_raw_output_label_zh": "本次未触发或未记录返回",
+        }
+
     def _generation_chain_summary(
         self,
         *,
@@ -486,6 +847,14 @@ class RuntimeResultsService:
         failure_reason: Any,
         gate_passed: bool,
     ) -> dict[str, Any]:
+        if self._is_cga_trace_v2(snapshot):
+            return self._generation_chain_summary_v2(
+                snapshot=snapshot,
+                generation_status=generation_status,
+                failure_reason=failure_reason,
+                gate_passed=gate_passed,
+            )
+
         intent = snapshot.get("intent") if isinstance(snapshot.get("intent"), dict) else {}
         validation = snapshot.get("validation") if isinstance(snapshot.get("validation"), dict) else {}
         selected_knowledge = snapshot.get("selected_knowledge") if isinstance(snapshot.get("selected_knowledge"), dict) else {}
@@ -535,6 +904,74 @@ class RuntimeResultsService:
             },
         }
 
+    def _generation_chain_summary_v2(
+        self,
+        *,
+        snapshot: dict[str, Any],
+        generation_status: str,
+        failure_reason: Any,
+        gate_passed: bool,
+    ) -> dict[str, Any]:
+        intent_recognition = self._trace_object(snapshot.get("intent_recognition"))
+        intent = self._trace_object(intent_recognition.get("result"))
+        semantic_view_matching = self._trace_object(snapshot.get("semantic_view_matching"))
+        semantic_result = self._trace_object(semantic_view_matching.get("result"))
+        knowledge_selection = self._trace_object(snapshot.get("knowledge_selection"))
+        generation = self._trace_object(snapshot.get("generation"))
+        renderer = self._trace_object(generation.get("renderer"))
+        preflight = self._trace_object(snapshot.get("preflight"))
+        generation_mode = "controlled_llm_fallback" if isinstance(generation.get("cypher_fallback_llm"), dict) else ""
+        if not generation_mode and renderer.get("family"):
+            generation_mode = f"{renderer.get('family')}_renderer"
+        preflight_accepted = preflight.get("accepted")
+        reason = failure_reason or preflight.get("reason") or renderer.get("failure_reason")
+        return {
+            "generation_status": {
+                "value": generation_status or None,
+                "label_zh": self._generation_status_label(generation_status),
+            },
+            "generation_mode": {
+                "value": generation_mode or None,
+                "label_zh": self._generation_mode_label(generation_mode),
+            },
+            "gate": {
+                "accepted": gate_passed,
+                "label_zh": "生成门禁通过" if gate_passed else "生成门禁未通过",
+            },
+            "failure_reason": {
+                "value": reason,
+                "label_zh": self._generation_failure_label(str(reason or "")),
+            },
+            "intent": {
+                "primary_intent": intent.get("primary_intent"),
+                "secondary_intent": intent.get("secondary_intent"),
+                "source": intent.get("source"),
+                "decision": intent.get("decision"),
+                "decision_label_zh": self._intent_decision_label(str(intent.get("decision") or "")),
+                "confidence": intent.get("confidence"),
+            },
+            "validation": {
+                "accepted": semantic_result.get("accepted"),
+                "label_zh": self._accepted_label(
+                    semantic_result.get("accepted"),
+                    accepted="语义视图匹配通过",
+                    rejected="语义视图匹配未通过",
+                ),
+                "diagnostics": semantic_result.get("diagnostics") or [],
+            },
+            "knowledge": {
+                "source": knowledge_selection.get("source"),
+                "source_label_zh": self._knowledge_source_label(str(knowledge_selection.get("source") or "")),
+                "selection_trace": knowledge_selection.get("selected_items") or [],
+            },
+            "preflight": {
+                "accepted": preflight_accepted,
+                "label_zh": self._accepted_label(preflight_accepted, accepted="预检通过", rejected="预检未通过"),
+                "reason": preflight.get("reason"),
+                "reason_label_zh": self._generation_failure_label(str(preflight.get("reason") or "")),
+            },
+        }
+
     def _generation_status_label(self, value: str) -> str:
         return {
             "generated": "生成成功",
@@ -555,6 +992,7 @@ class RuntimeResultsService:
             "logical_plan_mismatch": "生成结果与逻辑查询计划不一致",
             "path_planning_failed": "图路径规划失败",
             "cypher_fallback_cannot_generate": "受控模型无法安全生成",
+            "ambiguous_path_semantic": "路径语义存在歧义",
             "unbalanced_brackets": "括号未闭合",
             "no_cypher_found": "未找到 Cypher",
             "model_invocation_failed": "模型调用失败",

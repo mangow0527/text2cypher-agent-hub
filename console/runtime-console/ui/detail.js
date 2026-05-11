@@ -39,6 +39,7 @@ function tone(status) {
       return 'danger';
     case 'running':
     case 'generation_failed':
+    case 'clarification_required':
     case 'waiting_human_review':
     case 'apply_paused':
       return 'warn';
@@ -74,6 +75,19 @@ function codeBlock(value) {
   return `<pre>${escapeHtml(pretty(value))}</pre>`;
 }
 
+function inlineValue(value) {
+  if (value === null || value === undefined || value === '') {
+    return '未记录';
+  }
+  if (Array.isArray(value)) {
+    return `${value.length} 条`;
+  }
+  if (typeof value === 'object') {
+    return JSON.stringify(value, null, 2);
+  }
+  return String(value);
+}
+
 function emptyCypherText(value) {
   return value ? value : '未生成可评测 Cypher';
 }
@@ -87,8 +101,30 @@ function generationCypherText(section) {
 
 function renderCgaLlmPrompt(item, fallbackTitle, fallbackRawOutputTitle) {
   const title = item?.title_zh || fallbackTitle;
-  const body = item?.triggered ? item.prompt : (item?.empty_label_zh || '本次未触发');
   const rawOutputTitle = item?.raw_output_title_zh || fallbackRawOutputTitle;
+  const attempts = Array.isArray(item?.attempts) ? item.attempts : [];
+  if (attempts.length) {
+    return attempts
+      .map((attempt, index) => {
+        const suffix = attempt.call_id ? ` · ${attempt.call_id}` : ` #${index + 1}`;
+        const meta = [
+          attempt.stage ? `阶段：${attempt.stage}` : null,
+          attempt.model ? `模型：${attempt.model}` : null,
+          attempt.accepted === true ? '采用：是' : null,
+          attempt.accepted === false ? '采用：否' : null,
+          attempt.rejected_reason ? `拒绝原因：${attempt.rejected_reason}` : null,
+        ].filter(Boolean).join(' · ');
+        return `
+          <h3>${escapeHtml(`${title}${suffix}`)}</h3>
+          ${meta ? `<p class="empty">${escapeHtml(meta)}</p>` : ''}
+          ${codeBlock(attempt.prompt || item?.empty_label_zh || '本次未触发')}
+          <h3>${escapeHtml(rawOutputTitle)}</h3>
+          ${codeBlock(attempt.raw_output || item?.empty_raw_output_label_zh || '本次未触发或未记录返回')}
+        `;
+      })
+      .join('');
+  }
+  const body = item?.triggered ? item.prompt : (item?.empty_label_zh || '本次未触发');
   const rawOutputBody = item?.triggered ? (item.raw_output || item?.empty_raw_output_label_zh || '本次未触发或未记录返回') : (item?.empty_label_zh || '本次未触发');
   return `
     <h3>${escapeHtml(title)}</h3>
@@ -99,6 +135,20 @@ function renderCgaLlmPrompt(item, fallbackTitle, fallbackRawOutputTitle) {
 }
 
 function renderCgaLlmPrompts(prompts = {}) {
+  const traceV2Order = [
+    ['intent_primary_classification', '意图识别：一级分类 LLM 判定', '意图识别：一级分类 LLM 原始返回'],
+    ['intent_secondary_classification', '意图识别：二级分类 LLM 判定', '意图识别：二级分类 LLM 原始返回'],
+    ['semantic_view_disambiguation', '语义视图匹配：受控 LLM 消歧', '语义视图匹配：受控 LLM 消歧原始返回'],
+    ['cypher_generation_fallback', 'Renderer 失败后的 Cypher 兜底生成', 'Cypher 兜底生成 LLM 原始返回'],
+  ];
+  const hasTraceV2Prompts = traceV2Order
+    .slice(0, 3)
+    .some(([key]) => Object.prototype.hasOwnProperty.call(prompts, key));
+  if (hasTraceV2Prompts) {
+    return traceV2Order
+      .map(([key, title, rawTitle]) => renderCgaLlmPrompt(prompts[key], title, rawTitle))
+      .join('');
+  }
   return [
     renderCgaLlmPrompt(prompts.intent_recognition_fallback, '意图识别 LLM 兜底提示词', '意图识别 LLM 原始返回'),
     renderCgaLlmPrompt(prompts.cypher_generation_fallback, 'Renderer 失败后的 Cypher 兜底提示词', 'Cypher 生成 LLM 原始返回'),
@@ -110,6 +160,58 @@ function chainMetric(label, item, valueKey = 'label_zh') {
   const raw = item && typeof item === 'object' ? item.value || item.reason || item.decision || item.source : null;
   const rawText = raw ? `（原始值：${raw}）` : '';
   return metricCard(label, `${value || '未记录'}${rawText}`);
+}
+
+const cgaTraceLayerTitles = {
+  orchestration: '服务编排层',
+  intent_recognition: '意图识别层',
+  semantic_view_matching: '语义视图匹配层',
+  planning: '规划层',
+  generation: '生成与提交层',
+};
+
+function renderLegacyCgaChainSummary(chain) {
+  const intent = chain.intent || {};
+  const validation = chain.validation || {};
+  const knowledge = chain.knowledge || {};
+  const preflight = chain.preflight || {};
+  return `
+    <h3>生成链路摘要</h3>
+    <div class="field-grid">
+      ${chainMetric('生成状态', chain.generation_status)}
+      ${chainMetric('生成方式', chain.generation_mode)}
+      ${chainMetric('生成门禁', chain.gate)}
+      ${chainMetric('失败原因', chain.failure_reason)}
+      ${metricCard('意图识别', `${intent.decision_label_zh || '未记录'} · ${intent.source || '未知来源'} · 置信度 ${intent.confidence ?? '未记录'}`)}
+      ${metricCard('意图类型', [intent.primary_intent, intent.secondary_intent].filter(Boolean).join(' / ') || '未记录')}
+      ${metricCard('语义校验', validation.label_zh || '未记录')}
+      ${metricCard('知识选择', `${knowledge.source_label_zh || '未记录'} · ${(knowledge.selection_trace || []).length} 条 trace`)}
+      ${metricCard('预检结果', `${preflight.label_zh || '未记录'}${preflight.reason_label_zh ? ` · ${preflight.reason_label_zh}` : ''}`)}
+    </div>
+  `;
+}
+
+function renderCgaTraceLayers(layers = []) {
+  if (!layers.length) {
+    return '';
+  }
+  return `
+    <h3>CGA 分层链路</h3>
+    ${layers
+      .map((layer) => {
+        const fields = Array.isArray(layer.fields) ? layer.fields : [];
+        const title = layer.title_zh || cgaTraceLayerTitles[layer.key] || layer.key || '未命名层级';
+        return `
+          <h3>${escapeHtml(title)}</h3>
+          <div class="field-grid">
+            ${fields.map((field) => metricCard(field.label_zh || '字段', inlineValue(field.value))).join('')}
+          </div>
+          <h3>${escapeHtml(title)}原始证据</h3>
+          ${codeBlock(layer.raw || {})}
+        `;
+      })
+      .join('')}
+  `;
 }
 
 function renderOverview(detail) {
@@ -128,10 +230,7 @@ function renderOverview(detail) {
 
 function renderCypherGenerator(section) {
   const chain = section.chain_summary || {};
-  const intent = chain.intent || {};
-  const validation = chain.validation || {};
-  const knowledge = chain.knowledge || {};
-  const preflight = chain.preflight || {};
+  const traceLayers = Array.isArray(section.trace_layers) ? section.trace_layers : [];
   return `
     <details class="pipeline-step" open>
       <summary>
@@ -147,19 +246,9 @@ function renderCypherGenerator(section) {
       ${codeBlock(generationCypherText(section))}
       <h3>LLM 调用提示词</h3>
       ${renderCgaLlmPrompts(section.llm_prompts || {})}
-      <h3>生成链路摘要</h3>
-      <div class="field-grid">
-        ${chainMetric('生成状态', chain.generation_status)}
-        ${chainMetric('生成方式', chain.generation_mode)}
-        ${chainMetric('生成门禁', chain.gate)}
-        ${chainMetric('失败原因', chain.failure_reason)}
-        ${metricCard('意图识别', `${intent.decision_label_zh || '未记录'} · ${intent.source || '未知来源'} · 置信度 ${intent.confidence ?? '未记录'}`)}
-        ${metricCard('意图类型', [intent.primary_intent, intent.secondary_intent].filter(Boolean).join(' / ') || '未记录')}
-        ${metricCard('语义校验', validation.label_zh || '未记录')}
-        ${metricCard('知识选择', `${knowledge.source_label_zh || '未记录'} · ${(knowledge.selection_trace || []).length} 条 trace`)}
-        ${metricCard('预检结果', `${preflight.label_zh || '未记录'}${preflight.reason_label_zh ? ` · ${preflight.reason_label_zh}` : ''}`)}
-        ${metricCard('生成运行 ID', section.generation_run_id || '未提供')}
-      </div>
+      ${traceLayers.length ? renderCgaTraceLayers(traceLayers) : renderLegacyCgaChainSummary(chain)}
+      <h3>生成运行 ID</h3>
+      ${codeBlock(section.generation_run_id || '未提供')}
       <h3>CGA 分层证据快照</h3>
       ${codeBlock(section.prompt_markdown)}
     </details>

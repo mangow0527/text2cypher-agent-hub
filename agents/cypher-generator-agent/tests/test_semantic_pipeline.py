@@ -40,6 +40,181 @@ def test_semantic_pipeline_generates_cypher_for_related_record_query() -> None:
     assert result.preflight.accepted is True
 
 
+def test_semantic_pipeline_trace_exposes_semantic_view_and_logical_plan_layers() -> None:
+    pipeline = get_semantic_pipeline()
+    intent = IntentRecognitionResult(
+        primary_intent="record_retrieval_query",
+        secondary_intent="related_record_query",
+        confidence=0.93,
+        source="rule",
+        decision="accept",
+    )
+
+    result = pipeline.parse(
+        id="qa-trace",
+        question="查询金牌服务使用的隧道名称",
+        generation_run_id="run-trace",
+        intent_result=intent,
+    )
+
+    payload = result.to_dict()
+    assert payload["schema_version"] == "cga_trace_v2"
+    assert payload["semantic_view_matching"]["result"]["accepted"] is True
+    assert payload["semantic_view_matching"]["result"]["entities"] == ["service", "tunnel"]
+    assert payload["semantic_view_matching"]["result"]["filters"] == [
+        {
+            "field": "service.quality_of_service",
+            "operator": "=",
+            "value": "Gold",
+            "evidence": "金牌",
+        }
+    ]
+    assert payload["semantic_view_matching"]["result"]["paths"] == [
+        {
+            "path_semantic": "service.uses_tunnel",
+            "relationships": ["service_uses_tunnel"],
+            "evidence": "使用的隧道",
+        }
+    ]
+    assert payload["semantic_view_matching"]["result"]["returns"] == [
+        {"field": "tunnel.name", "evidence": "隧道名称"}
+    ]
+    assert payload["logical_query_plan"]["answer_shape"] == "records"
+    assert [operator["op"] for operator in payload["logical_query_plan"]["operators"]] == [
+        "scan",
+        "traverse",
+        "filter",
+        "project",
+    ]
+    assert payload["schema_path_planning"]["selected_paths"][0]["cypher_pattern"] == (
+        "(s:Service)-[:SERVICE_USES_TUNNEL]->(t:Tunnel)"
+    )
+    assert result.generated_cypher == (
+        "MATCH (s:Service)-[:SERVICE_USES_TUNNEL]->(t:Tunnel)\n"
+        "WHERE s.quality_of_service = 'Gold'\n"
+        "RETURN t.name AS tunnel_name"
+    )
+
+
+def test_semantic_pipeline_handles_entity_detail_and_name_filter_queries() -> None:
+    pipeline = get_semantic_pipeline()
+
+    detail = pipeline.parse(
+        question="查询所有服务的详细信息。",
+        intent_result=IntentRecognitionResult(
+            primary_intent="record_retrieval_query",
+            secondary_intent="entity_detail_query",
+            confidence=0.9,
+            source="rule",
+            decision="accept",
+        ),
+    )
+    assert detail.generated_cypher == "MATCH (s:Service)\nRETURN s"
+
+    projection = pipeline.parse(
+        question="查询名称为 Service_002 的服务的编号、名称和带宽。",
+        intent_result=IntentRecognitionResult(
+            primary_intent="record_retrieval_query",
+            secondary_intent="attribute_projection_query",
+            confidence=0.9,
+            source="rule",
+            decision="accept",
+        ),
+    )
+    assert "WHERE s.name = 'Service_002'" in projection.generated_cypher
+    assert "s.id AS service_id" in projection.generated_cypher
+    assert "s.name AS service_name" in projection.generated_cypher
+    assert "s.bandwidth AS service_bandwidth" in projection.generated_cypher
+    assert "Tunnel" not in projection.generated_cypher
+
+
+def test_semantic_pipeline_handles_common_service_tunnel_multihop_paths() -> None:
+    pipeline = get_semantic_pipeline()
+    intent = IntentRecognitionResult(
+        primary_intent="record_retrieval_query",
+        secondary_intent="related_record_query",
+        confidence=0.9,
+        source="rule",
+        decision="accept",
+    )
+
+    source_ne = pipeline.parse(
+        question="查询所有服务使用的隧道对应的源端网元。",
+        intent_result=intent,
+    )
+    assert "[:TUNNEL_SRC]->(ne:NetworkElement)" in source_ne.generated_cypher
+
+    ports = pipeline.parse(
+        question="查询服务使用的隧道所经过网元上的所有端口。",
+        intent_result=intent,
+    )
+    assert "[:PATH_THROUGH]->(ne:NetworkElement)" in ports.generated_cypher
+    assert "[:HAS_PORT]->(p:Port)" in ports.generated_cypher
+
+    vendor_breakdown = pipeline.parse(
+        question="统计服务所用隧道的目的端网元厂商分布，按数量升序排列，返回前5个厂商。",
+        intent_result=intent,
+    )
+    assert "[:TUNNEL_DST]->(ne:NetworkElement)" in vendor_breakdown.generated_cypher
+    assert "ne.vendor AS network_element_vendor" in vendor_breakdown.generated_cypher
+    assert "ORDER BY network_element_count ASC" in vendor_breakdown.generated_cypher
+
+
+def test_semantic_pipeline_handles_two_stage_aggregate_ranking() -> None:
+    pipeline = get_semantic_pipeline()
+    result = pipeline.parse(
+        question="统计各服务关联的目的网元总数，按首次统计值降序排列，返回前5个服务的名称、时延及两次统计结果。",
+        intent_result=IntentRecognitionResult(
+            primary_intent="ranking_query",
+            secondary_intent="attribute_ranking_query",
+            confidence=0.9,
+            source="rule",
+            decision="accept",
+        ),
+    )
+
+    assert result.generated_cypher == (
+        "MATCH (s:Service)-[:SERVICE_USES_TUNNEL]->(t:Tunnel)-[:TUNNEL_DST]->(ne:NetworkElement)\n"
+        "WITH s, count(ne) AS first_total\n"
+        "MATCH (s)-[:SERVICE_USES_TUNNEL]->(t:Tunnel)-[:TUNNEL_DST]->(ne:NetworkElement)\n"
+        "RETURN s.name AS service_name, s.latency AS service_latency, first_total, count(ne) AS total_count\n"
+        "ORDER BY first_total DESC\n"
+        "LIMIT 5"
+    )
+    payload = result.to_dict()
+    assert payload["semantic_query"]["with_stage"]["output_alias"] == "first_total"
+    assert payload["logical_query_plan"]["renderer_hints"]["aggregation_shape"] == "two_stage"
+
+
+def test_semantic_pipeline_returns_clarification_before_planning_for_ambiguous_view_match() -> None:
+    pipeline = get_semantic_pipeline()
+    intent = IntentRecognitionResult(
+        primary_intent="record_retrieval_query",
+        secondary_intent="related_record_query",
+        confidence=0.88,
+        source="rule",
+        decision="accept",
+    )
+
+    result = pipeline.parse(
+        id="qa-clarify",
+        question="查询服务对应的网元",
+        generation_run_id="run-clarify",
+        intent_result=intent,
+    )
+
+    payload = result.to_dict()
+    assert result.generation_mode is None
+    assert result.validation.accepted is False
+    assert result.validation.diagnostics[0].code == "clarification_required"
+    assert payload["semantic_view_matching"]["result"]["accepted"] is False
+    assert payload["semantic_view_matching"]["result"]["needs_clarification"] is True
+    assert payload["logical_query_plan"] is None
+    assert payload["schema_path_planning"] is None
+    assert payload["clarification"]["source_stage"] == "semantic_view_matching"
+    assert "源网元" in payload["clarification"]["question_zh"]
+
+
 def test_semantic_pipeline_does_not_generate_when_intent_is_not_accepted() -> None:
     pipeline = SemanticPipeline()
     intent = IntentRecognitionResult(
@@ -113,11 +288,11 @@ async def test_semantic_pipeline_uses_llm_as_third_stage_intent_recognizer() -> 
         "RETURN t.name AS tunnel_name"
     )
     assert result.preflight.accepted is True
-    assert result.to_dict()["llm_prompts"]["intent_recognition_fallback"] == llm_client.calls[0]["llm_prompt"]
-    assert result.to_dict()["llm_responses"]["intent_recognition_fallback"] == llm_client.calls[0]["raw_output"]
-    assert result.to_dict()["llm_prompts"]["cypher_generation_fallback"] is None
-    assert result.to_dict()["llm_responses"]["cypher_generation_fallback"] is None
-    assert "intent_fallback_cypher_generation" not in result.to_dict()["llm_prompts"]
+    payload = result.to_dict()
+    intent_attempts = payload["intent_recognition"]["diagnostics"]["llm_secondary_attempts"]
+    assert intent_attempts[0]["prompt"] == llm_client.calls[0]["llm_prompt"]
+    assert intent_attempts[0]["raw_output"] == llm_client.calls[0]["raw_output"]
+    assert payload["generation"]["cypher_fallback_llm"] is None
 
 
 @pytest.mark.asyncio
@@ -148,9 +323,10 @@ async def test_semantic_pipeline_rejects_cypher_text_from_intent_llm_fallback() 
     assert result.semantic_query is None
     assert result.generated_cypher is None
     assert result.preflight is None
-    assert result.to_dict()["llm_prompts"]["intent_recognition_fallback"]
-    assert result.to_dict()["llm_responses"]["intent_recognition_fallback"] == "MATCH (s:Service) RETURN s.name AS service_name"
-    assert "intent_fallback_cypher_generation" not in result.to_dict()["llm_prompts"]
+    payload = result.to_dict()
+    intent_attempts = payload["intent_recognition"]["diagnostics"]["llm_secondary_attempts"]
+    assert intent_attempts[0]["prompt"]
+    assert intent_attempts[0]["raw_output"] == "MATCH (s:Service) RETURN s.name AS service_name"
 
 
 def test_semantic_pipeline_rejects_accepted_intent_without_business_slot_schema() -> None:
@@ -281,7 +457,7 @@ async def test_semantic_pipeline_selects_knowledge_after_semantic_query_build() 
     assert knowledge_selector.calls[0]["semantic_query"]["kind"] == "record_selection"
     assert result.selected_knowledge is not None
     assert result.selected_knowledge.source == "rag"
-    assert result.to_dict()["selected_knowledge"]["fragments"][0]["type"] == "verified_query"
+    assert result.to_dict()["knowledge_selection"]["fragments"][0]["type"] == "verified_query"
 
 
 @pytest.mark.asyncio
@@ -328,13 +504,13 @@ async def test_semantic_pipeline_falls_back_to_controlled_llm_when_renderer_is_u
         "RETURN t.name AS tunnel_name"
     )
     assert result.preflight.accepted is True
-    assert '"kind": "record_selection"' in llm_client.prompt
-    assert "SemanticQuerySpec" in llm_client.prompt
-    assert "不要新增 SemanticQuerySpec 未授权的 label、edge、property" in llm_client.prompt
-    assert result.to_dict()["llm_prompts"]["cypher_generation_fallback"] == llm_client.prompt
-    assert result.to_dict()["llm_responses"]["cypher_generation_fallback"] == result.generated_cypher
-    assert result.to_dict()["llm_prompts"]["intent_recognition_fallback"] is None
-    assert result.to_dict()["llm_responses"]["intent_recognition_fallback"] is None
+    assert "逻辑查询计划与授权路径" in llm_client.prompt
+    assert "SemanticQuerySpec" not in llm_client.prompt
+    assert "不要新增逻辑查询计划和授权路径未允许的 label、edge、property" in llm_client.prompt
+    fallback_call = result.to_dict()["generation"]["cypher_fallback_llm"]
+    assert fallback_call["prompt"] == llm_client.prompt
+    assert fallback_call["raw_output"] == result.generated_cypher
+    assert result.to_dict()["intent_recognition"]["diagnostics"]["llm_secondary_attempts"] == []
 
 
 @pytest.mark.asyncio
@@ -382,8 +558,8 @@ async def test_semantic_pipeline_falls_back_to_controlled_llm_when_renderer_pref
     assert result.generated_cypher.endswith("RETURN t.name AS tunnel_name")
     assert result.preflight.accepted is True
     assert "semantic preflight failed" in llm_client.prompt
-    assert "semantic_query_mismatch" in llm_client.prompt
-    assert result.to_dict()["llm_prompts"]["cypher_generation_fallback"] == llm_client.prompt
+    assert "logical_plan_mismatch" in llm_client.prompt
+    assert result.to_dict()["generation"]["cypher_fallback_llm"]["prompt"] == llm_client.prompt
 
 
 @pytest.mark.asyncio

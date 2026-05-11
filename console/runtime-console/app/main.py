@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, RedirectResponse
@@ -46,8 +48,8 @@ def create_app() -> FastAPI:
     async def list_tasks(
         page: int = Query(1, ge=1),
         page_size: int = Query(20, ge=1, le=100),
-        difficulty: str | None = Query(None),
-        q: str | None = Query(None),
+        difficulty: Optional[str] = Query(None),
+        q: Optional[str] = Query(None),
     ) -> Dict[str, object]:
         return await run_in_threadpool(
             results_service.list_tasks,

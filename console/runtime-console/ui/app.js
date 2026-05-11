@@ -11,6 +11,7 @@ const pageIndicator = document.getElementById('page-indicator');
 
 const generationLabels = {
   generated: '生成成功',
+  clarification_required: '需要澄清',
   generation_failed: '生成失败',
   service_failed: '服务失败',
 };
@@ -54,6 +55,7 @@ function tone(status) {
     case 'running':
     case 'pending':
     case 'generation_failed':
+    case 'clarification_required':
       return 'warn';
     default:
       return 'neutral';

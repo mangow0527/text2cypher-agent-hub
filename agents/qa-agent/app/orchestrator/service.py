@@ -17,6 +17,7 @@ from app.domain.roundtrip.service import RoundtripService
 from app.domain.schema.compatibility_service import SchemaCompatibilityService
 from app.domain.schema.service import SchemaService
 from app.domain.schema.source_resolver import SourceResolver
+from app.domain.schema.value_catalog import ValueCatalogProfiler
 from app.domain.validation.service import ValidationService
 from app.integrations.qa_dispatcher import QADispatcher
 from app.logging import ModuleLogStore
@@ -40,6 +41,7 @@ class Orchestrator:
         schema_service: SchemaService | None = None,
         source_resolver: SourceResolver | None = None,
         schema_compatibility_service: SchemaCompatibilityService | None = None,
+        value_catalog_profiler: ValueCatalogProfiler | None = None,
         coverage_service: CoverageService | None = None,
         generation_service: GenerationService | None = None,
         query_plan_service: QueryPlanService | None = None,
@@ -58,6 +60,7 @@ class Orchestrator:
         self.schema_service = schema_service or SchemaService()
         self.source_resolver = source_resolver or SourceResolver()
         self.schema_compatibility_service = schema_compatibility_service or SchemaCompatibilityService()
+        self.value_catalog_profiler = value_catalog_profiler or ValueCatalogProfiler()
         self.coverage_service = coverage_service or CoverageService()
         self.generation_service = generation_service or GenerationService()
         self.query_plan_service = query_plan_service or QueryPlanService()
@@ -182,10 +185,11 @@ class Orchestrator:
                 ),
             )
             schema = resolved_schema_input
-            self.artifact_store.write_json(paths["schema"], schema.model_dump())
-            job.artifacts["schema"] = str(paths["schema"])
             resolved_tugraph = self.source_resolver.resolve_tugraph(job.request.tugraph_source, job.request.tugraph_config)
             self.schema_compatibility_service.assert_compatible(schema, resolved_tugraph)
+            schema = self.value_catalog_profiler.enrich(resolved_schema_input, resolved_tugraph)
+            self.artifact_store.write_json(paths["schema"], schema.model_dump())
+            job.artifacts["schema"] = str(paths["schema"])
 
             target_qa_count = job.request.output_config.target_qa_count
             difficulty_targets = dict(job.request.output_config.difficulty_targets)

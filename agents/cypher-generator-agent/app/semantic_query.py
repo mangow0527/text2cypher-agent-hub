@@ -49,6 +49,8 @@ class SemanticFieldRef:
 
     @property
     def expression(self) -> str:
+        if self.property == "*":
+            return self.alias
         return f"{self.alias}.{self.property}"
 
     def to_dict(self) -> dict[str, str]:
@@ -99,6 +101,20 @@ class SemanticOrderBy:
 
 
 @dataclass(frozen=True)
+class SemanticWithStage:
+    carry_aliases: tuple[str, ...]
+    metric: SemanticMetricRef
+    output_alias: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "carry_aliases": list(self.carry_aliases),
+            "metric": self.metric.to_dict(),
+            "output_alias": self.output_alias,
+        }
+
+
+@dataclass(frozen=True)
 class SemanticQuerySpec:
     kind: SemanticQueryKind
     entities: tuple[SemanticEntityRef, ...]
@@ -108,6 +124,7 @@ class SemanticQuerySpec:
     metrics: tuple[SemanticMetricRef, ...] = ()
     filters: tuple[SemanticFilterRef, ...] = ()
     order_by: tuple[SemanticOrderBy, ...] = ()
+    with_stage: SemanticWithStage | None = None
     limit: int | None = None
     output_alias: str | None = None
     intent: str | None = None
@@ -127,6 +144,7 @@ class SemanticQuerySpec:
             "metrics": [metric.to_dict() for metric in self.metrics],
             "filters": [filter_ref.to_dict() for filter_ref in self.filters],
             "order_by": [order.to_dict() for order in self.order_by],
+            "with_stage": self.with_stage.to_dict() if self.with_stage is not None else None,
             "limit": self.limit,
             "output_alias": self.output_alias,
         }

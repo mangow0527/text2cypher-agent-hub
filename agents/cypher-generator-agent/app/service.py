@@ -226,6 +226,31 @@ class CypherGeneratorAgentService:
                 generation_status="submitted_to_testing",
             )
 
+        clarification = getattr(semantic_result, "clarification", None)
+        if isinstance(clarification, dict):
+            clarification_report = CgaGenerationNonSuccessReport(
+                id=request.id,
+                question=request.question,
+                generation_run_id=generation_run_id,
+                generation_status="clarification_required",
+                input_prompt_snapshot=snapshot,
+                clarification=clarification,
+                gate_passed=False,
+            )
+            if not await self._deliver_or_outbox(
+                payload_type="CgaGenerationNonSuccessReport",
+                payload=clarification_report,
+            ):
+                return GenerationRunResult(
+                    generation_run_id=generation_run_id,
+                    generation_status="service_failed",
+                    reason="testing_agent_submission_failed",
+                )
+            return GenerationRunResult(
+                generation_run_id=generation_run_id,
+                generation_status="clarification_required",
+            )
+
         failure_reason = _semantic_generation_failure_reason(semantic_result)
         failure_report = CgaGenerationNonSuccessReport(
             id=request.id,
