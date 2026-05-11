@@ -7,10 +7,10 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from .models import (
+    CgaGenerationNonSuccessReport,
     EvaluationSummary,
     ExecutionResult,
     GeneratedCypherSubmissionRequest,
-    GenerationRunFailureReport,
     ImprovementAssessment,
     IssueTicket,
     QAGoldenRequest,
@@ -91,11 +91,8 @@ class TestingRepository:
             generation_run_id=request.generation_run_id,
             generated_cypher=request.generated_cypher,
             input_prompt_snapshot=request.input_prompt_snapshot,
-            last_llm_raw_output=request.last_llm_raw_output,
             generation_status="generated",
             failure_reason=None,
-            generation_retry_count=request.generation_retry_count,
-            generation_failure_reasons=request.generation_failure_reasons,
             state=state,
             received_at=_utc_now(),
             updated_at=_utc_now(),
@@ -103,7 +100,7 @@ class TestingRepository:
         self._write_submission_record(record)
         return SaveSubmissionResult(created=True, attempt_no=attempt_no, record=record)
 
-    def save_generation_failure_report(self, report: GenerationRunFailureReport) -> None:
+    def save_generation_failure_report(self, report: CgaGenerationNonSuccessReport) -> None:
         path = self._generation_failure_report_path(report.id, report.generation_run_id)
         payload = report.model_dump(mode="json")
         payload["received_at"] = _utc_now()
@@ -111,7 +108,7 @@ class TestingRepository:
             existing = json.loads(path.read_text(encoding="utf-8"))
             comparable = {key: value for key, value in existing.items() if key != "received_at"}
             if comparable != report.model_dump(mode="json"):
-                raise ValueError(f"Generation failure report conflict for id={report.id}")
+                raise ValueError(f"CGA non-success report conflict for id={report.id}")
             return
         path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -135,13 +132,15 @@ class TestingRepository:
 
     def save_generation_failure_submission(
         self,
-        report: GenerationRunFailureReport,
+        report: CgaGenerationNonSuccessReport,
         *,
         state: str,
     ) -> SaveSubmissionResult:
+        if report.generation_status != "generation_failed":
+            raise ValueError("Only generation_failed reports can create evaluation attempts")
         self.save_generation_failure_report(report)
         parsed_cypher = (report.parsed_cypher or "").strip()
-        generated_cypher = parsed_cypher or report.last_llm_raw_output or ""
+        generated_cypher = parsed_cypher
         for existing in self.list_submission_attempts(report.id):
             if existing["generation_run_id"] != report.generation_run_id:
                 continue
@@ -161,11 +160,8 @@ class TestingRepository:
             generation_run_id=report.generation_run_id,
             generated_cypher=generated_cypher,
             input_prompt_snapshot=report.input_prompt_snapshot,
-            last_llm_raw_output=report.last_llm_raw_output,
             generation_status="generation_failed",
             failure_reason=report.failure_reason,
-            generation_retry_count=report.generation_retry_count,
-            generation_failure_reasons=report.generation_failure_reasons,
             state=state,
             received_at=_utc_now(),
             updated_at=_utc_now(),
@@ -324,16 +320,13 @@ class TestingRepository:
             and existing["generation_run_id"] == request.generation_run_id
             and existing["generated_cypher"] == request.generated_cypher
             and existing["input_prompt_snapshot"] == request.input_prompt_snapshot
-            and existing.get("last_llm_raw_output", "") == request.last_llm_raw_output
-            and int(existing.get("generation_retry_count", 0)) == request.generation_retry_count
-            and existing.get("generation_failure_reasons", []) == request.generation_failure_reasons
             and existing.get("generation_status", "generated") == "generated"
         )
 
     def _generation_failure_submission_matches(
         self,
         existing: Dict[str, Any],
-        report: GenerationRunFailureReport,
+        report: CgaGenerationNonSuccessReport,
         generated_cypher: str,
     ) -> bool:
         return (
@@ -342,11 +335,8 @@ class TestingRepository:
             and existing["generation_run_id"] == report.generation_run_id
             and existing["generated_cypher"] == generated_cypher
             and existing["input_prompt_snapshot"] == report.input_prompt_snapshot
-            and existing.get("last_llm_raw_output", "") == report.last_llm_raw_output
             and existing.get("generation_status") == "generation_failed"
             and existing.get("failure_reason") == report.failure_reason
-            and int(existing.get("generation_retry_count", 0)) == report.generation_retry_count
-            and existing.get("generation_failure_reasons", []) == report.generation_failure_reasons
         )
 
     def _generation_failure_report_path(self, qa_id: str, generation_run_id: str) -> Path:

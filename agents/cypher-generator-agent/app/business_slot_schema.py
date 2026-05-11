@@ -7,6 +7,7 @@ from typing import Any
 
 import yaml
 
+from . import resource_paths
 from .intent_recognition import IntentRecognitionResult
 
 
@@ -267,9 +268,7 @@ class BusinessSlotFiller:
 
 @lru_cache(maxsize=1)
 def get_default_business_slot_schema_registry() -> BusinessSlotSchemaRegistry:
-    return BusinessSlotSchemaRegistry.from_path(
-        Path(__file__).resolve().parents[1] / "config" / "business_slot_schemas.yaml"
-    )
+    return BusinessSlotSchemaRegistry.from_path(resource_paths.business_slot_schemas_path())
 
 
 def _candidates(slots: object) -> tuple[str, ...]:

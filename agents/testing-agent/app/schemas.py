@@ -1,7 +1,7 @@
 from .models import (
+    CgaGenerationNonSuccessReport,
     EvaluationStatusResponse,
     GeneratedCypherSubmissionRequest,
-    GenerationRunFailureReport,
     IssueTicket,
     QAGoldenRequest,
     QAGoldenResponse,
@@ -10,8 +10,8 @@ from .models import (
 
 __all__ = [
     "EvaluationStatusResponse",
+    "CgaGenerationNonSuccessReport",
     "GeneratedCypherSubmissionRequest",
-    "GenerationRunFailureReport",
     "IssueTicket",
     "QAGoldenRequest",
     "QAGoldenResponse",

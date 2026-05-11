@@ -28,8 +28,8 @@ def run_semantic_cypher_preflight(cypher: str, *, semantic_query: SemanticQueryS
     query = cypher.strip()
     if _has_unauthorized_schema_reference(query, semantic_query):
         return PreflightCheck(accepted=False, reason="unauthorized_schema_reference")
-    if _has_semantic_query_mismatch(query, semantic_query):
-        return PreflightCheck(accepted=False, reason="semantic_query_mismatch")
+    if _has_logical_plan_mismatch(query, semantic_query):
+        return PreflightCheck(accepted=False, reason="logical_plan_mismatch")
     return PreflightCheck(accepted=True)
 
 
@@ -61,7 +61,7 @@ def _has_unauthorized_schema_reference(query: str, semantic_query: SemanticQuery
     return False
 
 
-def _has_semantic_query_mismatch(query: str, semantic_query: SemanticQuerySpec) -> bool:
+def _has_logical_plan_mismatch(query: str, semantic_query: SemanticQuerySpec) -> bool:
     for entity in semantic_query.entities:
         if f":{entity.label}" not in query:
             return True

@@ -15,7 +15,7 @@ from services.cypher_generator_agent.app.intent_recognition import IntentRecogni
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONFIG_DIR = REPO_ROOT / "services/cypher_generator_agent/config"
+INTENT_RESOURCE_DIR = REPO_ROOT / "services/cypher_generator_agent/resources/intent"
 
 
 class IntentEvaluationTest(unittest.TestCase):
@@ -90,8 +90,8 @@ class IntentEvaluationTest(unittest.TestCase):
             summary.confusion_pairs[0],
         )
 
-    def test_config_intent_eval_set_is_loadable_and_has_unique_ids(self) -> None:
-        items = load_intent_eval_items(CONFIG_DIR / "intent_eval_set.jsonl")
+    def test_resource_intent_eval_set_is_loadable_and_has_unique_ids(self) -> None:
+        items = load_intent_eval_items(INTENT_RESOURCE_DIR / "eval_set.jsonl")
 
         self.assertGreaterEqual(len(items), 50)
         self.assertEqual(len(items), len({item.id for item in items}))

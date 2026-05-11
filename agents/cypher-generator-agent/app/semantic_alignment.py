@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
+from . import resource_paths
 from .semantic_layer import SemanticLayer, SemanticLayerConfigError, load_semantic_layer
 
 
@@ -512,7 +513,7 @@ def _first_str(payload: dict[str, Any], *keys: str) -> str | None:
 
 
 def _default_semantic_layer_path() -> Path:
-    return Path(__file__).resolve().parents[1] / "config" / "semantic_layer.yaml"
+    return resource_paths.semantic_layer_path()
 
 
 def _default_tugraph_schema_path() -> Path:

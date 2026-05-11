@@ -6,7 +6,7 @@ import uvicorn
 
 from .config import get_settings
 from .models import EvaluationStatusResponse, IssueTicket, QAGoldenResponse, SubmissionReceipt
-from .schemas import GeneratedCypherSubmissionRequest, GenerationRunFailureReport, QAGoldenRequest
+from .schemas import CgaGenerationNonSuccessReport, GeneratedCypherSubmissionRequest, QAGoldenRequest
 from .service import get_testing_service
 
 app = FastAPI(title="testing-agent", version="2.0.0")
@@ -49,7 +49,7 @@ async def submit_evaluation(request: GeneratedCypherSubmissionRequest) -> Submis
 
 
 @app.post("/api/v1/evaluations/generation-failures", response_model=SubmissionReceipt)
-async def submit_generation_failure(request: GenerationRunFailureReport) -> SubmissionReceipt:
+async def submit_generation_failure(request: CgaGenerationNonSuccessReport) -> SubmissionReceipt:
     try:
         return await get_testing_service().ingest_generation_failure(request)
     except ValueError as exc:

@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from services.cypher_generator_agent.app import resource_paths
 from services.cypher_generator_agent.app.semantic_layer import (
     SemanticLayerConfigError,
     get_default_semantic_layer,
@@ -46,9 +47,8 @@ def test_default_semantic_layer_uses_tugraph_elem_type_field_for_type_semantics(
     assert semantic_layer.property("link_type").property == "elem_type"
 
 
-def test_slot_dictionary_entity_properties_are_exposed_by_semantic_layer() -> None:
-    slot_dictionary_path = REPO_ROOT / "services/cypher_generator_agent/config/slot_dictionary.yaml"
-    slot_dictionary = yaml.safe_load(slot_dictionary_path.read_text(encoding="utf-8"))
+def test_slot_parse_patterns_entity_properties_are_exposed_by_semantic_layer() -> None:
+    slot_patterns = yaml.safe_load(resource_paths.slot_parse_patterns_path().read_text(encoding="utf-8"))
     semantic_layer = get_default_semantic_layer()
     exposed_properties = {
         (field.owner, field.property)
@@ -57,7 +57,7 @@ def test_slot_dictionary_entity_properties_are_exposed_by_semantic_layer() -> No
 
     missing = sorted(
         f"{entity}.{property_name}"
-        for entity, property_names in slot_dictionary["entity_properties"].items()
+        for entity, property_names in slot_patterns["entity_properties"].items()
         for property_name in property_names
         if (entity, property_name) not in exposed_properties
     )

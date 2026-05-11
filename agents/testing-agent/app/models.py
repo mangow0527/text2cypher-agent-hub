@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 Difficulty = Literal["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8"]
@@ -41,9 +41,10 @@ GenerationFailureReason = Literal[
     "unsupported_call",
     "unsupported_start_clause",
     "unauthorized_schema_reference",
-    "semantic_query_mismatch",
-    "semantic_parse_rejected",
-    "generation_retry_exhausted",
+    "logical_plan_mismatch",
+    "semantic_match_rejected",
+    "path_planning_failed",
+    "cypher_fallback_cannot_generate",
 ]
 ServiceFailureReason = Literal[
     "knowledge_context_unavailable",
@@ -51,7 +52,7 @@ ServiceFailureReason = Literal[
     "model_invocation_failed",
     "testing_agent_submission_failed",
 ]
-GenerationReportStatus = Literal["generation_failed", "service_failed"]
+GenerationReportStatus = Literal["generation_failed", "clarification_required", "service_failed"]
 SubmissionGenerationStatus = Literal["generated", "generation_failed"]
 
 
@@ -70,44 +71,51 @@ class QAGoldenResponse(BaseModel):
 
 
 class GeneratedCypherSubmissionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     question: str
     generation_run_id: str
+    generation_status: Literal["generated"] = "generated"
     generated_cypher: str
     input_prompt_snapshot: str
-    last_llm_raw_output: str
-    generation_retry_count: int = Field(default=0, ge=0)
-    generation_failure_reasons: List[GenerationFailureReason] = Field(default_factory=list)
 
 
-class GenerationRunFailureReport(BaseModel):
+class CgaGenerationNonSuccessReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     question: str
     generation_run_id: str
-    input_prompt_snapshot: str
-    last_llm_raw_output: str = ""
     generation_status: GenerationReportStatus
-    failure_reason: GenerationFailureReason | ServiceFailureReason
-    last_generation_failure_reason: Optional[GenerationFailureReason] = None
-    generation_retry_count: int = Field(default=0, ge=0)
-    generation_failure_reasons: List[GenerationFailureReason] = Field(default_factory=list)
+    input_prompt_snapshot: str
+    failure_reason: Optional[Union[GenerationFailureReason, ServiceFailureReason]] = None
+    clarification: Optional[Dict[str, Any]] = None
     parsed_cypher: Optional[str] = None
     gate_passed: bool = False
 
     @model_validator(mode="after")
-    def validate_failure_reason_matches_status(self) -> "GenerationRunFailureReport":
+    def validate_non_success_status(self) -> "CgaGenerationNonSuccessReport":
         generation_reasons = set(GenerationFailureReason.__args__)
         service_reasons = set(ServiceFailureReason.__args__)
         if self.generation_status == "generation_failed":
             if self.failure_reason not in generation_reasons:
                 raise ValueError("generation_failed requires GenerationFailure reason")
-            if self.failure_reason == "generation_retry_exhausted" and self.last_generation_failure_reason is None:
-                raise ValueError("generation_retry_exhausted requires last_generation_failure_reason")
+            if self.clarification is not None:
+                raise ValueError("generation_failed must not include clarification")
+            return self
+        if self.generation_status == "clarification_required":
+            if self.clarification is None:
+                raise ValueError("clarification_required requires clarification")
+            if self.parsed_cypher is not None:
+                raise ValueError("clarification_required must not include parsed_cypher")
             return self
         if self.failure_reason not in service_reasons:
             raise ValueError("service_failed requires ServiceFailure reason")
-        if self.last_generation_failure_reason is not None:
-            raise ValueError("service_failed must not include last_generation_failure_reason")
+        if self.clarification is not None:
+            raise ValueError("service_failed must not include clarification")
+        if self.parsed_cypher is not None:
+            raise ValueError("service_failed must not include parsed_cypher")
         return self
 
 
@@ -233,11 +241,8 @@ class GenerationEvidence(BaseModel):
     generation_run_id: str
     attempt_no: int = Field(ge=1)
     input_prompt_snapshot: str
-    last_llm_raw_output: str = ""
     generation_status: SubmissionGenerationStatus = "generated"
-    failure_reason: Optional[GenerationFailureReason | ServiceFailureReason] = None
-    generation_retry_count: int = Field(default=0, ge=0)
-    generation_failure_reasons: List[GenerationFailureReason] = Field(default_factory=list)
+    failure_reason: Optional[Union[GenerationFailureReason, ServiceFailureReason]] = None
 
 
 class IssueTicket(BaseModel):
@@ -281,11 +286,8 @@ class SubmissionRecord(BaseModel):
     generation_run_id: str
     generated_cypher: str
     input_prompt_snapshot: str
-    last_llm_raw_output: str = ""
     generation_status: SubmissionGenerationStatus = "generated"
-    failure_reason: Optional[GenerationFailureReason | ServiceFailureReason] = None
-    generation_retry_count: int = Field(default=0, ge=0)
-    generation_failure_reasons: List[GenerationFailureReason] = Field(default_factory=list)
+    failure_reason: Optional[Union[GenerationFailureReason, ServiceFailureReason]] = None
     state: EvaluationState
     execution: Optional[ExecutionResult] = None
     evaluation: Optional[EvaluationSummary] = None

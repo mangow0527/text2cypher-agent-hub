@@ -23,6 +23,7 @@ class RuntimeResultsService:
     _DIFFICULTY_ORDER = ["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8"]
     _GENERATION_STATUS_LABELS = {
         "generated": "生成成功",
+        "clarification_required": "需要澄清",
         "generation_failed": "生成失败",
         "service_failed": "服务失败",
     }
@@ -399,9 +400,12 @@ class RuntimeResultsService:
         generation_failure: dict[str, Any] | None,
     ) -> dict[str, Any]:
         source = submission or generation_failure or {}
-        generated_cypher = (submission or {}).get("generated_cypher") or ""
-        parsed_cypher = generated_cypher or (generation_failure or {}).get("parsed_cypher")
         generation_status = source.get("generation_status")
+        generated_cypher = (submission or {}).get("generated_cypher") or ""
+        parsed_cypher = ""
+        if generation_status == "generation_failed":
+            parsed_cypher = (generation_failure or {}).get("parsed_cypher") or generated_cypher
+        display_cypher = generated_cypher or parsed_cypher
         gate_passed = (
             bool(generated_cypher)
             if submission is not None and submission.get("generation_status") == "generated"
@@ -413,16 +417,13 @@ class RuntimeResultsService:
             "question": source.get("question", ""),
             "difficulty": (golden or {}).get("difficulty"),
             "golden_cypher": (golden or {}).get("cypher"),
-            "generated_cypher": parsed_cypher,
+            "generated_cypher": display_cypher,
             "generation_run_id": source.get("generation_run_id"),
             "prompt_markdown": prompt_snapshot,
-            "last_llm_raw_output": source.get("last_llm_raw_output") or "",
             "parsed_cypher": parsed_cypher,
             "gate_passed": gate_passed,
             "failure_reason": source.get("failure_reason") or (generation_failure or {}).get("failure_reason"),
-            "last_failure_reason": source.get("last_generation_failure_reason") or (generation_failure or {}).get("last_generation_failure_reason"),
-            "retry_count": int(source.get("generation_retry_count") or (generation_failure or {}).get("generation_retry_count") or 0),
-            "failure_reasons": source.get("generation_failure_reasons") or (generation_failure or {}).get("generation_failure_reasons") or [],
+            "clarification": source.get("clarification") or (generation_failure or {}).get("clarification"),
             "generation_status": generation_status,
             "chain_summary": self._generation_chain_summary(
                 snapshot=snapshot,
@@ -446,26 +447,34 @@ class RuntimeResultsService:
 
     def _generation_llm_prompts(self, snapshot: dict[str, Any]) -> dict[str, dict[str, Any]]:
         raw_prompts = snapshot.get("llm_prompts") if isinstance(snapshot.get("llm_prompts"), dict) else {}
+        raw_responses = snapshot.get("llm_responses") if isinstance(snapshot.get("llm_responses"), dict) else {}
 
-        def prompt_item(key: str, title_zh: str) -> dict[str, Any]:
+        def prompt_item(key: str, title_zh: str, raw_output_title_zh: str) -> dict[str, Any]:
             raw_prompt = raw_prompts.get(key)
             prompt = raw_prompt.strip() if isinstance(raw_prompt, str) else ""
+            raw_response = raw_responses.get(key)
+            raw_output = raw_response.strip() if isinstance(raw_response, str) else ""
             return {
                 "key": key,
                 "title_zh": title_zh,
+                "raw_output_title_zh": raw_output_title_zh,
                 "triggered": bool(prompt),
                 "prompt": prompt,
+                "raw_output": raw_output,
                 "empty_label_zh": "本次未触发",
+                "empty_raw_output_label_zh": "本次未触发或未记录返回",
             }
 
         return {
             "intent_recognition_fallback": prompt_item(
                 "intent_recognition_fallback",
                 "意图识别 LLM 兜底提示词",
+                "意图识别 LLM 原始返回",
             ),
             "cypher_generation_fallback": prompt_item(
                 "cypher_generation_fallback",
                 "Renderer 失败后的 Cypher 兜底提示词",
+                "Cypher 生成 LLM 原始返回",
             ),
         }
 
@@ -529,6 +538,7 @@ class RuntimeResultsService:
     def _generation_status_label(self, value: str) -> str:
         return {
             "generated": "生成成功",
+            "clarification_required": "需要澄清",
             "generation_failed": "生成失败",
             "service_failed": "服务失败",
         }.get(value, "未记录")
@@ -541,9 +551,10 @@ class RuntimeResultsService:
 
     def _generation_failure_label(self, value: str) -> str:
         return {
-            "semantic_parse_rejected": "语义解析未通过",
-            "semantic_query_mismatch": "生成结果与语义查询规格不一致",
-            "generation_retry_exhausted": "生成重试次数耗尽",
+            "semantic_match_rejected": "语义视图匹配未通过",
+            "logical_plan_mismatch": "生成结果与逻辑查询计划不一致",
+            "path_planning_failed": "图路径规划失败",
+            "cypher_fallback_cannot_generate": "受控模型无法安全生成",
             "unbalanced_brackets": "括号未闭合",
             "no_cypher_found": "未找到 Cypher",
             "model_invocation_failed": "模型调用失败",
@@ -619,6 +630,7 @@ class RuntimeResultsService:
         repair_response = self._read_repair_response(submission)
         request = (analysis or {}).get("knowledge_repair_request") or {}
         status = (analysis or {}).get("status") or (repair_response or {}).get("status")
+        knowledge_agent_response = (analysis or {}).get("knowledge_agent_response")
         non_repairable_reason = str((analysis or {}).get("non_repairable_reason") or "")
         not_repairable_request = None
         not_repairable_response = None
@@ -636,18 +648,156 @@ class RuntimeResultsService:
                 "reason": "not_repairable",
                 "message": "不修复：repair-agent 判定该问题不是 knowledge-agent 知识缺口，因此没有发送请求。",
             }
+        if knowledge_agent_response is None:
+            knowledge_agent_response = not_repairable_response
         return {
             "issue_ticket_id": (ticket or {}).get("ticket_id") or (submission or {}).get("issue_ticket_id"),
             "analysis_id": (analysis or {}).get("analysis_id") or (repair_response or {}).get("analysis_id"),
             "status": status,
+            "repair_state": self._repair_state(status=status, analysis=analysis, knowledge_agent_response=knowledge_agent_response),
+            "knowledge_apply_state": self._knowledge_apply_state(
+                status=status,
+                analysis=analysis,
+                knowledge_agent_response=knowledge_agent_response,
+                request=request or not_repairable_request,
+            ),
+            "redispatch_state": self._redispatch_state(knowledge_agent_response),
             "non_repairable_reason": non_repairable_reason,
             "llm_prompt_markdown": self._repair_llm_prompt_markdown(analysis),
             "raw_output": (analysis or {}).get("raw_output"),
             "suggestion": request.get("suggestion"),
             "knowledge_types": request.get("knowledge_types") or [],
             "knowledge_agent_request": request or not_repairable_request,
-            "knowledge_agent_response": (analysis or {}).get("knowledge_agent_response") or not_repairable_response,
+            "knowledge_agent_response": knowledge_agent_response,
             "applied": (analysis or {}).get("applied") if analysis is not None else None,
+        }
+
+    def _repair_state(
+        self,
+        *,
+        status: Any,
+        analysis: dict[str, Any] | None,
+        knowledge_agent_response: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if analysis is None:
+            return self._state_item("not_recorded", "未记录", raw_status=status, message="未读取到 repair-agent 诊断记录。")
+        status_text = str(status or "")
+        decision = self._knowledge_agent_decision(knowledge_agent_response)
+        if decision == "human_review":
+            return self._state_item(
+                "waiting_human_review",
+                "等待人工审核",
+                raw_status=status,
+                message="knowledge-agent 已把修复建议转换为人工审核任务，尚不能视为知识已落库。",
+            )
+        if decision == "reject":
+            return self._state_item(
+                "rejected",
+                "候选修复被拒绝",
+                raw_status=status,
+                message="knowledge-agent 校验拒绝了 repair-agent 候选变更。",
+            )
+        if status_text == "not_repairable":
+            return self._state_item("not_repairable", "无需知识修复", raw_status=status, message=analysis.get("non_repairable_reason") or "repair-agent 判定该问题不是知识缺口。")
+        if status_text == "repair_apply_paused":
+            return self._state_item("apply_paused", "知识应用已暂停", raw_status=status, message="repair-agent 已生成建议，但知识应用当前被配置为暂停。")
+        if status_text == "apply_failed":
+            return self._state_item("apply_failed", "知识应用失败", raw_status=status, message="repair-agent 诊断完成，但提交 knowledge-agent 失败。")
+        if status_text == "analysis_pending":
+            return self._state_item("analysis_pending", "诊断中", raw_status=status, message="repair-agent 诊断尚未完成。")
+        if status_text == "applied":
+            applied = analysis.get("applied")
+            return self._state_item(
+                "applied" if applied else "suggestion_recorded",
+                "知识修复已应用" if applied else "修复建议已记录",
+                raw_status=status,
+                message="repair-agent 原始状态为 applied；请结合 knowledge apply 与 redispatch 状态判断闭环是否完成。",
+            )
+        return self._state_item(status_text or "unknown", status_text or "未知状态", raw_status=status)
+
+    def _knowledge_apply_state(
+        self,
+        *,
+        status: Any,
+        analysis: dict[str, Any] | None,
+        knowledge_agent_response: dict[str, Any] | None,
+        request: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if analysis is None:
+            return self._state_item("not_started", "未开始", raw_status=status, message="没有可绑定的 repair analysis，无法判断知识应用状态。")
+        status_text = str(status or "")
+        response_status = str((knowledge_agent_response or {}).get("status") or "")
+        response_code = str((knowledge_agent_response or {}).get("code") or "")
+        decision = self._knowledge_agent_decision(knowledge_agent_response)
+        if status_text == "not_repairable":
+            return self._state_item("not_sent", "未发送", raw_status=status, message="该问题被判定为不需要 knowledge-agent 知识应用。")
+        if status_text == "apply_failed":
+            return self._state_item("apply_failed", "知识应用失败", raw_status=status, message="knowledge-agent 应用请求失败。")
+        if status_text == "repair_apply_paused" or response_status == "paused" or response_code == "KNOWLEDGE_REPAIR_APPLY_DISABLED":
+            return self._state_item("apply_paused", "知识应用已暂停", raw_status=status, message="knowledge-agent 当前不执行自动落库。")
+        if decision == "human_review":
+            return self._state_item(
+                "waiting_human_review",
+                "等待人工审核后落库",
+                raw_status=status,
+                message="修复建议进入人工审核；通过审核前不视为知识已落库。",
+            )
+        if decision == "reject":
+            return self._state_item(
+                "rejected",
+                "候选变更被拒绝",
+                raw_status=status,
+                message="knowledge-agent schema-aware validation 拒绝了候选知识变更。",
+            )
+        if response_status == "ok" and analysis.get("applied"):
+            return self._state_item("applied", "知识应用已确认", raw_status=status, message="knowledge-agent 返回 ok，且 repair analysis 标记为 applied。")
+        if request:
+            return self._state_item("pending", "等待 knowledge-agent 响应", raw_status=status)
+        return self._state_item("not_sent", "未发送", raw_status=status)
+
+    def _redispatch_state(self, knowledge_agent_response: dict[str, Any] | None) -> dict[str, Any]:
+        response = knowledge_agent_response if isinstance(knowledge_agent_response, dict) else {}
+        redispatch = response.get("redispatch") if isinstance(response.get("redispatch"), dict) else {}
+        dispatch = redispatch.get("dispatch") if isinstance(redispatch.get("dispatch"), dict) else {}
+        status = str(redispatch.get("status") or dispatch.get("status") or "")
+        reason = str(dispatch.get("reason") or redispatch.get("reason") or "")
+        if reason == "knowledge_agent_no_longer_redispatches_qa":
+            return self._state_item(
+                "cancelled",
+                "QA 自动重派发已取消",
+                raw_status=status or None,
+                reason=reason,
+                message="redispatch 不再由 knowledge-agent 触发；未重派发不代表知识修复失败。",
+            )
+        if not redispatch:
+            return self._state_item("not_recorded", "未记录", message="knowledge-agent 响应中没有 redispatch 记录。")
+        if status == "skipped":
+            return self._state_item("skipped", "未重派发", raw_status=status, reason=reason or None)
+        if status:
+            return self._state_item(status, status, raw_status=status, reason=reason or None)
+        return self._state_item("unknown", "未知状态", reason=reason or None)
+
+    def _knowledge_agent_decision(self, knowledge_agent_response: dict[str, Any] | None) -> str:
+        response = knowledge_agent_response if isinstance(knowledge_agent_response, dict) else {}
+        agent_run = response.get("agent_run") if isinstance(response.get("agent_run"), dict) else {}
+        decision = agent_run.get("decision") if isinstance(agent_run.get("decision"), dict) else {}
+        return str(decision.get("action") or "")
+
+    def _state_item(
+        self,
+        value: str,
+        label_zh: str,
+        *,
+        raw_status: Any | None = None,
+        reason: str | None = None,
+        message: str = "",
+    ) -> dict[str, Any]:
+        return {
+            "value": value,
+            "label_zh": label_zh,
+            "raw_status": raw_status,
+            "reason": reason,
+            "message": message,
         }
 
     def _repair_llm_prompt_markdown(self, analysis: dict[str, Any] | None) -> str:
@@ -760,9 +910,27 @@ class RuntimeResultsService:
         submission: dict[str, Any] | None,
         analysis: dict[str, Any] | None,
     ) -> str:
+        if analysis is None:
+            if repair_status in {"failed", "pending"}:
+                return repair_status
+            if repair_status == "passed":
+                return "running"
+            return "not_started"
         response = (analysis or {}).get("knowledge_agent_response")
-        if response and response.get("status") == "ok":
+        apply_state = self._knowledge_apply_state(
+            status=(analysis or {}).get("status"),
+            analysis=analysis,
+            knowledge_agent_response=response,
+            request=(analysis or {}).get("knowledge_repair_request"),
+        )
+        if apply_state["value"] == "applied":
             return "passed"
+        if apply_state["value"] in {"waiting_human_review", "pending", "apply_paused"}:
+            return "running"
+        if apply_state["value"] in {"apply_failed", "rejected"}:
+            return "failed"
+        if apply_state["value"] in {"not_sent", "not_started"}:
+            return "not_started"
         if repair_status == "passed":
             return "running"
         if repair_status in {"failed", "pending"}:

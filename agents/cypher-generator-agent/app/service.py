@@ -18,9 +18,9 @@ from .config import Settings, get_settings
 from .knowledge_context import KnowledgeDocsValidator
 from .knowledge_selection import RagKnowledgeSelector
 from .models import (
+    CgaGenerationNonSuccessReport,
     GeneratedCypherSubmissionRequest,
     GenerationFailureReason,
-    GenerationRunFailureReport,
     GenerationRunResult,
     QAQuestionRequest,
 )
@@ -33,7 +33,7 @@ class GeneratedCypherSubmitter(Protocol):
     async def submit(self, payload: GeneratedCypherSubmissionRequest) -> Dict[str, object]:
         ...
 
-    async def submit_generation_failure(self, payload: GenerationRunFailureReport) -> Dict[str, object]:
+    async def submit_generation_failure(self, payload: CgaGenerationNonSuccessReport) -> Dict[str, object]:
         ...
 
 
@@ -75,7 +75,6 @@ class CypherGeneratorAgentService:
                     generation_run_id=generation_run_id,
                     reason="semantic_contract_unaligned",
                     input_prompt_snapshot=json.dumps(alignment_report.to_dict(), ensure_ascii=False, indent=2),
-                    last_llm_raw_output="",
                 )
                 return GenerationRunResult(
                     generation_run_id=generation_run_id,
@@ -88,7 +87,6 @@ class CypherGeneratorAgentService:
                     generation_run_id=generation_run_id,
                     reason="knowledge_context_unavailable",
                     input_prompt_snapshot=json.dumps(alignment_report.to_dict(), ensure_ascii=False, indent=2),
-                    last_llm_raw_output="",
                 )
                 return GenerationRunResult(
                     generation_run_id=generation_run_id,
@@ -111,8 +109,8 @@ class CypherGeneratorAgentService:
                     if payload_type == "GeneratedCypherSubmissionRequest":
                         payload = GeneratedCypherSubmissionRequest(**record["payload"])
                         result = await self.testing_client.submit(payload=payload)
-                    elif payload_type == "GenerationRunFailureReport":
-                        payload = GenerationRunFailureReport(**record["payload"])
+                    elif payload_type == "CgaGenerationNonSuccessReport":
+                        payload = CgaGenerationNonSuccessReport(**record["payload"])
                         result = await self.testing_client.submit_generation_failure(payload=payload)
                     else:
                         self.delivery_outbox.mark_dead_letter(record["delivery_id"], f"unknown payload_type: {payload_type}")
@@ -134,7 +132,7 @@ class CypherGeneratorAgentService:
         self,
         *,
         payload_type: str,
-        payload: GeneratedCypherSubmissionRequest | GenerationRunFailureReport,
+        payload: GeneratedCypherSubmissionRequest | CgaGenerationNonSuccessReport,
     ) -> bool:
         try:
             if payload_type == "GeneratedCypherSubmissionRequest":
@@ -163,22 +161,18 @@ class CypherGeneratorAgentService:
         generation_run_id: str,
         reason: str,
         input_prompt_snapshot: str,
-        last_llm_raw_output: str,
     ) -> None:
-        failure_report = GenerationRunFailureReport(
+        failure_report = CgaGenerationNonSuccessReport(
             id=request.id,
             question=request.question,
             generation_run_id=generation_run_id,
-            input_prompt_snapshot=input_prompt_snapshot,
-            last_llm_raw_output=last_llm_raw_output,
             generation_status="service_failed",
+            input_prompt_snapshot=input_prompt_snapshot,
             failure_reason=reason,
-            generation_retry_count=0,
-            generation_failure_reasons=[],
             gate_passed=False,
         )
         await self._deliver_or_outbox(
-            payload_type="GenerationRunFailureReport",
+            payload_type="CgaGenerationNonSuccessReport",
             payload=failure_report,
         )
 
@@ -200,7 +194,6 @@ class CypherGeneratorAgentService:
                 generation_run_id=generation_run_id,
                 reason="model_invocation_failed",
                 input_prompt_snapshot="",
-                last_llm_raw_output="",
             )
             return GenerationRunResult(
                 generation_run_id=generation_run_id,
@@ -218,9 +211,6 @@ class CypherGeneratorAgentService:
                 generation_run_id=generation_run_id,
                 generated_cypher=generated_cypher,
                 input_prompt_snapshot=snapshot,
-                last_llm_raw_output=generated_cypher,
-                generation_retry_count=0,
-                generation_failure_reasons=[],
             )
             if not await self._deliver_or_outbox(
                 payload_type="GeneratedCypherSubmissionRequest",
@@ -237,21 +227,18 @@ class CypherGeneratorAgentService:
             )
 
         failure_reason = _semantic_generation_failure_reason(semantic_result)
-        failure_report = GenerationRunFailureReport(
+        failure_report = CgaGenerationNonSuccessReport(
             id=request.id,
             question=request.question,
             generation_run_id=generation_run_id,
             generation_status="generation_failed",
             failure_reason=failure_reason,
             input_prompt_snapshot=snapshot,
-            last_llm_raw_output=generated_cypher if isinstance(generated_cypher, str) else "",
-            generation_retry_count=0,
-            generation_failure_reasons=[failure_reason],
             parsed_cypher=generated_cypher if isinstance(generated_cypher, str) and generated_cypher.strip() else None,
             gate_passed=False,
         )
         if not await self._deliver_or_outbox(
-            payload_type="GenerationRunFailureReport",
+            payload_type="CgaGenerationNonSuccessReport",
             payload=failure_report,
         ):
             return GenerationRunResult(
@@ -355,4 +342,4 @@ def _semantic_generation_failure_reason(semantic_result: object) -> GenerationFa
     reason = getattr(preflight, "reason", None)
     if reason in set(GenerationFailureReason.__args__):
         return reason
-    return "semantic_parse_rejected"
+    return "semantic_match_rejected"

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Any, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, model_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 
 
 GenerationFailureReason = Literal[
@@ -18,9 +18,10 @@ GenerationFailureReason = Literal[
     "unsupported_call",
     "unsupported_start_clause",
     "unauthorized_schema_reference",
-    "semantic_query_mismatch",
-    "semantic_parse_rejected",
-    "generation_retry_exhausted",
+    "logical_plan_mismatch",
+    "semantic_match_rejected",
+    "path_planning_failed",
+    "cypher_fallback_cannot_generate",
 ]
 
 ServiceFailureReason = Literal[
@@ -30,8 +31,8 @@ ServiceFailureReason = Literal[
     "testing_agent_submission_failed",
 ]
 
-GenerationStatus = Literal["submitted_to_testing", "generation_failed", "service_failed"]
-GenerationReportStatus = Literal["generation_failed", "service_failed"]
+GenerationStatus = Literal["submitted_to_testing", "clarification_required", "generation_failed", "service_failed"]
+GenerationReportStatus = Literal["generation_failed", "clarification_required", "service_failed"]
 
 
 class QAQuestionRequest(BaseModel):
@@ -62,59 +63,66 @@ class PreflightCheck(BaseModel):
         return self
 
     @model_serializer
-    def serialize(self) -> dict[str, bool | GenerationFailureReason]:
-        payload: dict[str, bool | GenerationFailureReason] = {"accepted": self.accepted}
+    def serialize(self) -> dict[str, object]:
+        payload: dict[str, object] = {"accepted": self.accepted}
         if self.reason is not None:
             payload["reason"] = self.reason
         return payload
 
 
 class GeneratedCypherSubmissionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     question: str
     generation_run_id: str
+    generation_status: Literal["generated"] = "generated"
     generated_cypher: str
     input_prompt_snapshot: str
-    last_llm_raw_output: str
-    generation_retry_count: int = Field(default=0, ge=0)
-    generation_failure_reasons: list[GenerationFailureReason] = Field(default_factory=list)
 
 
-class GenerationRunFailureReport(BaseModel):
+class CgaGenerationNonSuccessReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     question: str
     generation_run_id: str
-    input_prompt_snapshot: str
-    last_llm_raw_output: str = ""
     generation_status: GenerationReportStatus
-    failure_reason: GenerationFailureReason | ServiceFailureReason
-    last_generation_failure_reason: Optional[GenerationFailureReason] = None
-    generation_retry_count: int = Field(default=0, ge=0)
-    generation_failure_reasons: list[GenerationFailureReason] = Field(default_factory=list)
+    input_prompt_snapshot: str
+    failure_reason: Optional[Union[GenerationFailureReason, ServiceFailureReason]] = None
+    clarification: Optional[dict[str, Any]] = None
     parsed_cypher: Optional[str] = None
     gate_passed: bool = False
 
     @model_validator(mode="after")
-    def validate_failure_reason_matches_status(self) -> "GenerationRunFailureReport":
+    def validate_non_success_status(self) -> "CgaGenerationNonSuccessReport":
         generation_reasons = set(GenerationFailureReason.__args__)
         service_reasons = set(ServiceFailureReason.__args__)
         if self.generation_status == "generation_failed":
             if self.failure_reason not in generation_reasons:
                 raise ValueError("generation_failed requires GenerationFailure reason")
-            if self.failure_reason == "generation_retry_exhausted" and self.last_generation_failure_reason is None:
-                raise ValueError("generation_retry_exhausted requires last_generation_failure_reason")
+            if self.clarification is not None:
+                raise ValueError("generation_failed must not include clarification")
+            return self
+        if self.generation_status == "clarification_required":
+            if self.clarification is None:
+                raise ValueError("clarification_required requires clarification")
+            if self.parsed_cypher is not None:
+                raise ValueError("clarification_required must not include parsed_cypher")
             return self
         if self.failure_reason not in service_reasons:
             raise ValueError("service_failed requires ServiceFailure reason")
-        if self.last_generation_failure_reason is not None:
-            raise ValueError("service_failed must not include last_generation_failure_reason")
+        if self.clarification is not None:
+            raise ValueError("service_failed must not include clarification")
+        if self.parsed_cypher is not None:
+            raise ValueError("service_failed must not include parsed_cypher")
         return self
 
 
 class GenerationRunResult(BaseModel):
     generation_run_id: str
     generation_status: GenerationStatus
-    reason: Optional[GenerationFailureReason | ServiceFailureReason] = None
+    reason: Optional[Union[GenerationFailureReason, ServiceFailureReason]] = None
     last_reason: Optional[GenerationFailureReason] = None
 
     @model_validator(mode="after")
@@ -123,13 +131,15 @@ class GenerationRunResult(BaseModel):
             if self.reason is not None or self.last_reason is not None:
                 raise ValueError("submitted_to_testing must not include failure reason")
             return self
+        if self.generation_status == "clarification_required":
+            if self.last_reason is not None:
+                raise ValueError("clarification_required must not include last_reason")
+            return self
 
         if self.generation_status == "generation_failed":
             generation_reasons = set(GenerationFailureReason.__args__)
             if self.reason not in generation_reasons:
                 raise ValueError("generation_failed requires GenerationFailure reason")
-            if self.reason == "generation_retry_exhausted" and self.last_reason is None:
-                raise ValueError("generation_retry_exhausted requires last_reason")
             return self
 
         service_reasons = set(ServiceFailureReason.__args__)

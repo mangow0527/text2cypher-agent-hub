@@ -4,6 +4,7 @@ from pathlib import Path
 
 import yaml
 
+from services.cypher_generator_agent.app import resource_paths
 from services.cypher_generator_agent.app.semantic_alignment import (
     validate_default_semantic_alignment,
     validate_semantic_alignment,
@@ -63,8 +64,7 @@ def test_semantic_alignment_rejects_knowledge_property_missing_only_from_semanti
         few_shot="Question: 查询链路协议\nCypher: MATCH (l:Link) RETURN l.protocol AS link_protocol",
     )
     semantic_layer_path = tmp_path / "semantic_layer.yaml"
-    default_semantic_layer_path = REPO_ROOT / "services/cypher_generator_agent/config/semantic_layer.yaml"
-    semantic_layer_doc = yaml.safe_load(default_semantic_layer_path.read_text(encoding="utf-8"))
+    semantic_layer_doc = yaml.safe_load(resource_paths.semantic_layer_path().read_text(encoding="utf-8"))
     semantic_layer_doc["properties"] = [
         item for item in semantic_layer_doc["properties"] if item["name"] != "link_protocol"
     ]

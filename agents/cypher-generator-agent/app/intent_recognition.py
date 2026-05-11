@@ -12,6 +12,8 @@ from typing import Any, Literal, Protocol
 
 import yaml
 
+from . import resource_paths
+
 
 IntentSource = Literal["rule", "embedding", "llm"]
 IntentDecision = Literal["accept", "fallback_embedding", "fallback_llm", "clarify"]
@@ -372,7 +374,13 @@ class TextEmbedder(Protocol):
 
 
 class EmbeddingStore(Protocol):
-    def search(self, query_vector: tuple[float, ...], *, top_k: int) -> list[tuple[IntentEmbeddingSample, float]]:
+    def search(
+        self,
+        query_vector: tuple[float, ...],
+        *,
+        top_k: int,
+        query_text: str | None = None,
+    ) -> list[tuple[IntentEmbeddingSample, float]]:
         ...
 
 
@@ -382,7 +390,13 @@ class InMemoryEmbeddingStore:
         self.embedder = embedder
         self._sample_vectors = [(sample, embedder.embed(sample.text)) for sample in samples]
 
-    def search(self, query_vector: tuple[float, ...], *, top_k: int) -> list[tuple[IntentEmbeddingSample, float]]:
+    def search(
+        self,
+        query_vector: tuple[float, ...],
+        *,
+        top_k: int,
+        query_text: str | None = None,
+    ) -> list[tuple[IntentEmbeddingSample, float]]:
         scored_samples = sorted(
             (
                 (sample, _cosine_similarity(query_vector, sample_vector))
@@ -419,7 +433,13 @@ class JsonlEmbeddingStore:
             )
         return cls(sample_vectors=sample_vectors)
 
-    def search(self, query_vector: tuple[float, ...], *, top_k: int) -> list[tuple[IntentEmbeddingSample, float]]:
+    def search(
+        self,
+        query_vector: tuple[float, ...],
+        *,
+        top_k: int,
+        query_text: str | None = None,
+    ) -> list[tuple[IntentEmbeddingSample, float]]:
         scored_samples = sorted(
             (
                 (sample, _cosine_similarity(query_vector, sample_vector))
@@ -724,7 +744,7 @@ class EmbeddingIntentRecognizer:
     def retrieve_candidates(self, question: str, *, top_k: int | None = None) -> list[IntentEmbeddingCandidate]:
         query_vector = self.embedder.embed(question)
         limit = top_k or self.default_top_k
-        scored_samples = self.store.search(query_vector, top_k=limit)
+        scored_samples = self.store.search(query_vector, top_k=limit, query_text=question)
         return [
             IntentEmbeddingCandidate(
                 sample_id=sample.id,
@@ -734,6 +754,7 @@ class EmbeddingIntentRecognizer:
                 score=round(score, 4),
             )
             for sample, score in scored_samples
+            if (sample.primary_intent, sample.secondary_intent) in self.valid_intents
         ]
 
     def recognize(self, question: str) -> IntentRecognitionResult:
@@ -870,16 +891,15 @@ class HybridIntentRecognizer:
 
 @lru_cache(maxsize=1)
 def get_rule_based_intent_recognizer() -> RuleBasedIntentRecognizer:
-    config_dir = Path(__file__).resolve().parents[1] / "config"
     return RuleBasedIntentRecognizer.from_files(
-        taxonomy_path=config_dir / "intent_taxonomy.yaml",
-        rules_path=config_dir / "intent_rules.yaml",
+        taxonomy_path=resource_paths.intent_taxonomy_path(),
+        rules_path=resource_paths.intent_rules_path(),
     )
 
 
 @lru_cache(maxsize=1)
 def get_hybrid_intent_recognizer() -> HybridIntentRecognizer:
-    config_dir = Path(__file__).resolve().parents[1] / "config"
+    embedding_store = os.getenv("NL2CYPHER_INTENT_EMBEDDING_STORE", "local").strip().lower()
     embedding_index = os.getenv("NL2CYPHER_INTENT_EMBEDDING_INDEX")
     embedder = build_text_embedder(
         provider=os.getenv("NL2CYPHER_INTENT_EMBEDDER_PROVIDER", "local_hash"),
@@ -893,22 +913,72 @@ def get_hybrid_intent_recognizer() -> HybridIntentRecognizer:
         "consensus_top_k": _env_int("NL2CYPHER_INTENT_CONSENSUS_TOP_K", 3),
         "consensus_min_count": _env_int("NL2CYPHER_INTENT_CONSENSUS_MIN_COUNT", 2),
     }
-    if embedding_index:
+    if embedding_store in {"rag", "rag_vector", "rag_vector_store"}:
+        from .intent_vector_store import FallbackEmbeddingStore, RagIntentEmbeddingStore
+
+        rag_store = RagIntentEmbeddingStore(
+            base_url=_env_first(
+                "NL2CYPHER_INTENT_RAG_SERVICE_URL",
+                "CYPHER_GENERATOR_AGENT_RAG_SERVICE_URL",
+                default="http://127.0.0.1:8004",
+            ),
+            collection=os.getenv("NL2CYPHER_INTENT_RAG_COLLECTION", "nl2cypher_intent_examples_v1"),
+            endpoint_path=os.getenv("NL2CYPHER_INTENT_RAG_SEARCH_PATH", "/api/v1/intent/search"),
+            taxonomy_version=os.getenv("NL2CYPHER_INTENT_TAXONOMY_VERSION"),
+            timeout_seconds=float(
+                _env_first(
+                    "NL2CYPHER_INTENT_RAG_TIMEOUT_SECONDS",
+                    "CYPHER_GENERATOR_AGENT_RAG_REQUEST_TIMEOUT_SECONDS",
+                    default="60",
+                )
+            ),
+            include_query_vector=_env_bool("NL2CYPHER_INTENT_RAG_INCLUDE_QUERY_VECTOR", False),
+        )
+        store: EmbeddingStore = rag_store
+        if _env_bool("NL2CYPHER_INTENT_FALLBACK_TO_LOCAL", True):
+            store = FallbackEmbeddingStore(
+                primary=rag_store,
+                fallback=_build_local_embedding_store(
+                    embedder=embedder,
+                    embedding_index=embedding_index,
+                ),
+            )
+        embedding_recognizer = EmbeddingIntentRecognizer(
+            samples=[],
+            valid_intents=_extract_valid_intents(_load_yaml_mapping(resource_paths.intent_taxonomy_path())),
+            store=store,
+            **embedding_kwargs,
+        )
+    elif embedding_index:
         embedding_recognizer = EmbeddingIntentRecognizer.from_index_file(
-            taxonomy_path=config_dir / "intent_taxonomy.yaml",
+            taxonomy_path=resource_paths.intent_taxonomy_path(),
             index_path=Path(embedding_index),
             **embedding_kwargs,
         )
     else:
         embedding_recognizer = EmbeddingIntentRecognizer.from_files(
-            taxonomy_path=config_dir / "intent_taxonomy.yaml",
-            corpus_path=config_dir / "intent_embedding_corpus.jsonl",
+            taxonomy_path=resource_paths.intent_taxonomy_path(),
+            corpus_path=resource_paths.intent_embedding_corpus_path(),
             **embedding_kwargs,
         )
     return HybridIntentRecognizer(
         rule_recognizer=get_rule_based_intent_recognizer(),
         embedding_recognizer=embedding_recognizer,
     )
+
+
+def _build_local_embedding_store(
+    *,
+    embedder: TextEmbedder,
+    embedding_index: str | None,
+) -> EmbeddingStore:
+    if embedding_index:
+        return JsonlEmbeddingStore.from_path(Path(embedding_index))
+    samples = [
+        IntentEmbeddingSample.from_mapping(sample)
+        for sample in _load_jsonl_mappings(resource_paths.intent_embedding_corpus_path())
+    ]
+    return InMemoryEmbeddingStore(samples=samples, embedder=embedder)
 
 
 def _load_yaml_mapping(path: Path) -> dict[str, object]:
@@ -1069,6 +1139,21 @@ def _env_float(name: str, default: float) -> float:
 def _env_int(name: str, default: int) -> int:
     value = os.getenv(name)
     return int(value) if value else default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_first(*names: str, default: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return default
 
 
 def _string_tuple(value: object) -> tuple[str, ...]:

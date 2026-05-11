@@ -186,7 +186,7 @@ def build_repair_diagnosis_prompt(context: Dict[str, Any], *, ticket: IssueTicke
         f"IssueTicketSummary: {json.dumps(compact_ticket, ensure_ascii=False)}\n"
         f"DiagnosisContext: {json.dumps(compact_context, ensure_ascii=False)}\n"
         "诊断顺序：\n"
-        "1. 先看 DiagnosisContext.generation_evidence：如果 generation_status=generation_failed，优先根据 failure_reason、generation_failure_reasons、generation_retry_count、last_llm_raw_output 判断失败发生在输出协议、Cypher 语法还是知识缺失。\n"
+        "1. 先看 DiagnosisContext.generation_evidence：如果 generation_status=generation_failed，优先根据 failure_reason、input_prompt_snapshot 和 actual.generated_cypher 判断失败发生在输出协议、Cypher 语法还是知识缺失。\n"
         "2. 再看 evaluation.primary_metrics.grammar：如果 grammar.score=0 或 parser_error 非空，优先考虑 cypher_syntax。\n"
         "3. 再看 IssueTicketSummary.actual.execution：如果 execution.success=false 或 error_message 非空，结合错误判断是 cypher_syntax 还是 business_knowledge。\n"
         "4. 再看 execution_accuracy.strict_check 和 semantic_check：如果语法和执行都成功但 strict/semantic 失败，说明 query 语义不等价；比较 expected.cypher 与 actual.generated_cypher，找缺失的 label、relation、path、filter、return shape。\n"

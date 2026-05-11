@@ -17,10 +17,10 @@ from .comparison import compare_answers
 from .config import Settings, get_settings
 from .grammar import Antlr4CypherParserAdapter, GrammarChecker, build_grammar_metric
 from .models import (
+    CgaGenerationNonSuccessReport,
     EvaluationStatusResponse,
     ExecutionResult,
     GenerationEvidence,
-    GenerationRunFailureReport,
     GeneratedCypherSubmissionRequest,
     GrammarMetric,
     ImprovementAssessment,
@@ -62,6 +62,8 @@ class TestingAgentService:
         self.semantic_reviewer = semantic_reviewer
         self.settings = settings
         self._background_tasks: dict[tuple[str, int], asyncio.Task[Any]] = {}
+        self._evaluation_locks: dict[tuple[str, int], asyncio.Lock] = {}
+        self._repair_tasks: dict[str, asyncio.Task[Any]] = {}
 
     async def ingest_golden(self, request: QAGoldenRequest) -> QAGoldenResponse:
         self.repository.save_golden(request)
@@ -94,8 +96,8 @@ class TestingAgentService:
             self._schedule_attempt_evaluation(request.id, saved.attempt_no)
         return SubmissionReceipt(accepted=True)
 
-    async def ingest_generation_failure(self, report: GenerationRunFailureReport) -> SubmissionReceipt:
-        if report.generation_status == "service_failed":
+    async def ingest_generation_failure(self, report: CgaGenerationNonSuccessReport) -> SubmissionReceipt:
+        if report.generation_status in {"service_failed", "clarification_required"}:
             self.repository.save_generation_failure_report(report)
             return SubmissionReceipt(accepted=True)
 
@@ -143,6 +145,21 @@ class TestingAgentService:
         return resumed
 
     async def _evaluate_attempt(self, qa_id: str, attempt_no: int):
+        key = (qa_id, attempt_no)
+        lock = self._evaluation_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            submission = self.repository.get_submission_attempt(qa_id, attempt_no)
+            if submission is not None and submission.get("evaluation") and submission.get("state") in {
+                "passed",
+                "issue_ticket_created",
+                "repair_submission_failed",
+                "semantic_review_invalid",
+                "tugraph_execution_failed",
+            }:
+                return None
+            return await self._evaluate_attempt_unlocked(qa_id, attempt_no)
+
+    async def _evaluate_attempt_unlocked(self, qa_id: str, attempt_no: int):
         golden = self.repository.get_golden(qa_id)
         submission = self.repository.get_submission_attempt(qa_id, attempt_no)
         if golden is None or submission is None:
@@ -284,22 +301,13 @@ class TestingAgentService:
                     generation_run_id=submission["generation_run_id"],
                     attempt_no=attempt_no,
                     input_prompt_snapshot=submission["input_prompt_snapshot"],
-                    last_llm_raw_output=submission.get("last_llm_raw_output", ""),
                     generation_status=submission.get("generation_status", "generated"),
                     failure_reason=submission.get("failure_reason"),
-                    generation_retry_count=int(submission.get("generation_retry_count", 0)),
-                    generation_failure_reasons=submission.get("generation_failure_reasons", []),
                 ),
             )
             self.repository.save_issue_ticket(ticket, attempt_no=attempt_no)
-            self.repository.update_submission_state(qa_id, attempt_no, "repair_pending")
-            try:
-                response = await self.repair_client.submit_issue_ticket(ticket)
-            except Exception:
-                self.repository.update_submission_state(qa_id, attempt_no, "repair_submission_failed")
-                raise
-            self.repository.save_repair_response(qa_id, attempt_no, response)
             self.repository.update_submission_state(qa_id, attempt_no, "issue_ticket_created")
+            self._schedule_repair_submission(ticket, attempt_no)
 
         previous = self._previous_evaluated_attempt(qa_id, attempt_no)
         if previous and previous.get("evaluation"):
@@ -313,6 +321,28 @@ class TestingAgentService:
             self.repository.save_improvement_assessment(qa_id, attempt_no, assessment)
 
         return evaluation
+
+    def _schedule_repair_submission(self, ticket: IssueTicket, attempt_no: int) -> None:
+        existing = self._repair_tasks.get(ticket.ticket_id)
+        if existing is not None and not existing.done():
+            return
+        task = asyncio.create_task(self._submit_repair_ticket(ticket, attempt_no))
+        self._repair_tasks[ticket.ticket_id] = task
+        task.add_done_callback(lambda completed: self._log_background_repair_failure(ticket=ticket, task=completed))
+
+    async def _submit_repair_ticket(self, ticket: IssueTicket, attempt_no: int) -> None:
+        response = await self.repair_client.submit_issue_ticket(ticket)
+        self.repository.save_repair_response(ticket.id, attempt_no, response)
+
+    def _log_background_repair_failure(self, *, ticket: IssueTicket, task: asyncio.Task[Any]) -> None:
+        self._repair_tasks.pop(ticket.ticket_id, None)
+        try:
+            task.result()
+        except Exception:
+            logger.exception(
+                "repair_submission_failed",
+                extra={"qa_id": ticket.id, "ticket_id": ticket.ticket_id},
+            )
 
     def _previous_evaluated_attempt(self, qa_id: str, current_attempt_no: int) -> dict[str, Any] | None:
         for attempt_no in range(current_attempt_no - 1, 0, -1):
@@ -438,10 +468,4 @@ def get_testing_service() -> TestingAgentService:
 
 def _generation_failure_message(submission: Dict[str, Any]) -> str:
     failure_reason = submission.get("failure_reason") or "generation_failed"
-    last_reason = None
-    reasons = submission.get("generation_failure_reasons") or []
-    if reasons:
-        last_reason = reasons[-1]
-    if last_reason and last_reason != failure_reason:
-        return f"Generation failed before testing-agent evaluation: {failure_reason}; last generation failure: {last_reason}."
     return f"Generation failed before testing-agent evaluation: {failure_reason}."

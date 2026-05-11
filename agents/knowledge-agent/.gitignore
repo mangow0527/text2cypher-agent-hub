@@ -1,6 +1,7 @@
 .DS_Store
 .env
 artifacts/
+backend/knowledge/_history/
 __pycache__/
 *.pyc
 .pytest_cache/

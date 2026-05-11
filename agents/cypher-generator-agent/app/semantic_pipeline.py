@@ -37,6 +37,13 @@ def _empty_llm_prompts() -> dict[str, str | None]:
     }
 
 
+def _empty_llm_responses() -> dict[str, str | None]:
+    return {
+        "intent_recognition_fallback": None,
+        "cypher_generation_fallback": None,
+    }
+
+
 @dataclass(frozen=True)
 class SemanticParseResult:
     id: str | None
@@ -54,6 +61,7 @@ class SemanticParseResult:
     preflight: object | None
     selected_knowledge: SelectedKnowledgeContext | None = None
     llm_prompts: dict[str, str | None] = field(default_factory=_empty_llm_prompts)
+    llm_responses: dict[str, str | None] = field(default_factory=_empty_llm_responses)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -72,6 +80,7 @@ class SemanticParseResult:
             "generated_cypher": self.generated_cypher,
             "preflight": _to_dict(self.preflight),
             "llm_prompts": dict(self.llm_prompts or _empty_llm_prompts()),
+            "llm_responses": dict(self.llm_responses or _empty_llm_responses()),
         }
 
 
@@ -149,6 +158,11 @@ class SemanticPipeline:
         except Exception as exc:
             return await self._fallback_to_llm(context=context, renderer_error=str(exc))
         preflight = run_semantic_cypher_preflight(cypher, semantic_query=context.semantic_query)
+        if not preflight.accepted:
+            return await self._fallback_to_llm(
+                context=context,
+                renderer_error=f"semantic preflight failed: {preflight.reason or 'unknown'}",
+            )
         return context.to_result(
             generation_mode="deterministic_renderer",
             generated_cypher=cypher,
@@ -333,12 +347,17 @@ class SemanticPipeline:
             llm_prompt=prompt,
         )
         raw_output = raw_generation.get("raw_output")
+        llm_responses = {
+            **(context.llm_responses or _empty_llm_responses()),
+            "cypher_generation_fallback": raw_output if isinstance(raw_output, str) else None,
+        }
         if not isinstance(raw_output, str):
             return context.to_result(
                 generation_mode="controlled_llm_fallback",
                 generated_cypher=None,
                 preflight=PreflightCheck(accepted=False, reason="no_cypher_found"),
                 llm_prompts=llm_prompts,
+                llm_responses=llm_responses,
             )
         parsed = parse_model_output(raw_output)
         if parsed.reason is not None:
@@ -347,6 +366,7 @@ class SemanticPipeline:
                 generated_cypher=None,
                 preflight=PreflightCheck(accepted=False, reason=parsed.reason),
                 llm_prompts=llm_prompts,
+                llm_responses=llm_responses,
             )
         preflight = run_semantic_cypher_preflight(parsed.parsed_cypher, semantic_query=context.semantic_query)
         return context.to_result(
@@ -354,6 +374,7 @@ class SemanticPipeline:
             generated_cypher=parsed.parsed_cypher,
             preflight=preflight,
             llm_prompts=llm_prompts,
+            llm_responses=llm_responses,
         )
 
     async def _fallback_intent_recognition_to_llm(
@@ -376,13 +397,17 @@ class SemanticPipeline:
             llm_prompt=prompt,
         )
         raw_output = raw_generation.get("raw_output")
+        llm_responses = {
+            **(base_result.llm_responses or _empty_llm_responses()),
+            "intent_recognition_fallback": raw_output if isinstance(raw_output, str) else None,
+        }
         if not isinstance(raw_output, str):
-            return _intent_llm_rejected_result(base_result, llm_prompts, "intent_llm_invalid_output")
+            return _intent_llm_rejected_result(base_result, llm_prompts, llm_responses, "intent_llm_invalid_output")
         llm_intent = _parse_intent_llm_output(raw_output)
         if llm_intent is None:
-            return _intent_llm_rejected_result(base_result, llm_prompts, "intent_llm_invalid_output")
+            return _intent_llm_rejected_result(base_result, llm_prompts, llm_responses, "intent_llm_invalid_output")
         if llm_intent.decision != "accept":
-            return _intent_llm_rejected_result(base_result, llm_prompts, "intent_llm_clarify", intent=llm_intent)
+            return _intent_llm_rejected_result(base_result, llm_prompts, llm_responses, "intent_llm_clarify", intent=llm_intent)
 
         context = self._build_context(
             id=base_result.id,
@@ -391,14 +416,20 @@ class SemanticPipeline:
             intent_result=llm_intent,
         )
         if isinstance(context, SemanticParseResult):
-            return replace(context, llm_prompts=llm_prompts)
+            return replace(context, llm_prompts=llm_prompts, llm_responses=llm_responses)
         context = context.with_llm_prompts(llm_prompts)
+        context = context.with_llm_responses(llm_responses)
         context = context.with_selected_knowledge(await self._select_knowledge(context))
         try:
             cypher = self.renderer.render(context.semantic_query)
         except Exception as exc:
             return await self._fallback_to_llm(context=context, renderer_error=str(exc))
         preflight = run_semantic_cypher_preflight(cypher, semantic_query=context.semantic_query)
+        if not preflight.accepted:
+            return await self._fallback_to_llm(
+                context=context,
+                renderer_error=f"semantic preflight failed: {preflight.reason or 'unknown'}",
+            )
         return context.to_result(
             generation_mode="deterministic_renderer",
             generated_cypher=cypher,
@@ -420,6 +451,7 @@ class _SemanticPipelineContext:
     semantic_query: SemanticQuerySpec
     selected_knowledge: SelectedKnowledgeContext | None = None
     llm_prompts: dict[str, str | None] = field(default_factory=_empty_llm_prompts)
+    llm_responses: dict[str, str | None] = field(default_factory=_empty_llm_responses)
 
     def with_selected_knowledge(
         self,
@@ -433,6 +465,12 @@ class _SemanticPipelineContext:
     ) -> "_SemanticPipelineContext":
         return replace(self, llm_prompts=llm_prompts)
 
+    def with_llm_responses(
+        self,
+        llm_responses: dict[str, str | None],
+    ) -> "_SemanticPipelineContext":
+        return replace(self, llm_responses=llm_responses)
+
     def to_result(
         self,
         *,
@@ -440,6 +478,7 @@ class _SemanticPipelineContext:
         generated_cypher: str | None,
         preflight: object | None,
         llm_prompts: dict[str, str | None] | None = None,
+        llm_responses: dict[str, str | None] | None = None,
     ) -> SemanticParseResult:
         return SemanticParseResult(
             id=self.id,
@@ -457,6 +496,7 @@ class _SemanticPipelineContext:
             generated_cypher=generated_cypher,
             preflight=preflight,
             llm_prompts=llm_prompts or self.llm_prompts or _empty_llm_prompts(),
+            llm_responses=llm_responses or self.llm_responses or _empty_llm_responses(),
         )
 
 
@@ -530,6 +570,7 @@ def _extract_json_object(raw_output: str) -> dict[str, Any] | None:
 def _intent_llm_rejected_result(
     base_result: SemanticParseResult,
     llm_prompts: dict[str, str | None],
+    llm_responses: dict[str, str | None],
     code: str,
     *,
     intent: IntentRecognitionResult | None = None,
@@ -551,6 +592,7 @@ def _intent_llm_rejected_result(
         generated_cypher=None,
         preflight=None,
         llm_prompts=llm_prompts,
+        llm_responses=llm_responses,
     )
 
 

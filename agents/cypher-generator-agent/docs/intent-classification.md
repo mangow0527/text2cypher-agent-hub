@@ -2,9 +2,9 @@
 
 ## 1. 目标与原则
 
-本文档定义 NL2Cypher ChatBI 场景下的意图分类，适用于单轮、一句话、一个问题原则上由一条 Cypher 回答的查询任务，覆盖资源设备信息查询、关系路径查询和常见分析型问数。
+本文档定义 NL2Cypher ChatBI 场景下的意图分类，适用于单轮、一句话、一个问题原则上由一个 `LogicalQueryPlan` 并最终由一条 Cypher 回答的查询任务，覆盖资源设备信息查询、关系路径查询和常见分析型问数。
 
-分类依据参考 NLIDB / Text-to-SQL / ChatBI / 语义解析实践：用 intent 选择用户问题的主要分析目标，用 slot 承载业务对象、属性、指标、条件和值，用 schema linking 映射到真实图谱 schema，用结构特征描述路径、聚合、排序、时间粒度等查询细节。
+分类依据参考 NLIDB / Text-to-SQL / ChatBI / 语义解析实践：用 intent 识别用户问题的答案形态，用语义视图匹配承接业务对象、属性、关系、路径、指标、条件和值，用 planner 合并 intent、语义视图匹配结果和结构特征生成查询计划。
 
 核心原则：
 
@@ -15,7 +15,7 @@
 - 一级意图按用户最终目标划分，避免把 Cypher 写法、路径跳数或聚合函数混入分类标准。
 - 二级意图只区分对后续查询计划有明显影响、且自然语言表达相对独立的子类。
 - 同一个问题如果同时包含路径、聚合、排序，以最终答案形态为主分类，以结构特征记录其他信息。
-- 对象、属性、关系、指标和值不放进 intent，而放进 slot、schema linking 和 metric linking。
+- 对象、属性、关系、路径、指标、条件和值不放进 intent，而由语义视图匹配和后续 planner 承接。
 
 ## 2. 分类总览
 
@@ -54,11 +54,11 @@
 
 判定时遵循“最终答案优先”：
 
-- “统计每个服务使用的隧道数量”归 `breakdown_query`，路径匹配记录为结构特征。
-- “隧道数量最多的前 5 个服务”归 `ranking_query`，聚合函数和路径匹配记录为结构特征。
+- “统计每个服务使用的隧道数量”归 `breakdown_query`，是否需要路径作为结构特征记录，具体业务路径由语义视图匹配确定。
+- “隧道数量最多的前 5 个服务”归 `ranking_query`，聚合和排序是答案形态信号，具体业务路径由语义视图匹配确定。
 - “服务 A 和服务 B 使用的隧道数量谁更多”归 `comparison_query`。
 - “服务 A 使用但服务 B 未使用的隧道”归 `set_operation_query`。
-- “查询服务所使用的隧道”归 `record_retrieval_query`，关系链记录为结构特征。
+- “查询服务所使用的隧道”归 `record_retrieval_query`，是否需要关系/路径作为结构特征记录，具体业务路径由语义视图匹配确定。
 - “查询服务到端口的完整路径”归 `relationship_path_query`。
 
 ## 3. 二级分类与示例
@@ -78,7 +78,7 @@
 
 - 只要最终返回的是明细行、对象列表或属性表，优先归 `record_retrieval_query`。
 - 过滤、排序、limit 不改变该类意图。
-- 需要通过关系或固定路径拿到相关记录时，归 `related_record_query`；关系链和跳数进入结构特征。
+- 需要通过关系或固定路径拿到相关记录时，归 `related_record_query`；是否需要路径进入结构特征，具体关系链由语义视图匹配确定。
 - 如果用户要求完整路径、所有路径、拓扑子图或可达关系，归 `relationship_path_query`。
 
 ### 3.2 `relationship_path_query`：关系/路径查询
@@ -150,7 +150,7 @@
 
 - “前 N 条记录”只是 limit，不一定是排名；如果没有排序依据或最高/最多语义，归 `record_retrieval_query`。
 - “最高、最低、最多、最少、排名、按指标排序取前 N”归 `ranking_query`。
-- 如果排名对象来自路径统计，路径信息进入结构特征，不单独扩展为排名类 intent。
+- 如果排名对象来自路径统计，是否需要路径进入结构特征，具体路径由语义视图匹配确定，不单独扩展为排名类 intent。
 
 ### 3.6 `comparison_query`：对比查询
 
@@ -234,7 +234,7 @@
 
 ## 4. 建议输出结构
 
-意图识别模块建议输出精简 intent，结构细节由槽位、schema linking 和结构特征承接。
+意图识别模块建议输出精简 intent。业务实体、字段、关系、路径、指标、条件和值由语义视图匹配输出；结构特征只作为可选诊断信息和 planner hint，不替代语义视图匹配结果。
 
 ```json
 {
@@ -246,7 +246,7 @@
 }
 ```
 
-配套结构特征示例：
+可选结构特征示例：
 
 ```json
 {
@@ -255,12 +255,13 @@
   "hop_count": 2,
   "aggregation_functions": ["count"],
   "group_by": true,
+  "group_by_dimensions": ["service"],
   "order_limit": "topn",
   "time_grain": "none"
 }
 ```
 
-建议输出以下辅助结构特征，用于 query planning、评测和错误分析：
+可选输出以下辅助结构特征，用于 planner 提示、评测和错误分析：
 
 | 字段 | 含义 | 示例值 |
 |---|---|---|
@@ -271,7 +272,7 @@
 | `filter_level` | 过滤位置 | `none`、`record_filter`、`relation_filter`、`path_filter`、`post_aggregate_filter`、`set_filter` |
 | `aggregation_functions` | 聚合函数 | `count`、`count_distinct`、`sum`、`avg`、`max`、`min` |
 | `group_by` | 是否分组 | `true`、`false` |
-| `group_by_dimensions` | 分组维度 | `vendor`、`status`、`service_type` |
+| `group_by_dimensions` | 候选分组维度信号，最终字段由语义视图匹配确定 | `vendor`、`status`、`service_type` |
 | `order_limit` | 排序截断 | `none`、`order_only`、`limit_only`、`topn`、`bottomn` |
 | `time_grain` | 时间粒度 | `none`、`hour`、`day`、`week`、`month`、`year` |
 | `comparison_target_type` | 对比对象类型 | `none`、`entity`、`segment`、`metric`、`period` |
@@ -281,10 +282,12 @@
 
 ## 5. 参考依据
 
+以下资料用于说明“答案形态识别、语义匹配、结构化规划”拆分的来源。文献中的结构要素填充、模式对齐和解码模块，在本工程中分别映射到语义视图匹配、schema 校验和 planner，用来说明各模块边界，不作为 intent 分类内容。
+
 - [WikiSQL / Seq2SQL](https://arxiv.org/abs/1709.00103)：采用选择列、聚合函数、过滤条件等 sketch 组件表达查询结构。
-- [TypeSQL](https://arxiv.org/abs/1804.09769)：将 Text-to-SQL 建模为 slot filling 问题，强调结构槽位和类型感知。
+- [TypeSQL](https://arxiv.org/abs/1804.09769)：强调结构化查询要素和类型感知对语义解析的作用。
 - [Spider](https://arxiv.org/abs/1809.08887)：覆盖多表关系、复杂条件、聚合、排序、嵌套查询等查询结构。
-- [RAT-SQL](https://arxiv.org/abs/1911.04942)：强调 schema linking 与关系感知编码。
+- [RAT-SQL](https://arxiv.org/abs/1911.04942)：强调 schema 关系和结构编码对复杂查询生成的作用。
 - [RASAT](https://arxiv.org/abs/2205.06983)：进一步利用关系感知结构增强 Text-to-SQL 语义解析。
-- [Text-to-SQL / NLIDB survey](https://link.springer.com/article/10.1007/s00778-022-00776-8)：将 schema linking、query decoding、output refinement 等作为独立模块。
-- ATIS / SNIPS 等 NLU 任务：采用 intent detection + slot filling 的经典拆分。
+- [Text-to-SQL / NLIDB survey](https://link.springer.com/article/10.1007/s00778-022-00776-8)：将 schema grounding、query decoding、output refinement 等作为相互独立但需要衔接的模块。
+- ATIS / SNIPS 等 NLU 任务：提供“意图识别”和“语义要素识别”分层的经典参考；本工程使用语义视图匹配承接语义要素。

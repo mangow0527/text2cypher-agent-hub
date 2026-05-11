@@ -1,9 +1,10 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import json
+import httpx
 import yaml
 
 from services.cypher_generator_agent.app.intent_recognition import (
@@ -20,17 +21,22 @@ from services.cypher_generator_agent.app.intent_recognition import (
     write_embedding_index,
     get_hybrid_intent_recognizer,
 )
+from services.cypher_generator_agent.app.intent_vector_store import (
+    FallbackEmbeddingStore,
+    RagIntentEmbeddingStore,
+    RagIntentSearchError,
+)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-CONFIG_DIR = REPO_ROOT / "services/cypher_generator_agent/config"
+INTENT_RESOURCE_DIR = REPO_ROOT / "services/cypher_generator_agent/resources/intent"
 
 
 class RuleBasedIntentRecognizerTest(unittest.TestCase):
-    def test_recognize_returns_best_rule_match_from_config_files(self) -> None:
+    def test_recognize_returns_best_rule_match_from_resource_files(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         result = recognizer.recognize("查询服务所使用隧道的 ID 和名称")
@@ -43,8 +49,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_recognize_returns_fallback_when_no_rule_matches(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         result = recognizer.recognize("帮我看看这个业务是不是正常")
@@ -57,8 +63,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_rejects_broad_lookup_patterns(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         broad_questions = [
@@ -77,8 +83,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_keeps_distinct_count_as_metric(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         result = recognizer.recognize("统计不同厂商数量")
@@ -90,8 +96,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_accepts_stable_related_count_as_metric(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         questions = [
@@ -109,8 +115,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_prefers_numeric_metric_for_scalar_maximum(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         questions = [
@@ -129,8 +135,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_prefers_multi_metric_over_single_numeric_metric(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         questions = [
@@ -150,8 +156,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_prefers_derived_metric_ranking_over_trend_when_ordered(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         result = recognizer.recognize("查询增长率最高的业务类型")
@@ -163,8 +169,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_rejects_complex_detail_with_relation_filters(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         result = recognizer.recognize(
@@ -178,8 +184,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_prefers_set_difference_for_unassigned_relation(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         result = recognizer.recognize("查询未被任何服务使用的隧道")
@@ -191,8 +197,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_accepts_named_entity_related_record_template(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         result = recognizer.recognize("查询设备A连接的端口")
@@ -204,8 +210,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_accepts_clear_field_detail_relation_and_path_templates(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
         cases = [
             (
@@ -250,8 +256,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_rejects_complex_breakdown_with_relation_conditions(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         result = recognizer.recognize(
@@ -265,8 +271,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_rejects_complex_ranking_with_relation_conditions(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         result = recognizer.recognize(
@@ -280,8 +286,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_rejects_complex_path_with_relation_conditions(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         result = recognizer.recognize("查询前5条从网络设备经过端口连接到状态为down的光纤端口的路径。")
@@ -293,8 +299,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_accepts_stable_multi_metric_breakdown_template(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         result = recognizer.recognize("查询每个网络设备拥有的端口总数，以及它作为源端所连接的光纤端口数量。")
@@ -306,8 +312,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_accepts_stable_grouped_multi_metric_template(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         result = recognizer.recognize(
@@ -321,8 +327,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_prefers_share_breakdown_for_grouped_ratio(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         result = recognizer.recognize("按厂商统计设备占比")
@@ -334,8 +340,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_prefers_segment_comparison_for_named_segments(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         result = recognizer.recognize("比较核心网和接入网的平均链路带宽")
@@ -347,8 +353,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
 
     def test_rule_stage_prefers_time_series_for_hourly_statistics(self) -> None:
         recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
 
         result = recognizer.recognize("按小时统计端口 down 数量")
@@ -424,8 +430,8 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
         self.assertEqual("fallback_llm", result.decision)
 
     def test_llm_fewshots_reference_known_taxonomy_intents(self) -> None:
-        taxonomy = yaml.safe_load((CONFIG_DIR / "intent_taxonomy.yaml").read_text(encoding="utf-8"))
-        fewshots = yaml.safe_load((CONFIG_DIR / "intent_llm_fewshots.yaml").read_text(encoding="utf-8"))
+        taxonomy = yaml.safe_load((INTENT_RESOURCE_DIR / "taxonomy.yaml").read_text(encoding="utf-8"))
+        fewshots = yaml.safe_load((INTENT_RESOURCE_DIR / "llm_fewshots.yaml").read_text(encoding="utf-8"))
         known_intents = {
             (primary["primary_intent"], secondary["secondary_intent"])
             for primary in taxonomy["intents"]
@@ -441,14 +447,14 @@ class RuleBasedIntentRecognizerTest(unittest.TestCase):
         self.assertLessEqual(referenced_intents, known_intents)
 
     def test_embedding_corpus_has_minimum_samples_per_secondary_intent(self) -> None:
-        taxonomy = yaml.safe_load((CONFIG_DIR / "intent_taxonomy.yaml").read_text(encoding="utf-8"))
+        taxonomy = yaml.safe_load((INTENT_RESOURCE_DIR / "taxonomy.yaml").read_text(encoding="utf-8"))
         known_intents = {
             (primary["primary_intent"], secondary["secondary_intent"])
             for primary in taxonomy["intents"]
             for secondary in primary["secondary_intents"]
         }
         sample_counts = {intent: 0 for intent in known_intents}
-        for line in (CONFIG_DIR / "intent_embedding_corpus.jsonl").read_text(encoding="utf-8").splitlines():
+        for line in (INTENT_RESOURCE_DIR / "embedding_corpus.jsonl").read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
             sample = yaml.safe_load(line)
@@ -826,6 +832,87 @@ class EmbeddingIntentRecognizerTest(unittest.TestCase):
         self.assertEqual("count_metric_001", candidates[0].sample_id)
         self.assertEqual(1.0, candidates[0].score)
 
+    def test_embedding_recognizer_passes_question_text_to_embedding_store(self) -> None:
+        sample = IntentEmbeddingSample(
+            id="count_metric_001",
+            primary_intent="metric_query",
+            secondary_intent="count_metric_query",
+            text="count sample",
+        )
+        embedder = _StaticEmbedder({"query text": (1.0, 0.0)})
+        store = _QuestionAwareStore(sample)
+        recognizer = EmbeddingIntentRecognizer(
+            samples=[],
+            valid_intents={("metric_query", "count_metric_query")},
+            embedder=embedder,
+            store=store,
+            accept_threshold=0.5,
+        )
+
+        candidates = recognizer.retrieve_candidates("query text", top_k=1)
+
+        self.assertEqual("query text", store.seen_query_text)
+        self.assertEqual("count_metric_001", candidates[0].sample_id)
+
+    def test_rag_intent_embedding_store_posts_question_and_returns_ranked_samples(self) -> None:
+        requests: list[dict[str, object]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(json.loads(request.content.decode("utf-8")))
+            return httpx.Response(
+                200,
+                json={
+                    "hits": [
+                        {
+                            "id": "related_record_001",
+                            "text": "查询服务所使用隧道的 ID 和名称",
+                            "primary_intent": "record_retrieval_query",
+                            "secondary_intent": "related_record_query",
+                            "score": 0.91,
+                        }
+                    ]
+                },
+            )
+
+        store = RagIntentEmbeddingStore(
+            base_url="http://rag-service",
+            collection="nl2cypher_intent_examples_v1",
+            taxonomy_version="v1",
+            transport=httpx.MockTransport(handler),
+        )
+
+        matches = store.search((0.1, 0.2), top_k=3, query_text="服务使用了哪些隧道")
+
+        self.assertEqual("服务使用了哪些隧道", requests[0]["question"])
+        self.assertEqual(3, requests[0]["top_k"])
+        self.assertEqual("nl2cypher_intent_examples_v1", requests[0]["collection"])
+        self.assertEqual({"enabled": True, "taxonomy_version": "v1"}, requests[0]["filters"])
+        self.assertEqual("related_record_001", matches[0][0].id)
+        self.assertEqual("record_retrieval_query", matches[0][0].primary_intent)
+        self.assertEqual("related_record_query", matches[0][0].secondary_intent)
+        self.assertEqual(0.91, matches[0][1])
+
+    def test_fallback_embedding_store_uses_local_store_when_rag_search_fails(self) -> None:
+        sample = IntentEmbeddingSample(
+            id="count_metric_001",
+            primary_intent="metric_query",
+            secondary_intent="count_metric_query",
+            text="count sample",
+        )
+        fallback = InMemoryEmbeddingStore(
+            samples=[sample],
+            embedder=_StaticEmbedder({"query": (1.0, 0.0), "count sample": (1.0, 0.0)}),
+        )
+        store = FallbackEmbeddingStore(
+            primary=_FailingEmbeddingStore(),
+            fallback=fallback,
+        )
+
+        matches = store.search((1.0, 0.0), top_k=1, query_text="query")
+
+        self.assertEqual("count_metric_001", matches[0][0].id)
+        self.assertEqual(1.0, matches[0][1])
+
     def test_write_embedding_index_and_jsonl_store_round_trip_vectors(self) -> None:
         samples = [
             IntentEmbeddingSample(
@@ -1117,6 +1204,33 @@ class _StaticEmbedder:
         return self.vectors[text]
 
 
+class _QuestionAwareStore:
+    def __init__(self, sample: IntentEmbeddingSample) -> None:
+        self.sample = sample
+        self.seen_query_text: str | None = None
+
+    def search(
+        self,
+        query_vector: tuple[float, ...],
+        *,
+        top_k: int,
+        query_text: str | None = None,
+    ) -> list[tuple[IntentEmbeddingSample, float]]:
+        self.seen_query_text = query_text
+        return [(self.sample, 1.0)]
+
+
+class _FailingEmbeddingStore:
+    def search(
+        self,
+        query_vector: tuple[float, ...],
+        *,
+        top_k: int,
+        query_text: str | None = None,
+    ) -> list[tuple[IntentEmbeddingSample, float]]:
+        raise RagIntentSearchError("rag unavailable")
+
+
 class _FakeSentenceTransformerModel:
     def __init__(self) -> None:
         self.calls: list[tuple[str, bool]] = []
@@ -1129,8 +1243,8 @@ class _FakeSentenceTransformerModel:
 class HybridIntentRecognizerTest(unittest.TestCase):
     def test_recognize_uses_embedding_when_rule_stage_has_no_match(self) -> None:
         rule_recognizer = RuleBasedIntentRecognizer.from_files(
-            taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-            rules_path=CONFIG_DIR / "intent_rules.yaml",
+            taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+            rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
         )
         embedding_recognizer = EmbeddingIntentRecognizer.from_samples(
             [
@@ -1280,15 +1394,32 @@ class HybridIntentRecognizerTest(unittest.TestCase):
         self.assertIsInstance(recognizer.embedding_recognizer.store, JsonlEmbeddingStore)
         self.assertEqual(["count_metric_001"], [sample.id for sample in recognizer.embedding_recognizer.samples])
 
+    def test_cached_hybrid_recognizer_can_use_rag_vector_store_from_environment(self) -> None:
+        get_hybrid_intent_recognizer.cache_clear()
+        with patch.dict(
+            "os.environ",
+            {
+                "NL2CYPHER_INTENT_EMBEDDING_STORE": "rag_vector",
+                "NL2CYPHER_INTENT_RAG_SERVICE_URL": "http://rag-service",
+                "NL2CYPHER_INTENT_RAG_COLLECTION": "nl2cypher_intent_examples_v1",
+                "NL2CYPHER_INTENT_TAXONOMY_VERSION": "v1",
+            },
+        ):
+            recognizer = get_hybrid_intent_recognizer()
+        get_hybrid_intent_recognizer.cache_clear()
+
+        self.assertIsInstance(recognizer.embedding_recognizer.store, FallbackEmbeddingStore)
+        self.assertEqual([], recognizer.embedding_recognizer.samples)
+
     def _configured_hybrid_recognizer(self) -> HybridIntentRecognizer:
         return HybridIntentRecognizer(
             rule_recognizer=RuleBasedIntentRecognizer.from_files(
-                taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-                rules_path=CONFIG_DIR / "intent_rules.yaml",
+                taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+                rules_path=INTENT_RESOURCE_DIR / "rules.yaml",
             ),
             embedding_recognizer=EmbeddingIntentRecognizer.from_files(
-                taxonomy_path=CONFIG_DIR / "intent_taxonomy.yaml",
-                corpus_path=CONFIG_DIR / "intent_embedding_corpus.jsonl",
+                taxonomy_path=INTENT_RESOURCE_DIR / "taxonomy.yaml",
+                corpus_path=INTENT_RESOURCE_DIR / "embedding_corpus.jsonl",
             ),
         )
 

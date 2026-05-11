@@ -7,11 +7,11 @@ from typing import Any
 
 import yaml
 
+from . import resource_paths
 from .models import GenerationFailureReason
 
 
 PROMPT_TEMPLATE_VERSION = "cypher_generator_agent_prompt_v1"
-_CONFIG_DIR = Path(__file__).resolve().parents[1] / "config"
 
 EXTRA_CONSTRAINT_BY_REASON: dict[GenerationFailureReason, str] = {
     "empty_output": "必须输出一条完整的只读 Cypher。",
@@ -25,10 +25,11 @@ EXTRA_CONSTRAINT_BY_REASON: dict[GenerationFailureReason, str] = {
     "write_operation": "只生成只读查询。",
     "unsupported_call": "不要使用未允许的 CALL procedure。",
     "unsupported_start_clause": "使用 MATCH 或 WITH 作为查询起始子句。",
-    "unauthorized_schema_reference": "不要引用 SemanticQuerySpec 未授权的 label、edge、property。",
-    "semantic_query_mismatch": "必须完整覆盖 SemanticQuerySpec 中的实体、关系、过滤、投影、维度、指标、排序、limit 和输出别名。",
-    "semantic_parse_rejected": "必须先满足意图、业务槽位和语义层约束，再生成 Cypher。",
-    "generation_retry_exhausted": "",
+    "unauthorized_schema_reference": "不要引用逻辑查询计划和已授权 schema path 之外的 label、edge、property。",
+    "logical_plan_mismatch": "必须完整覆盖 LogicalQueryPlan 中的查询目标、过滤条件、路径引用、返回对象、排序和 limit。",
+    "semantic_match_rejected": "必须满足语义视图匹配结果中的实体、过滤条件、路径语义和返回策略。",
+    "path_planning_failed": "只能使用规划层已经选中的合法 schema graph path。",
+    "cypher_fallback_cannot_generate": "如果无法安全生成，请输出 __CANNOT_GENERATE__。",
 }
 
 
@@ -56,12 +57,12 @@ def render_controlled_semantic_prompt(
 """
     extra_constraint = _render_extra_constraint(extra_constraint_reason)
     return f"""【任务说明】
-你是 cypher-generator-agent 的受控 Cypher fallback 生成模型。请根据用户问题、SemanticQuerySpec 和已选择知识上下文生成一条只读 Cypher 查询。
+你是 cypher-generator-agent 的受控 Cypher fallback 生成模型。请根据用户问题、逻辑查询计划、已授权 schema path 和已选择知识上下文生成一条只读 Cypher 查询。
 
 【用户问题】
 {question.strip()}
 
-【SemanticQuerySpec】
+【逻辑查询计划与授权路径】
 {semantic_query_json.strip()}
 {selected_knowledge_section}
 {renderer_error_section}
@@ -71,9 +72,9 @@ def render_controlled_semantic_prompt(
 - 只输出一条查询。
 - 查询必须是只读查询。
 - 查询必须以 MATCH 或 WITH 开始。
-- 不要新增 SemanticQuerySpec 未授权的 label、edge、property。
-- 必须覆盖 SemanticQuerySpec 中的 entity、relationship、filter、projection、dimension、metric、order_by、limit、output_alias。
-- 如果无法覆盖，仍然只输出最接近 SemanticQuerySpec 的只读 Cypher，不要解释。
+- 不要新增逻辑查询计划和授权路径未允许的 label、edge、property。
+- 必须覆盖逻辑查询计划中的查询目标、过滤条件、路径引用、返回对象、排序和 limit。
+- 如果无法安全覆盖，输出 __CANNOT_GENERATE__，不要解释。
 {extra_constraint}""".strip()
 
 
@@ -121,8 +122,8 @@ def render_intent_recognition_fallback_prompt(
 
 @lru_cache(maxsize=1)
 def _load_intent_llm_assets() -> dict[str, str]:
-    fewshot_payload = _read_yaml(_CONFIG_DIR / "intent_llm_fewshots.yaml")
-    taxonomy_payload = _read_yaml(_CONFIG_DIR / "intent_taxonomy.yaml")
+    fewshot_payload = _read_yaml(resource_paths.intent_llm_fewshots_path())
+    taxonomy_payload = _read_yaml(resource_paths.intent_taxonomy_path())
     principles = "\n".join(f"- {item}" for item in fewshot_payload.get("global_decision_principles", []))
     boundaries = "\n".join(_format_boundary(item) for item in fewshot_payload.get("confusable_boundaries", []))
     fewshots = "\n".join(_format_fewshot(item) for item in fewshot_payload.get("few_shot_reasoning_examples", [])[:12])
@@ -169,7 +170,7 @@ def _format_fewshot(item: Any) -> str:
 
 
 def _render_extra_constraint(reason: GenerationFailureReason | None) -> str:
-    if reason is None or reason == "generation_retry_exhausted":
+    if reason is None:
         return ""
     text = EXTRA_CONSTRAINT_BY_REASON[reason]
     return f"""

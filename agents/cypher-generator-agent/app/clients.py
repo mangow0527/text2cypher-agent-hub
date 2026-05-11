@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 import httpx
 
-from .models import GeneratedCypherSubmissionRequest, GenerationRunFailureReport
+from .models import CgaGenerationNonSuccessReport, GeneratedCypherSubmissionRequest
 
 
 logger = logging.getLogger("cypher_generator_agent")
@@ -153,7 +153,7 @@ class TestingAgentClient:
             target="testing_agent.submission",
         )
 
-    async def submit_generation_failure(self, payload: GenerationRunFailureReport) -> Dict[str, Any]:
+    async def submit_generation_failure(self, payload: CgaGenerationNonSuccessReport) -> Dict[str, Any]:
         return await self._submit_with_retries(
             payload=payload,
             endpoint_path="/api/v1/evaluations/generation-failures",
@@ -163,7 +163,7 @@ class TestingAgentClient:
     async def _submit_with_retries(
         self,
         *,
-        payload: GeneratedCypherSubmissionRequest | GenerationRunFailureReport,
+        payload: GeneratedCypherSubmissionRequest | CgaGenerationNonSuccessReport,
         endpoint_path: str,
         target: str,
     ) -> Dict[str, Any]:
@@ -190,7 +190,7 @@ class TestingAgentClient:
     async def _submit_once(
         self,
         *,
-        payload: GeneratedCypherSubmissionRequest | GenerationRunFailureReport,
+        payload: GeneratedCypherSubmissionRequest | CgaGenerationNonSuccessReport,
         endpoint_path: str,
         target: str,
         submit_index: int,

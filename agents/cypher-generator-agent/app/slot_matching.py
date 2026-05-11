@@ -8,6 +8,8 @@ from typing import Any
 
 import yaml
 
+from . import resource_paths
+
 
 @dataclass(frozen=True)
 class SlotMatch:
@@ -100,7 +102,7 @@ class SlotMatcher:
 
     @classmethod
     def from_default_config(cls) -> "SlotMatcher":
-        return cls(_load_default_dictionary())
+        return cls(load_default_slot_dictionary())
 
     @classmethod
     def from_config_path(cls, path: str | Path) -> "SlotMatcher":
@@ -404,10 +406,23 @@ class _Occurrence:
 
 
 @lru_cache(maxsize=1)
-def _load_default_dictionary() -> dict[str, Any]:
-    config_path = Path(__file__).resolve().parents[1] / "config" / "slot_dictionary.yaml"
-    with config_path.open("r", encoding="utf-8") as file:
-        return yaml.safe_load(file) or {}
+def load_default_slot_dictionary() -> dict[str, Any]:
+    dictionary: dict[str, Any] = {}
+    for path in (
+        resource_paths.slot_lexicon_path(),
+        resource_paths.slot_value_aliases_path(),
+        resource_paths.slot_parse_patterns_path(),
+    ):
+        dictionary.update(_read_yaml_mapping(path))
+    return dictionary
+
+
+def _read_yaml_mapping(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as file:
+        data = yaml.safe_load(file) or {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} must contain a YAML mapping")
+    return data
 
 
 def _synonyms(config: object) -> tuple[str, ...]:

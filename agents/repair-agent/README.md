@@ -4,13 +4,15 @@ This service analyzes failed evaluations, produces knowledge repair suggestions,
 
 ## Contract
 
-`repair-agent` consumes failed `IssueTicket` payloads from `testing-agent`. It does not call `cypher-generator-agent`, execute TuGraph, configure the generator LLM, or post to feedback endpoints owned by other services. Generation facts, execution results, evaluation evidence, and the prompt snapshot must arrive in the ticket.
+`repair-agent` consumes failed `IssueTicket` payloads from `testing-agent`. It does not call `cypher-generator-agent`, execute TuGraph, configure the generator LLM, or post to feedback endpoints owned by other services. Generation facts, execution results, evaluation evidence, and the generator evidence snapshot must arrive in the ticket.
 
-Required prompt evidence comes from:
+Required generator evidence comes from:
 
 ```text
 IssueTicket.generation_evidence.input_prompt_snapshot
 ```
+
+The field name is historical. In the current semantic-pipeline path it contains the generator's semantic trace, not necessarily a full LLM prompt.
 
 The LLM diagnosis response must be a JSON object with:
 

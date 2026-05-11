@@ -1,0 +1,25 @@
+default_filter_entity:
+  quality_of_service: service
+
+entity_properties:
+  service: ["id", "name", "quality_of_service", "elem_type", "bandwidth", "latency"]
+  tunnel: ["id", "name", "elem_type", "bandwidth", "latency", "ietf_standard"]
+  network_element: ["id", "name", "vendor", "elem_type", "ip_address", "location", "model", "software_version"]
+  port: ["id", "name", "status", "elem_type", "speed", "mac_address", "vlan_id"]
+  link: ["id", "name", "status", "admin_status", "elem_type", "bandwidth", "latency", "mtu", "protocol", "vlan_id"]
+  fiber: ["id", "name", "elem_type", "length", "location", "wavelength", "bandwidth_capacity"]
+  protocol: ["id", "name", "version", "standard", "ietf_category"]
+
+order:
+  desc: ["最高", "最大", "最多", "降序"]
+  asc: ["最低", "最小", "最少", "升序"]
+
+group_by:
+  prefixes: ["按", "按照", "基于"]
+
+limit:
+  patterns:
+    - "前\\s*(\\d+)\\s*个"
+    - "top\\s*(\\d+)"
+    - "Top\\s*(\\d+)"
+    - "TOP\\s*(\\d+)"

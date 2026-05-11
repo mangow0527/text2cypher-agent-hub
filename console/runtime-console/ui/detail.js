@@ -27,16 +27,28 @@ function tone(status) {
     case 'pass':
     case 'generated':
     case 'ok':
+    case 'applied':
     case true:
       return 'ok';
     case 'failed':
     case 'fail':
     case 'service_failed':
+    case 'apply_failed':
+    case 'rejected':
     case false:
       return 'danger';
     case 'running':
     case 'generation_failed':
+    case 'waiting_human_review':
+    case 'apply_paused':
       return 'warn';
+    case 'cancelled':
+    case 'skipped':
+    case 'not_sent':
+    case 'not_recorded':
+    case 'not_started':
+    case 'not_repairable':
+      return 'neutral';
     default:
       return 'neutral';
   }
@@ -66,19 +78,30 @@ function emptyCypherText(value) {
   return value ? value : '未生成可评测 Cypher';
 }
 
-function renderCgaLlmPrompt(item, fallbackTitle) {
+function generationCypherText(section) {
+  if (section.generation_status === 'clarification_required') {
+    return '需要澄清';
+  }
+  return emptyCypherText(section.generated_cypher || section.parsed_cypher);
+}
+
+function renderCgaLlmPrompt(item, fallbackTitle, fallbackRawOutputTitle) {
   const title = item?.title_zh || fallbackTitle;
   const body = item?.triggered ? item.prompt : (item?.empty_label_zh || '本次未触发');
+  const rawOutputTitle = item?.raw_output_title_zh || fallbackRawOutputTitle;
+  const rawOutputBody = item?.triggered ? (item.raw_output || item?.empty_raw_output_label_zh || '本次未触发或未记录返回') : (item?.empty_label_zh || '本次未触发');
   return `
     <h3>${escapeHtml(title)}</h3>
     ${codeBlock(body)}
+    <h3>${escapeHtml(rawOutputTitle)}</h3>
+    ${codeBlock(rawOutputBody)}
   `;
 }
 
 function renderCgaLlmPrompts(prompts = {}) {
   return [
-    renderCgaLlmPrompt(prompts.intent_recognition_fallback, '意图识别 LLM 兜底提示词'),
-    renderCgaLlmPrompt(prompts.cypher_generation_fallback, 'Renderer 失败后的 Cypher 兜底提示词'),
+    renderCgaLlmPrompt(prompts.intent_recognition_fallback, '意图识别 LLM 兜底提示词', '意图识别 LLM 原始返回'),
+    renderCgaLlmPrompt(prompts.cypher_generation_fallback, 'Renderer 失败后的 Cypher 兜底提示词', 'Cypher 生成 LLM 原始返回'),
   ].join('');
 }
 
@@ -121,7 +144,7 @@ function renderCypherGenerator(section) {
       <h3>标准 Cypher</h3>
       ${codeBlock(section.golden_cypher)}
       <h3>生成 Cypher</h3>
-      ${codeBlock(emptyCypherText(section.generated_cypher || section.parsed_cypher))}
+      ${codeBlock(generationCypherText(section))}
       <h3>LLM 调用提示词</h3>
       ${renderCgaLlmPrompts(section.llm_prompts || {})}
       <h3>生成链路摘要</h3>
@@ -136,11 +159,8 @@ function renderCypherGenerator(section) {
         ${metricCard('知识选择', `${knowledge.source_label_zh || '未记录'} · ${(knowledge.selection_trace || []).length} 条 trace`)}
         ${metricCard('预检结果', `${preflight.label_zh || '未记录'}${preflight.reason_label_zh ? ` · ${preflight.reason_label_zh}` : ''}`)}
         ${metricCard('生成运行 ID', section.generation_run_id || '未提供')}
-        ${metricCard('最后失败原因', section.last_failure_reason || '无')}
-        ${metricCard('重试次数', section.retry_count ?? 0)}
-        ${metricCard('历史失败原因', (section.failure_reasons || []).join(', ') || '无')}
       </div>
-      <h3>SemanticQuerySpec / 原始语义快照</h3>
+      <h3>CGA 分层证据快照</h3>
       ${codeBlock(section.prompt_markdown)}
     </details>
   `;
@@ -198,8 +218,11 @@ function renderTestingAgent(section) {
 }
 
 function renderRepairAgent(section) {
-  const statusLabel = section.status || (section.analysis_id ? 'recorded' : 'not recorded');
-  const statusTone = section.status === 'not_repairable' ? 'warn' : (section.analysis_id ? 'passed' : 'pending');
+  const repairState = section.repair_state || {};
+  const applyState = section.knowledge_apply_state || {};
+  const redispatchState = section.redispatch_state || {};
+  const statusLabel = repairState.label_zh || section.status || (section.analysis_id ? 'recorded' : 'not recorded');
+  const statusTone = repairState.value || (section.status === 'not_repairable' ? 'not_repairable' : (section.analysis_id ? 'applied' : 'pending'));
   const nonRepairableReason = section.status === 'not_repairable'
     ? `
       <h3>不修复原因</h3>
@@ -212,6 +235,16 @@ function renderRepairAgent(section) {
         <span>repair-agent</span>
         <span class="status-pill tone-${tone(statusTone)}">${escapeHtml(statusLabel)}</span>
       </summary>
+      <h3>repair 状态</h3>
+      <div class="field-grid">
+        ${metricCard('诊断状态', `${repairState.label_zh || '未记录'}${repairState.raw_status ? `（原始值：${repairState.raw_status}）` : ''}`, repairState.value)}
+        ${metricCard('知识应用状态', `${applyState.label_zh || '未记录'}${applyState.raw_status ? `（原始值：${applyState.raw_status}）` : ''}`, applyState.value)}
+        ${metricCard('redispatch 状态', `${redispatchState.label_zh || '未记录'}${redispatchState.reason ? `（原因：${redispatchState.reason}）` : ''}`, redispatchState.value)}
+        ${metricCard('applied 原始标记', section.applied ?? '未记录')}
+      </div>
+      ${repairState.message ? `<h3>诊断状态说明</h3>${codeBlock(repairState.message)}` : ''}
+      ${applyState.message ? `<h3>知识应用说明</h3>${codeBlock(applyState.message)}` : ''}
+      ${redispatchState.message ? `<h3>redispatch 说明</h3>${codeBlock(redispatchState.message)}` : ''}
       <h3>发给诊断大模型的完整提示词</h3>
       ${codeBlock(section.llm_prompt_markdown)}
       <h3>大模型原始返回</h3>

@@ -65,21 +65,21 @@ async def test_semantic_pipeline_uses_llm_as_third_stage_intent_recognizer() -> 
             self.calls = []
 
         async def generate_from_prompt(self, *, task_id: str, question_text: str, llm_prompt: str):
+            raw_output = (
+                '{"primary_intent":"record_retrieval_query",'
+                '"secondary_intent":"related_record_query",'
+                '"confidence":0.86,'
+                '"decision":"accept"}'
+            )
             self.calls.append(
                 {
                     "task_id": task_id,
                     "question_text": question_text,
                     "llm_prompt": llm_prompt,
+                    "raw_output": raw_output,
                     }
                 )
-            return {
-                "raw_output": (
-                    '{"primary_intent":"record_retrieval_query",'
-                    '"secondary_intent":"related_record_query",'
-                    '"confidence":0.86,'
-                    '"decision":"accept"}'
-                )
-            }
+            return {"raw_output": raw_output}
 
     llm_client = FakeLLMClient()
     pipeline = SemanticPipeline(llm_client=llm_client)
@@ -114,7 +114,9 @@ async def test_semantic_pipeline_uses_llm_as_third_stage_intent_recognizer() -> 
     )
     assert result.preflight.accepted is True
     assert result.to_dict()["llm_prompts"]["intent_recognition_fallback"] == llm_client.calls[0]["llm_prompt"]
+    assert result.to_dict()["llm_responses"]["intent_recognition_fallback"] == llm_client.calls[0]["raw_output"]
     assert result.to_dict()["llm_prompts"]["cypher_generation_fallback"] is None
+    assert result.to_dict()["llm_responses"]["cypher_generation_fallback"] is None
     assert "intent_fallback_cypher_generation" not in result.to_dict()["llm_prompts"]
 
 
@@ -147,6 +149,7 @@ async def test_semantic_pipeline_rejects_cypher_text_from_intent_llm_fallback() 
     assert result.generated_cypher is None
     assert result.preflight is None
     assert result.to_dict()["llm_prompts"]["intent_recognition_fallback"]
+    assert result.to_dict()["llm_responses"]["intent_recognition_fallback"] == "MATCH (s:Service) RETURN s.name AS service_name"
     assert "intent_fallback_cypher_generation" not in result.to_dict()["llm_prompts"]
 
 
@@ -329,7 +332,58 @@ async def test_semantic_pipeline_falls_back_to_controlled_llm_when_renderer_is_u
     assert "SemanticQuerySpec" in llm_client.prompt
     assert "不要新增 SemanticQuerySpec 未授权的 label、edge、property" in llm_client.prompt
     assert result.to_dict()["llm_prompts"]["cypher_generation_fallback"] == llm_client.prompt
+    assert result.to_dict()["llm_responses"]["cypher_generation_fallback"] == result.generated_cypher
     assert result.to_dict()["llm_prompts"]["intent_recognition_fallback"] is None
+    assert result.to_dict()["llm_responses"]["intent_recognition_fallback"] is None
+
+
+@pytest.mark.asyncio
+async def test_semantic_pipeline_falls_back_to_controlled_llm_when_renderer_preflight_fails() -> None:
+    class MismatchingRenderer:
+        def render(self, semantic_query):
+            return (
+                "MATCH (s:Service)-[:SERVICE_USES_TUNNEL]->(t:Tunnel)\n"
+                "WHERE s.quality_of_service = 'Gold'\n"
+                "RETURN t.id AS tunnel_id"
+            )
+
+    class FakeLLMClient:
+        def __init__(self) -> None:
+            self.prompt = ""
+
+        async def generate_from_prompt(self, *, task_id: str, question_text: str, llm_prompt: str):
+            self.prompt = llm_prompt
+            return {
+                "raw_output": (
+                    "MATCH (s:Service)-[:SERVICE_USES_TUNNEL]->(t:Tunnel)\n"
+                    "WHERE s.quality_of_service = 'Gold'\n"
+                    "RETURN t.name AS tunnel_name"
+                )
+            }
+
+    llm_client = FakeLLMClient()
+    pipeline = SemanticPipeline(renderer=MismatchingRenderer(), llm_client=llm_client)
+    intent = IntentRecognitionResult(
+        primary_intent="record_retrieval_query",
+        secondary_intent="related_record_query",
+        confidence=0.93,
+        source="rule",
+        decision="accept",
+    )
+
+    result = await pipeline.parse_with_fallback(
+        id="qa-preflight-fallback",
+        question="查询 Gold 服务使用的隧道名称",
+        generation_run_id="cypher-run-preflight-fallback",
+        intent_result=intent,
+    )
+
+    assert result.generation_mode == "controlled_llm_fallback"
+    assert result.generated_cypher.endswith("RETURN t.name AS tunnel_name")
+    assert result.preflight.accepted is True
+    assert "semantic preflight failed" in llm_client.prompt
+    assert "semantic_query_mismatch" in llm_client.prompt
+    assert result.to_dict()["llm_prompts"]["cypher_generation_fallback"] == llm_client.prompt
 
 
 @pytest.mark.asyncio

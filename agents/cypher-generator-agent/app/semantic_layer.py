@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 import yaml
 
+from . import resource_paths
+
 
 Direction = Literal["out", "in", "undirected"]
 
@@ -380,7 +382,7 @@ def _duplicate_name_diagnostics(kind: str, items: dict[str, Any]) -> list[str]:
 
 
 def _default_config_path() -> Path:
-    return Path(__file__).resolve().parents[1] / "config" / "semantic_layer.yaml"
+    return resource_paths.semantic_layer_path()
 
 
 def _default_schema_path() -> Path:
