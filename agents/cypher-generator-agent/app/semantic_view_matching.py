@@ -192,6 +192,73 @@ class SemanticViewMatcher:
             },
         )
 
+    def match_with_selected_path(
+        self,
+        question: str,
+        *,
+        selected_path_semantic: str,
+        llm_attempt: dict[str, object],
+    ) -> SemanticViewMatchingTrace:
+        text = normalize_question(question)
+        entities = self._match_entities(text)
+        filters = self._match_filters(text)
+        if selected_path_semantic not in self.semantic_view.path_semantics:
+            return SemanticViewMatchingTrace(
+                source="network_graph_semantic_view.yaml",
+                result=SemanticMatchResult(
+                    accepted=False,
+                    entities=tuple(entities),
+                    filters=tuple(filters),
+                    rejection_reason="llm_selected_unknown_path_semantic",
+                    trace=("LLM 消歧选择了语义视图之外的路径语义",),
+                ),
+                stages={"llm_disambiguation": {"decision": "reject", "reason": "unknown_path_semantic"}},
+                llm_disambiguation_attempts=(dict(llm_attempt),),
+            )
+        path = self.semantic_view.path_semantic(selected_path_semantic)
+        selected_path = SemanticMatchedPath(
+            path_semantic=path.name,
+            relationships=path.relationships,
+            evidence=str(llm_attempt.get("reason") or "LLM 有限候选消歧"),
+        )
+        returns = self._match_returns(text, entities, [selected_path])
+        metrics = self._match_metrics(text, entities)
+        order_by = self._match_order_by(text, returns, metrics)
+        limit = _match_limit(text)
+        entities = _complete_entities(
+            entities=entities,
+            filters=filters,
+            paths=[selected_path],
+            returns=returns,
+            metrics=metrics,
+            order_by=order_by,
+            semantic_view=self.semantic_view,
+        )
+        trace = _trace_items(entities, filters, [selected_path], returns, metrics, order_by, limit)
+        return SemanticViewMatchingTrace(
+            source="network_graph_semantic_view.yaml",
+            result=SemanticMatchResult(
+                accepted=True,
+                entities=tuple(entities),
+                filters=tuple(filters),
+                paths=(selected_path,),
+                returns=tuple(returns),
+                metrics=tuple(metrics),
+                order_by=tuple(order_by),
+                limit=limit,
+                needs_clarification=False,
+                trace=tuple([*trace, f"LLM 消歧 -> path_semantics {selected_path_semantic}"]),
+                candidate_trace=tuple(_candidate_trace(entities, filters, [selected_path], returns, metrics)),
+            ),
+            stages={
+                "candidate_generation": {"decision": "accept", "candidate_count": 1},
+                "semantic_completion": {"decision": "accept"},
+                "candidate_ranking": {"decision": "accept", "reason": "LLM 有限候选消歧"},
+                "llm_disambiguation": {"decision": "accept", "selected_path_semantic": selected_path_semantic},
+            },
+            llm_disambiguation_attempts=(dict(llm_attempt),),
+        )
+
     def _match_entities(self, text: str) -> list[str]:
         matches: list[str] = []
         for entity in self.semantic_view.entities.values():

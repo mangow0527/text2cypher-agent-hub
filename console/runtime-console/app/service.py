@@ -562,14 +562,6 @@ class RuntimeResultsService:
         semantic_view_matching = self._trace_object(snapshot.get("semantic_view_matching"))
         semantic_result = self._trace_object(semantic_view_matching.get("result"))
         semantic_trace = self._semantic_view_trace(semantic_view_matching, semantic_result)
-        secondary_attempts = self._llm_attempts_without_stage(
-            intent_diagnostics.get("llm_secondary_attempts"),
-            {"intent_recognition_fallback"},
-        )
-        fallback_attempts = self._llm_attempts_with_stage(
-            intent_diagnostics.get("llm_secondary_attempts"),
-            {"intent_recognition_fallback"},
-        )
         logical_query_plan = self._trace_object(snapshot.get("logical_query_plan") or snapshot.get("logical_plan"))
         schema_path_planning = self._trace_object(snapshot.get("schema_path_planning"))
         knowledge_selection = self._trace_object(snapshot.get("knowledge_selection"))
@@ -630,11 +622,7 @@ class RuntimeResultsService:
                     ),
                     self._trace_field(
                         "二级 LLM 调用",
-                        self._trace_count(secondary_attempts),
-                    ),
-                    self._trace_field(
-                        "兜底 LLM 调用",
-                        self._trace_count(fallback_attempts),
+                        self._trace_count(intent_diagnostics.get("llm_secondary_attempts")),
                     ),
                 ],
                 "raw": intent_recognition,
@@ -796,14 +784,6 @@ class RuntimeResultsService:
         semantic_result = self._trace_object(semantic_view_matching.get("result"))
         semantic_trace = self._semantic_view_trace(semantic_view_matching, semantic_result)
         generation = self._trace_object(snapshot.get("generation"))
-        secondary_attempts = self._llm_attempts_without_stage(
-            intent_diagnostics.get("llm_secondary_attempts"),
-            {"intent_recognition_fallback"},
-        )
-        fallback_attempts = self._llm_attempts_with_stage(
-            intent_diagnostics.get("llm_secondary_attempts"),
-            {"intent_recognition_fallback"},
-        )
         return {
             "intent_primary_classification": self._llm_prompt_item_from_attempts(
                 "intent_primary_classification",
@@ -815,13 +795,7 @@ class RuntimeResultsService:
                 "intent_secondary_classification",
                 "意图识别：二级分类 LLM 判定",
                 "意图识别：二级分类 LLM 原始返回",
-                secondary_attempts,
-            ),
-            "intent_recognition_fallback": self._llm_prompt_item_from_attempts(
-                "intent_recognition_fallback",
-                "意图识别 LLM 兜底提示词",
-                "意图识别 LLM 原始返回",
-                fallback_attempts,
+                intent_diagnostics.get("llm_secondary_attempts"),
             ),
             "semantic_view_disambiguation": self._llm_prompt_item_from_attempts(
                 "semantic_view_disambiguation",

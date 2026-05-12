@@ -506,12 +506,22 @@ async def test_semantic_pipeline_uses_llm_as_third_stage_intent_recognizer() -> 
             self.calls = []
 
         async def generate_from_prompt(self, *, task_id: str, question_text: str, llm_prompt: str):
-            raw_output = (
-                '{"primary_intent":"record_retrieval_query",'
-                '"secondary_intent":"related_record_query",'
-                '"confidence":0.86,'
-                '"decision":"accept"}'
-            )
+            if "当前只做一级意图" in llm_prompt:
+                raw_output = (
+                    '{"primary_intent":"record_retrieval_query",'
+                    '"secondary_intent":null,'
+                    '"confidence":0.86,'
+                    '"decision":"accept",'
+                    '"reason":"用户要返回关联资源明细"}'
+                )
+            else:
+                raw_output = (
+                    '{"primary_intent":"record_retrieval_query",'
+                    '"secondary_intent":"related_record_query",'
+                    '"confidence":0.84,'
+                    '"decision":"accept",'
+                    '"reason":"用户要查询服务关联的隧道名称"}'
+                )
             self.calls.append(
                 {
                     "task_id": task_id,
@@ -539,9 +549,10 @@ async def test_semantic_pipeline_uses_llm_as_third_stage_intent_recognizer() -> 
         intent_result=intent,
     )
 
-    assert len(llm_client.calls) == 1
+    assert len(llm_client.calls) == 2
     assert llm_client.calls[0]["task_id"] == "qa-fallback"
-    assert "第三阶段 LLM 意图识别" in llm_client.calls[0]["llm_prompt"]
+    assert "一级意图" in llm_client.calls[0]["llm_prompt"]
+    assert "二级意图" in llm_client.calls[1]["llm_prompt"]
     assert "只输出 JSON" in llm_client.calls[0]["llm_prompt"]
     assert "SemanticQuerySpec" not in llm_client.calls[0]["llm_prompt"]
     assert result.intent.source == "llm"
@@ -555,9 +566,14 @@ async def test_semantic_pipeline_uses_llm_as_third_stage_intent_recognizer() -> 
     )
     assert result.preflight.accepted is True
     payload = result.to_dict()
-    intent_attempts = payload["intent_recognition"]["diagnostics"]["llm_secondary_attempts"]
-    assert intent_attempts[0]["prompt"] == llm_client.calls[0]["llm_prompt"]
-    assert intent_attempts[0]["raw_output"] == llm_client.calls[0]["raw_output"]
+    primary_attempts = payload["intent_recognition"]["diagnostics"]["llm_primary_attempts"]
+    secondary_attempts = payload["intent_recognition"]["diagnostics"]["llm_secondary_attempts"]
+    assert primary_attempts[0]["attempt_type"] == "candidate_first"
+    assert primary_attempts[0]["prompt"] == llm_client.calls[0]["llm_prompt"]
+    assert primary_attempts[0]["raw_output"] == llm_client.calls[0]["raw_output"]
+    assert secondary_attempts[0]["attempt_type"] == "candidate_first"
+    assert secondary_attempts[0]["prompt"] == llm_client.calls[1]["llm_prompt"]
+    assert secondary_attempts[0]["raw_output"] == llm_client.calls[1]["raw_output"]
     assert payload["generation"]["cypher_fallback_llm"] is None
 
 
@@ -590,9 +606,64 @@ async def test_semantic_pipeline_rejects_cypher_text_from_intent_llm_fallback() 
     assert result.generated_cypher is None
     assert result.preflight is None
     payload = result.to_dict()
-    intent_attempts = payload["intent_recognition"]["diagnostics"]["llm_secondary_attempts"]
+    intent_attempts = payload["intent_recognition"]["diagnostics"]["llm_primary_attempts"]
     assert intent_attempts[0]["prompt"]
     assert intent_attempts[0]["raw_output"] == "MATCH (s:Service) RETURN s.name AS service_name"
+
+
+@pytest.mark.asyncio
+async def test_semantic_pipeline_uses_llm_to_disambiguate_semantic_view_path() -> None:
+    class FakeLLMClient:
+        def __init__(self) -> None:
+            self.calls = []
+
+        async def generate_from_prompt(self, *, task_id: str, question_text: str, llm_prompt: str):
+            raw_output = (
+                '{"decision":"accept",'
+                '"selected_path_semantic":"service.tunnel_destination",'
+                '"confidence":0.82,'
+                '"reason":"到达/对应在该候选集中选择目的网元"}'
+            )
+            self.calls.append(
+                {
+                    "task_id": task_id,
+                    "question_text": question_text,
+                    "llm_prompt": llm_prompt,
+                    "raw_output": raw_output,
+                }
+            )
+            return {"raw_output": raw_output}
+
+    llm_client = FakeLLMClient()
+    pipeline = SemanticPipeline(llm_client=llm_client)
+    intent = IntentRecognitionResult(
+        primary_intent="record_retrieval_query",
+        secondary_intent="related_record_query",
+        confidence=0.88,
+        source="rule",
+        decision="accept",
+    )
+
+    result = await pipeline.parse_with_fallback(
+        id="qa-semantic-disambiguation",
+        question="查询服务对应的网元",
+        generation_run_id="run-semantic-disambiguation",
+        intent_result=intent,
+    )
+
+    assert len(llm_client.calls) == 1
+    assert "语义视图匹配" in llm_client.calls[0]["llm_prompt"]
+    assert "service.tunnel_destination" in llm_client.calls[0]["llm_prompt"]
+    assert result.validation.accepted is True
+    assert result.clarification is None
+    assert result.semantic_view_matching is not None
+    assert result.semantic_view_matching.result.accepted is True
+    assert result.semantic_view_matching.result.paths[0].path_semantic == "service.tunnel_destination"
+    payload = result.to_dict()
+    semantic_attempts = payload["semantic_view_matching"]["llm_disambiguation_attempts"]
+    assert semantic_attempts[0]["prompt"] == llm_client.calls[0]["llm_prompt"]
+    assert semantic_attempts[0]["raw_output"] == llm_client.calls[0]["raw_output"]
+    assert payload["generation"]["cypher_fallback_llm"] is None
 
 
 def test_semantic_pipeline_rejects_unmatched_semantic_view_without_slot_fallback() -> None:

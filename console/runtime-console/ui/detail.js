@@ -75,6 +75,18 @@ function codeBlock(value) {
   return `<pre>${escapeHtml(pretty(value))}</pre>`;
 }
 
+function cypherOverviewCard(label, value, status = null) {
+  return `
+    <article class="overview-card cypher-overview-card">
+      <div>
+        <h3>${escapeHtml(label)}</h3>
+        ${codeBlock(value)}
+      </div>
+      ${status === null ? '' : `<span class="status-pill tone-${tone(status)}">${escapeHtml(status)}</span>`}
+    </article>
+  `;
+}
+
 function inlineValue(value) {
   if (value === null || value === undefined || value === '') {
     return '未记录';
@@ -164,12 +176,11 @@ function renderCgaLlmPrompts(prompts = {}) {
   const traceV2Order = [
     ['intent_primary_classification', '意图识别：一级分类 LLM 判定', '意图识别：一级分类 LLM 原始返回'],
     ['intent_secondary_classification', '意图识别：二级分类 LLM 判定', '意图识别：二级分类 LLM 原始返回'],
-    ['intent_recognition_fallback', '意图识别 LLM 兜底提示词', '意图识别 LLM 原始返回'],
     ['semantic_view_disambiguation', '语义视图匹配：受控 LLM 消歧', '语义视图匹配：受控 LLM 消歧原始返回'],
     ['cypher_generation_fallback', 'Renderer 失败后的 Cypher 兜底生成', 'Cypher 兜底生成 LLM 原始返回'],
   ];
   const hasTraceV2Prompts = traceV2Order
-    .slice(0, 3)
+    .slice(0, 4)
     .some(([key]) => Object.prototype.hasOwnProperty.call(prompts, key));
   if (hasTraceV2Prompts) {
     return traceV2Order
@@ -243,6 +254,11 @@ function renderCgaTraceLayers(layers = []) {
 
 function renderOverview(detail) {
   const summary = detail.summary || {};
+  const pipeline = detail.pipeline || {};
+  const generator = pipeline.cypher_generator_agent || {};
+  const testing = pipeline.testing_agent || {};
+  const goldenCypher = generator.golden_cypher || testing.golden_cypher;
+  const generatedCypher = generator.generated_cypher || generator.parsed_cypher || testing.actual_cypher;
   taskMeta.textContent = `${summary.id || detail.id} · ${summary.question || '未提供问题文本'}`;
   overviewGrid.innerHTML = [
     metricCard('自然语言问题', summary.question || '未提供'),
@@ -253,6 +269,8 @@ function renderOverview(detail) {
     metricCard('当前阶段', summary.current_stage || 'pending'),
     metricCard('澄清反问', summary.clarification_summary || '未触发澄清'),
     metricCard('更新时间', summary.updated_at || detail.updated_at || '未提供'),
+    cypherOverviewCard('标准 Cypher', goldenCypher || '未提供'),
+    cypherOverviewCard('生成 Cypher', generationCypherText({ ...generator, generated_cypher: generatedCypher })),
   ].join('');
 }
 
@@ -265,13 +283,6 @@ function renderCypherGenerator(section) {
         <span>cypher-generator-agent</span>
         <span class="status-pill tone-${tone(section.generation_status)}">${escapeHtml(section.generation_status || 'unknown')}</span>
       </summary>
-      <h3>生成对照</h3>
-      <h3>自然语言问题</h3>
-      ${codeBlock(section.question || '未提供')}
-      <h3>标准 Cypher</h3>
-      ${codeBlock(section.golden_cypher)}
-      <h3>生成 Cypher</h3>
-      ${codeBlock(generationCypherText(section))}
       ${renderClarificationBlock(section.clarification)}
       <h3>LLM 调用提示词</h3>
       ${renderCgaLlmPrompts(section.llm_prompts || {})}

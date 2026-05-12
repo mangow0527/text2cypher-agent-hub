@@ -120,6 +120,237 @@ def render_intent_recognition_fallback_prompt(
 {assets["fewshots"]}""".strip()
 
 
+def render_intent_primary_candidate_prompt(
+    *,
+    question: str,
+    candidate_cards: str,
+) -> str:
+    return f"""# 任务
+
+你是 cypher-generator-agent 的意图识别模块。当前只做一级意图候选判定。
+
+你只需要判断用户问题最终想得到什么形态的答案。
+
+你不能做以下事情：
+- 不要识别业务实体、字段、关系、路径、指标和值。
+- 不要生成 Cypher。
+- 不要判断二级意图。
+
+# 用户问题
+
+{question.strip()}
+
+# 前置候选依据
+
+前两阶段整理出以下一级候选。请优先使用这些候选依据判断。
+
+{candidate_cards.strip() or "无候选依据。"}
+
+# 判断规则
+
+1. 如果候选依据已经足以判断一级意图，输出 `decision=accept`，并选择候选中的一级意图。
+2. 如果候选依据不足以判断，但用户问题本身有明确动作和答案形态，输出 `decision=need_full_taxonomy`。
+3. 如果用户问题本身缺少动作、目标或答案形态，输出 `decision=clarify`，并给出中文澄清问题。
+
+# 输出要求
+
+只输出 JSON，不要输出 Markdown、代码块、解释或自然语言说明。JSON 必须包含：
+- `primary_intent`: 字符串或 null
+- `secondary_intent`: 固定为 null
+- `confidence`: 0 到 1 的数字
+- `source`: 固定为 `llm`
+- `decision`: 只能是 `accept`、`need_full_taxonomy` 或 `clarify`
+- `reason`: 中文理由
+- `clarification_question`: 仅当 `decision=clarify` 时填写中文澄清问题
+
+不要在 `accept` 时输出候选依据之外的一级意图。""".strip()
+
+
+def render_intent_primary_full_prompt(
+    *,
+    question: str,
+    candidate_stage_summary: str,
+) -> str:
+    taxonomy = _load_intent_taxonomy_summary()
+    return f"""# 任务
+
+你是 cypher-generator-agent 的意图识别模块。当前只做一级意图全量兜底判定。
+
+候选判定阶段认为前置候选依据不足，因此现在提供完整一级分类供你选择。
+
+你不能做以下事情：
+- 不要识别业务实体、字段、关系、路径、指标和值。
+- 不要生成 Cypher。
+- 不要判断二级意图。
+
+# 用户问题
+
+{question.strip()}
+
+# 候选阶段摘要
+
+{candidate_stage_summary.strip() or "前置候选不足。"}
+
+# 一级意图分类
+
+你只能从以下一级意图中选择一个。
+
+{taxonomy["primary"]}
+
+# 输出要求
+
+只输出 JSON，不要输出 Markdown、代码块、解释或自然语言说明。JSON 必须包含：
+- `primary_intent`: 字符串或 null
+- `secondary_intent`: 固定为 null
+- `confidence`: 0 到 1 的数字
+- `source`: 固定为 `llm`
+- `decision`: 只能是 `accept` 或 `clarify`
+- `reason`: 中文理由
+- `clarification_question`: 仅当 `decision=clarify` 时填写中文澄清问题
+
+如果完整一级分类下仍无法安全判断，输出 `decision=clarify`。
+不要输出上述一级意图列表之外的值。""".strip()
+
+
+def render_intent_secondary_candidate_prompt(
+    *,
+    question: str,
+    primary_intent: str,
+    primary_intent_name: str,
+    candidate_cards: str,
+) -> str:
+    return f"""# 任务
+
+你是 cypher-generator-agent 的意图识别模块。当前只做二级意图候选判定。
+
+一级意图已经确定为：`{primary_intent}`，中文名：{primary_intent_name}。
+
+你只需要在这个一级意图下面判断最合适的二级意图。
+
+你不能做以下事情：
+- 不要改变一级意图。
+- 不要选择其他一级意图下面的二级意图。
+- 不要识别业务实体、字段、关系、路径、指标和值。
+- 不要生成 Cypher。
+
+# 用户问题
+
+{question.strip()}
+
+# 前置候选依据
+
+前两阶段在当前一级意图下召回了以下二级候选。请先认真利用这些候选依据判断。
+
+{candidate_cards.strip() or "无候选依据。"}
+
+# 判断规则
+
+1. 如果候选依据已经足以判断二级意图，输出 `decision=accept`，并选择候选中的二级意图。
+2. 如果候选依据不足以判断，但用户问题在当前一级意图下仍有明确答案形态，输出 `decision=need_full_taxonomy`。
+3. 如果当前一级意图明确，但用户表达无法区分二级答案形态，输出 `decision=clarify`，并给出中文澄清问题。
+
+# 输出要求
+
+只输出 JSON，不要输出 Markdown、代码块、解释或自然语言说明。JSON 必须包含：
+- `primary_intent`: 固定为 `{primary_intent}`
+- `secondary_intent`: 字符串或 null
+- `confidence`: 0 到 1 的数字
+- `source`: 固定为 `llm`
+- `decision`: 只能是 `accept`、`need_full_taxonomy` 或 `clarify`
+- `reason`: 中文理由
+- `clarification_question`: 仅当 `decision=clarify` 时填写中文澄清问题
+
+不要在 `accept` 时输出候选依据之外的二级意图。""".strip()
+
+
+def render_intent_secondary_full_prompt(
+    *,
+    question: str,
+    primary_intent: str,
+    primary_intent_name: str,
+    candidate_stage_summary: str,
+) -> str:
+    taxonomy = _load_intent_taxonomy_summary()
+    secondary = taxonomy["secondary_by_primary"].get(primary_intent, "无")
+    return f"""# 任务
+
+你是 cypher-generator-agent 的意图识别模块。当前只做二级意图全量兜底判定。
+
+一级意图已经确定为：`{primary_intent}`，中文名：{primary_intent_name}。
+
+候选判定阶段认为前置二级候选依据不足，因此现在提供该一级下的完整二级分类供你选择。
+
+你不能做以下事情：
+- 不要改变一级意图。
+- 不要选择其他一级意图下面的二级意图。
+- 不要识别业务实体、字段、关系、路径、指标和值。
+- 不要生成 Cypher。
+
+# 用户问题
+
+{question.strip()}
+
+# 候选阶段摘要
+
+{candidate_stage_summary.strip() or "前置二级候选不足。"}
+
+# 当前一级意图下的完整二级分类
+
+{secondary}
+
+# 输出要求
+
+只输出 JSON，不要输出 Markdown、代码块、解释或自然语言说明。JSON 必须包含：
+- `primary_intent`: 固定为 `{primary_intent}`
+- `secondary_intent`: 字符串或 null
+- `confidence`: 0 到 1 的数字
+- `source`: 固定为 `llm`
+- `decision`: 只能是 `accept` 或 `clarify`
+- `reason`: 中文理由
+- `clarification_question`: 仅当 `decision=clarify` 时填写中文澄清问题
+
+如果完整二级分类下仍无法安全判断，输出 `decision=clarify`。
+不要输出当前一级意图之外的二级意图。""".strip()
+
+
+def render_semantic_view_disambiguation_prompt(
+    *,
+    question: str,
+    candidate_cards: str,
+) -> str:
+    return f"""# 任务
+
+你是 cypher-generator-agent 的语义视图匹配消歧模块。当前只在有限候选中选择最符合用户问题的业务语义。
+
+你不能做以下事情：
+- 不要生成 Cypher。
+- 不要创造候选列表之外的实体、字段、关系或路径。
+- 不要补充用户没有表达的业务条件。
+
+# 用户问题
+
+{question.strip()}
+
+# 语义候选
+
+{candidate_cards.strip()}
+
+# 判断规则
+
+1. 如果用户表达已经足以选择一个候选，输出 `decision=accept`，并返回候选的 `path_semantic`。
+2. 如果多个候选都合理且无法选择，输出 `decision=clarify`，并给出中文澄清问题。
+3. 如果候选都不符合用户问题，输出 `decision=reject`。
+
+# 输出要求
+
+只输出 JSON，不要输出 Markdown、代码块、解释或自然语言说明。JSON 必须包含：
+- `decision`: `accept`、`clarify` 或 `reject`
+- `selected_path_semantic`: 仅当 `decision=accept` 时填写候选中的 path_semantic
+- `confidence`: 0 到 1 的数字
+- `reason`: 中文理由
+- `clarification_question`: 仅当 `decision=clarify` 时填写中文澄清问题""".strip()
+
+
 @lru_cache(maxsize=1)
 def _load_intent_llm_assets() -> dict[str, str]:
     fewshot_payload = _read_yaml(resource_paths.intent_llm_fewshots_path())
@@ -133,6 +364,37 @@ def _load_intent_llm_assets() -> dict[str, str]:
         "boundaries": boundaries or "无",
         "fewshots": fewshots or "无",
         "taxonomy": taxonomy,
+    }
+
+
+@lru_cache(maxsize=1)
+def _load_intent_taxonomy_summary() -> dict[str, Any]:
+    taxonomy_payload = _read_yaml(resource_paths.intent_taxonomy_path())
+    primary_lines: list[str] = []
+    secondary_by_primary: dict[str, str] = {}
+    for primary in taxonomy_payload.get("intents", []):
+        if not isinstance(primary, dict):
+            continue
+        primary_intent = str(primary.get("primary_intent") or "")
+        if not primary_intent:
+            continue
+        primary_lines.append(
+            f"- `{primary_intent}`：{primary.get('name_zh') or primary_intent}。{primary.get('description') or ''}"
+        )
+        secondary_lines = []
+        for secondary in primary.get("secondary_intents", []):
+            if not isinstance(secondary, dict):
+                continue
+            secondary_intent = str(secondary.get("secondary_intent") or "")
+            if not secondary_intent:
+                continue
+            secondary_lines.append(
+                f"- `{secondary_intent}`：{secondary.get('name_zh') or secondary_intent}。{secondary.get('description') or ''}"
+            )
+        secondary_by_primary[primary_intent] = "\n".join(secondary_lines) or "无"
+    return {
+        "primary": "\n".join(primary_lines) or "无",
+        "secondary_by_primary": secondary_by_primary,
     }
 
 

@@ -98,8 +98,7 @@ CGA 区域按触发位置组织 LLM 调用。所有 LLM 调用必须展示 promp
 | --- | --- | --- | --- |
 | 意图识别一级分类 | 意图识别：一级分类 LLM 判定 | `intent_recognition.diagnostics.llm_primary_attempts[]` | 规则和向量召回不能稳定确定一级意图 |
 | 意图识别二级分类 | 意图识别：二级分类 LLM 判定 | `intent_recognition.diagnostics.llm_secondary_attempts[]` | 一级意图已确定，但二级意图候选仍有歧义 |
-| 意图识别兜底 | 意图识别 LLM 兜底提示词 | `intent_recognition.diagnostics.llm_secondary_attempts[]` 中 `stage=intent_recognition_fallback` 的调用 | 规则、向量召回和分层分类不能给出可接受意图时触发；运行中心独立展示，不归入二级分类 |
-| 语义视图消歧 | 语义视图匹配：受控 LLM 消歧 | `semantic_view_matching.result.trace.llm_disambiguation_attempts[]` | 候选分数接近、规则无法消歧，且仍可给出有限候选 |
+| 语义视图消歧 | 语义视图匹配：受控 LLM 消歧 | `semantic_view_matching.llm_disambiguation_attempts[]` | 候选分数接近、规则无法消歧，且仍可给出有限候选 |
 | Cypher 兜底生成 | Renderer 失败后的 Cypher 兜底生成 | `generation.cypher_fallback_llm` | 确定性渲染器不覆盖或 preflight 拒绝后允许模型兜底 |
 
 每条 LLM 调用记录至少包含：

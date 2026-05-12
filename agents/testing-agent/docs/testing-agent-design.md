@@ -96,7 +96,7 @@ testing-agent 接收该请求后，会向 cypher-generator-agent 返回接收回
 | `question` | 原始自然语言问题 |
 | `generation_run_id` | cypher-generator-agent 本次执行标识 |
 | `generation_status` | `generation_failed`、`clarification_required` 或 `service_failed` |
-| `input_prompt_snapshot` | 生成证据快照。当前主契约为 `cga_trace_v2`；Cypher 兜底模型调用保存在 `generation.cypher_fallback_llm`，语义视图消歧调用保存在 `semantic_view_matching.result.trace.llm_disambiguation_attempts` |
+| `input_prompt_snapshot` | 生成证据快照。当前主契约为 `cga_trace_v2`；Cypher 兜底模型调用保存在 `generation.cypher_fallback_llm`，语义视图消歧调用保存在 `semantic_view_matching.llm_disambiguation_attempts` |
 | `failure_reason` | `generation_failed` 和 `service_failed` 必填；`clarification_required` 可以为空 |
 | `clarification` | `generation_status=clarification_required` 时必填；内容与 `input_prompt_snapshot.clarification` 保持一致 |
 | `parsed_cypher` | 仅 `generation_failed` 可使用；表示最后一次可解析出的候选 Cypher，没有可识别 Cypher 时为空 |
