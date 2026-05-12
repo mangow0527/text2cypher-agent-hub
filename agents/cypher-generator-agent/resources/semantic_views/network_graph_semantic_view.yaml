@@ -662,7 +662,8 @@ path_semantics:
     source_entity: service
     target_entity: tunnel
     intermediate_entities: []
-    path: [{relationship: service_uses_tunnel}]
+    path:
+      - relationship: service_uses_tunnel
     trigger_phrases: [使用的隧道, 服务使用隧道, 服务与隧道, 服务和隧道, 服务隧道对应关系, 服务与隧道的对应关系, 承载]
     negative_phrases: []
     default_return_fields: [service.name, tunnel.name]
@@ -672,7 +673,9 @@ path_semantics:
     source_entity: service
     target_entity: network_element
     intermediate_entities: [tunnel]
-    path: [{relationship: service_uses_tunnel}, {relationship: path_through}]
+    path:
+      - relationship: service_uses_tunnel
+      - relationship: path_through
     trigger_phrases: [经过网元, 路径经过, 所经过网元, 所经隧道穿过, 隧道穿过, 穿过的网元, 隧道路径中经过, 路径中经过]
     negative_phrases: [源网元, 目的网元]
     default_return_fields: [network_element.name]
@@ -682,7 +685,10 @@ path_semantics:
     source_entity: service
     target_entity: port
     intermediate_entities: [tunnel, network_element]
-    path: [{relationship: service_uses_tunnel}, {relationship: path_through}, {relationship: has_port}]
+    path:
+      - relationship: service_uses_tunnel
+      - relationship: path_through
+      - relationship: has_port
     trigger_phrases: [经过网元上的端口, 所经过网元上的端口, 所经过网元上的所有端口, 所经过网元的端口, 网元上的端口, 隧道经过的网元端口, 隧道经过网元端口, 网元端口MAC地址, 网元端口 MAC 地址, 端口MAC地址]
     negative_phrases: []
     default_return_fields: [service.name, tunnel.name, network_element.model, port.mac_address]
@@ -692,7 +698,10 @@ path_semantics:
     source_entity: service
     target_entity: port
     intermediate_entities: [tunnel, network_element]
-    path: [{relationship: service_uses_tunnel}, {relationship: tunnel_src}, {relationship: has_port}]
+    path:
+      - relationship: service_uses_tunnel
+      - relationship: tunnel_src
+      - relationship: has_port
     trigger_phrases: [源网元端口, 源网元端口信息, 源网络元素端口, 源端网络元素上的端口, 源端网元上的端口, 源网元上的端口, 隧道源网元端口, 源网元厂商和端口, 源网元厂商和端口MAC地址, 源网元厂商和端口 MAC 地址]
     negative_phrases: [目的网元, 目的端网元]
     default_return_fields: [service.name, tunnel.name, network_element.ip_address, port.id, port.name]
@@ -702,7 +711,10 @@ path_semantics:
     source_entity: service
     target_entity: port
     intermediate_entities: [tunnel, network_element]
-    path: [{relationship: service_uses_tunnel}, {relationship: tunnel_dst}, {relationship: has_port}]
+    path:
+      - relationship: service_uses_tunnel
+      - relationship: tunnel_dst
+      - relationship: has_port
     trigger_phrases: [目的网元端口, 目的端网元端口, 目的网元下的端口, 到达网元下的端口, 到达的网元端口, 隧道目的网元端口]
     negative_phrases: [源网元, 源端网元]
     default_return_fields: [service.elem_type, tunnel.elem_type, network_element.model, port.mac_address]
@@ -712,7 +724,9 @@ path_semantics:
     source_entity: service
     target_entity: network_element
     intermediate_entities: [tunnel]
-    path: [{relationship: service_uses_tunnel}, {relationship: tunnel_src}]
+    path:
+      - relationship: service_uses_tunnel
+      - relationship: tunnel_src
     trigger_phrases: [源网元, 源端网元, 源网元IP, 源网元IP地址, 源端网元IP地址]
     negative_phrases: [目的网元]
     default_return_fields: [network_element.name, network_element.ip_address]
@@ -722,7 +736,9 @@ path_semantics:
     source_entity: service
     target_entity: network_element
     intermediate_entities: [tunnel]
-    path: [{relationship: service_uses_tunnel}, {relationship: tunnel_dst}]
+    path:
+      - relationship: service_uses_tunnel
+      - relationship: tunnel_dst
     trigger_phrases: [目的网元, 目的端网元, 目的网元位置, 目的端网元位置, 连接到各位置网元, 各位置网元, 到达的目的网元, 经隧道到达, 隧道终点, 隧道终点数量, 终点数量]
     negative_phrases: [源网元]
     default_return_fields: [network_element.name, network_element.location]
@@ -732,7 +748,8 @@ path_semantics:
     source_entity: tunnel
     target_entity: network_element
     intermediate_entities: []
-    path: [{relationship: path_through}]
+    path:
+      - relationship: path_through
     trigger_phrases: [隧道经过, 路径经过]
     negative_phrases: []
     default_return_fields: [network_element.name]
@@ -743,6 +760,44 @@ return_policies:
     applies_to:
       path_semantics: [service.uses_tunnel, service.tunnel_path, service.tunnel_path_ports, service.tunnel_source, service.tunnel_source_ports, service.tunnel_destination, service.tunnel_destination_ports, tunnel.path_through_network_element]
       entities: [service, tunnel, network_element, port]
-    rules: [{when: no_explicit_return_field, return_fields: [tunnel.name], description: 路径查询没有指定返回字段时，优先返回路径终点名称。}]
-disambiguation_rules: [{rule_id: destination_ne_prefers_tunnel_dst, name_zh: 目的网元优先解释为隧道目的端, positive_patterns: [目的网元, 目的端网元], negative_patterns: [经过网元, 源网元, 端口, 接口], prefer: service.tunnel_destination, reject: [service.tunnel_path, service.tunnel_source], explanation: 用户明确提到目的网元时，选择隧道目的端路径。}, {rule_id: source_ne_prefers_tunnel_src, name_zh: 源网元优先解释为隧道源端, positive_patterns: [源网元, 源端网元, 源网络元素, 源端网络元素], negative_patterns: [目的网元, 目的端网元, 经过网元, 穿过, 端口, 接口], prefer: service.tunnel_source, reject: [service.tunnel_path, service.tunnel_destination], explanation: 用户明确提到源网元或源端网络元素时，选择隧道源端路径。}, {rule_id: traversed_ne_prefers_path_through, name_zh: 所经穿过网元优先解释为路径经过网元, positive_patterns: [所经, 经过, 穿过, 路径中, 隧道路径], negative_patterns: [源网元, 源端网元, 目的网元, 目的端网元, 到达, 端口, 接口], prefer: service.tunnel_path, reject: [service.tunnel_source, service.tunnel_destination], explanation: 用户明确提到所经、经过、穿过或路径中时，选择隧道路径经过网元。}, {rule_id: destination_port_prefers_tunnel_dst_port, name_zh: 到达网元端口优先解释为目的端网元端口, positive_patterns: [
-      到达网元下的端口, 目的网元端口, 目的端网元端口, 目的网元下的端口], negative_patterns: [源网元, 源端网元, 经过网元, 穿过], prefer: service.tunnel_destination_ports, reject: [service.tunnel_path_ports, service.tunnel_source_ports], explanation: 用户明确提到到达网元或目的网元下的端口时，选择目的端网元端口路径。}, {rule_id: source_port_prefers_tunnel_src_port, name_zh: 源网元端口优先解释为源端网元端口, positive_patterns: [源网元端口, 源网元端口信息, 源网络元素端口, 源端网络元素上的端口, 源端网元上的端口, 源网元厂商和端口, 源网元厂商和端口MAC地址], negative_patterns: [目的网元, 目的端网元, 经过网元, 穿过], prefer: service.tunnel_source_ports, reject: [service.tunnel_path_ports, service.tunnel_destination_ports], explanation: 用户明确提到源端网元端口时，选择源端网元端口路径。}]
+    rules:
+      - when: no_explicit_return_field
+        return_fields: [tunnel.name]
+        description: 路径查询没有指定返回字段时，优先返回路径终点名称。
+
+disambiguation_rules:
+  - rule_id: destination_ne_prefers_tunnel_dst
+    name_zh: 目的网元优先解释为隧道目的端
+    positive_patterns: [目的网元, 目的端网元]
+    negative_patterns: [经过网元, 源网元, 端口, 接口]
+    prefer: service.tunnel_destination
+    reject: [service.tunnel_path, service.tunnel_source]
+    explanation: 用户明确提到目的网元时，选择隧道目的端路径。
+  - rule_id: source_ne_prefers_tunnel_src
+    name_zh: 源网元优先解释为隧道源端
+    positive_patterns: [源网元, 源端网元, 源网络元素, 源端网络元素]
+    negative_patterns: [目的网元, 目的端网元, 经过网元, 穿过, 端口, 接口]
+    prefer: service.tunnel_source
+    reject: [service.tunnel_path, service.tunnel_destination]
+    explanation: 用户明确提到源网元或源端网络元素时，选择隧道源端路径。
+  - rule_id: traversed_ne_prefers_path_through
+    name_zh: 所经穿过网元优先解释为路径经过网元
+    positive_patterns: [所经, 经过, 穿过, 路径中, 隧道路径]
+    negative_patterns: [源网元, 源端网元, 目的网元, 目的端网元, 到达, 端口, 接口]
+    prefer: service.tunnel_path
+    reject: [service.tunnel_source, service.tunnel_destination]
+    explanation: 用户明确提到所经、经过、穿过或路径中时，选择隧道路径经过网元。
+  - rule_id: destination_port_prefers_tunnel_dst_port
+    name_zh: 到达网元端口优先解释为目的端网元端口
+    positive_patterns: [到达网元下的端口, 目的网元端口, 目的端网元端口, 目的网元下的端口]
+    negative_patterns: [源网元, 源端网元, 经过网元, 穿过]
+    prefer: service.tunnel_destination_ports
+    reject: [service.tunnel_path_ports, service.tunnel_source_ports]
+    explanation: 用户明确提到到达网元或目的网元下的端口时，选择目的端网元端口路径。
+  - rule_id: source_port_prefers_tunnel_src_port
+    name_zh: 源网元端口优先解释为源端网元端口
+    positive_patterns: [源网元端口, 源网元端口信息, 源网络元素端口, 源端网络元素上的端口, 源端网元上的端口, 源网元厂商和端口, 源网元厂商和端口MAC地址]
+    negative_patterns: [目的网元, 目的端网元, 经过网元, 穿过]
+    prefer: service.tunnel_source_ports
+    reject: [service.tunnel_path_ports, service.tunnel_destination_ports]
+    explanation: 用户明确提到源端网元端口时，选择源端网元端口路径。
