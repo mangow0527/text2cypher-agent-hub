@@ -82,8 +82,8 @@ class LogicalQueryPlanner:
         filters = tuple(self._filter_ref(item) for item in semantic_match.filters)
         projections = tuple(self._return_ref(item.field) for item in semantic_match.returns)
         metrics = tuple(self._metric_ref(item.metric_id) for item in semantic_match.metrics)
-        kind = _semantic_query_kind(intent_result, metrics, projections)
-        if kind == "ranking":
+        kind = _semantic_query_kind(question, intent_result, metrics, projections)
+        if kind == "ranking" and not metrics:
             projections = _ensure_ranking_name_projection(projections, semantic_match, self.semantic_view)
         order_by = tuple(self._order_ref(item, projections, metrics) for item in semantic_match.order_by)
         if kind == "dimension_breakdown" and metrics and not order_by:
@@ -97,7 +97,7 @@ class LogicalQueryPlanner:
                 output_alias="first_total",
             )
             metrics = (replace(first_metric, name="total_count", output_alias="total_count"),)
-            if order_by and _contains(question, "首次统计值"):
+            if order_by and _orders_by_first_stage(question):
                 order_by = tuple(
                     SemanticOrderBy(
                         expression="first_total" if item.expression == first_metric.output_alias else item.expression,
@@ -191,6 +191,20 @@ class LogicalQueryPlanner:
         )
 
     def _metric_ref(self, metric_id: str) -> SemanticMetricRef:
+        if metric_id.startswith("count_property:"):
+            field_id = metric_id.split(":", 1)[1]
+            owner, property_name = field_id.split(".", 1)
+            entity = self.semantic_view.entities[owner]
+            output_alias = f"{owner}_{property_name}_count"
+            return SemanticMetricRef(
+                name=metric_id,
+                entity=owner,
+                alias=entity.alias,
+                aggregation="count",
+                expression=f"count({entity.alias}.{property_name})",
+                output_alias=output_alias,
+                property=property_name,
+            )
         metric = self.semantic_view.metrics.get(metric_id)
         if metric is None:
             raise KeyError(metric_id)
@@ -323,22 +337,40 @@ def _field_name(semantic_view: GraphSemanticView, owner: str, property_name: str
 
 
 def _semantic_query_kind(
+    question: str,
     intent_result: IntentRecognitionResult,
     metrics: tuple[SemanticMetricRef, ...],
     projections: tuple[SemanticFieldRef, ...],
 ) -> SemanticQueryKind:
     primary = intent_result.primary_intent
+    if primary == "ranking_query":
+        return "ranking"
+    if metrics and projections and _asks_for_breakdown(question):
+        return "dimension_breakdown"
     if primary == "metric_query":
         return "metric_aggregation"
     if primary == "breakdown_query":
         return "dimension_breakdown"
-    if primary == "ranking_query":
-        return "ranking"
     if primary == "existence_query":
+        if projections and not _asks_for_existence(question):
+            return "record_selection"
         return "existence_check"
     if metrics and not projections:
         return "metric_aggregation"
     return "record_selection"
+
+
+def _asks_for_breakdown(question: str) -> bool:
+    return (
+        _contains(question, "按")
+        or _contains(question, "各")
+        or _contains(question, "分布")
+        or _contains(question, "分组")
+    )
+
+
+def _asks_for_existence(question: str) -> bool:
+    return _contains(question, "是否") or _contains(question, "有没有") or _contains(question, "存在")
 
 
 def _ensure_ranking_name_projection(
@@ -381,7 +413,21 @@ def _requires_two_stage_aggregate(
 ) -> bool:
     if not metrics or not relationships:
         return False
-    return _contains(question, "首次统计值") or _contains(question, "两次统计结果")
+    return (
+        _contains(question, "首次统计值")
+        or _contains(question, "首次统计数量")
+        or _contains(question, "首次统计的")
+        or _contains(question, "两次统计结果")
+        or _contains(question, "分阶段统计")
+    )
+
+
+def _orders_by_first_stage(question: str) -> bool:
+    return (
+        _contains(question, "首次统计值")
+        or _contains(question, "首次统计数量")
+        or _contains(question, "首次统计的")
+    )
 
 
 def _contains(text: str, term: str) -> bool:

@@ -41,6 +41,26 @@ def test_default_graph_semantic_view_uses_tugraph_elem_type_field_for_type_seman
     assert semantic_view.dimension("link.elem_type").property == "elem_type"
 
 
+def test_graph_semantic_view_covers_user_language_for_field_and_path_materials() -> None:
+    semantic_view = get_default_graph_semantic_view()
+
+    assert "服务ID" in semantic_view.dimension("service.id").synonyms
+    assert "隧道ID" in semantic_view.dimension("tunnel.id").synonyms
+    assert "网元ID" in semantic_view.dimension("network_element.id").synonyms
+    assert "端口ID" in semantic_view.dimension("port.id").synonyms
+    assert "IETF标准" in semantic_view.dimension("tunnel.ietf_standard").synonyms
+    assert "端口MAC地址" in semantic_view.dimension("port.mac_address").synonyms
+    assert "网元IP地址" in semantic_view.dimension("network_element.ip_address").synonyms
+    assert "服务带宽值" in semantic_view.fact("service.bandwidth").synonyms
+    assert "服务延迟" in semantic_view.fact("service.latency").synonyms
+    assert "隧道延迟" in semantic_view.fact("tunnel.latency").synonyms
+
+    assert "服务与隧道的对应关系" in semantic_view.path_semantic("service.uses_tunnel").trigger_phrases
+    assert "网元端口MAC地址" in semantic_view.path_semantic("service.tunnel_path_ports").trigger_phrases
+    assert "源网元IP地址" in semantic_view.path_semantic("service.tunnel_source").trigger_phrases
+    assert "连接到各位置网元" in semantic_view.path_semantic("service.tunnel_destination").trigger_phrases
+
+
 def test_loader_rejects_invalid_schema_references(tmp_path: Path) -> None:
     config_path = tmp_path / "network_graph_semantic_view.yaml"
     config_path.write_text(

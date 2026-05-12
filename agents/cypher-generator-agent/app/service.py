@@ -286,9 +286,7 @@ def build_workflow_service(settings: Settings) -> CypherGeneratorAgentService:
             timeout_seconds=settings.request_timeout_seconds,
         ),
         delivery_outbox=DeliveryOutbox(outbox_dir),
-        semantic_alignment_report_factory=lambda: validate_default_semantic_alignment(
-            knowledge_dir=settings.knowledge_docs_dir
-        ),
+        semantic_alignment_report_factory=_build_semantic_alignment_report_factory(settings),
         semantic_pipeline=SemanticPipeline(
             llm_client=CypherLLMClient(
                 llm_generator=OpenAIChatCompletionCypherGenerator(
@@ -311,21 +309,33 @@ def get_workflow_service() -> CypherGeneratorAgentService:
 
 def get_generator_status() -> Dict[str, object]:
     settings = get_settings()
-    knowledge_docs_validator = KnowledgeDocsValidator(knowledge_dir=settings.knowledge_docs_dir)
-    semantic_alignment = validate_default_semantic_alignment(knowledge_dir=settings.knowledge_docs_dir)
     knowledge_context_source = settings.knowledge_context_source.lower()
+    knowledge_docs_required = knowledge_context_source != "rag"
+    knowledge_docs_configured = (
+        KnowledgeDocsValidator(knowledge_dir=settings.knowledge_docs_dir).is_available()
+        if knowledge_docs_required
+        else None
+    )
+    semantic_alignment = _build_semantic_alignment_report_factory(settings)()
     return {
         "llm_enabled": settings.llm_enabled,
         "llm_provider": settings.llm_provider,
         "llm_model": settings.llm_model,
         "active_mode": "semantic_pipeline" if settings.llm_enabled else "disabled",
         "knowledge_context_source": knowledge_context_source,
-        "knowledge_docs_dir_configured": knowledge_docs_validator.is_available(),
+        "knowledge_docs_required": knowledge_docs_required,
+        "knowledge_docs_dir_configured": knowledge_docs_configured,
         "knowledge_selection_configured": knowledge_context_source == "rag",
         "rag_service_url": settings.rag_service_url if knowledge_context_source == "rag" else None,
         "semantic_alignment": semantic_alignment.to_dict(),
         "testing_agent_configured": bool(settings.testing_agent_url),
     }
+
+
+def _build_semantic_alignment_report_factory(settings: Settings) -> Callable[[], SemanticAlignmentReport]:
+    if settings.knowledge_context_source.lower() == "rag":
+        return lambda: validate_default_semantic_alignment()
+    return lambda: validate_default_semantic_alignment(knowledge_dir=settings.knowledge_docs_dir)
 
 
 def _build_knowledge_selector(settings: Settings) -> RagKnowledgeSelector | None:

@@ -238,6 +238,8 @@ class SemanticPipeline:
             "breakdown_query",
             "ranking_query",
             "existence_query",
+            "relationship_path_query",
+            "set_operation_query",
         }:
             return SemanticParseResult(
                 id=id,

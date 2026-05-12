@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     data_dir: str = "data/testing_service"
     repair_service_url: str = "http://127.0.0.1:8002"
     request_timeout_seconds: float = 120.0
-    tugraph_url: str = "http://114.215.172.132:7070"
+    tugraph_url: str = "http://101.37.211.45:7070"
     tugraph_username: str = "admin"
     tugraph_password: str = "73@TuGraph"
     tugraph_graph: str = "network_schema_v10"

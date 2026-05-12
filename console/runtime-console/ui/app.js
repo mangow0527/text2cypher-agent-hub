@@ -142,7 +142,7 @@ function renderPagination() {
 
 function renderTaskTable(tasks) {
   if (!tasks.length) {
-    taskTableBody.innerHTML = '<tr><td colspan="8" class="empty-cell">暂无符合新契约的运行任务。</td></tr>';
+    taskTableBody.innerHTML = '<tr><td colspan="9" class="empty-cell">暂无符合新契约的运行任务。</td></tr>';
     tableMeta.textContent = `共 ${currentPagination.total || 0} 个任务，当前页 0 个`;
     renderPagination();
     return;
@@ -158,6 +158,7 @@ function renderTaskTable(tasks) {
           <td><span class="status-pill tone-${tone(task.final_verdict)}">${escapeHtml(verdictLabels[task.final_verdict] || '待定')}</span></td>
           <td>${escapeHtml(task.current_stage || 'pending')}</td>
           <td>${escapeHtml(task.attempt_no ?? 0)}</td>
+          <td>${escapeHtml(task.clarification_summary || '未触发')}</td>
           <td>${escapeHtml(task.updated_at || '未提供')}</td>
           <td>${escapeHtml(task.question || '未提供问题文本')}</td>
         </tr>

@@ -88,6 +88,32 @@ function inlineValue(value) {
   return String(value);
 }
 
+function renderClarificationBlock(clarification) {
+  if (!clarification || typeof clarification !== 'object') {
+    return '';
+  }
+  const options = Array.isArray(clarification.options) ? clarification.options : [];
+  return `
+    <section class="clarification-box">
+      <h3>澄清反问</h3>
+      <div class="field-grid">
+        ${metricCard('澄清问题', clarification.question_zh || '未记录')}
+        ${metricCard('原因代码', clarification.reason_code || '未记录')}
+        ${metricCard('来源层级', clarification.source_stage || '未记录')}
+        ${metricCard('回答类型', clarification.expected_answer_type || '未记录')}
+      </div>
+      <h3>澄清选项</h3>
+      ${
+        options.length
+          ? `<div class="clarification-options">${options
+              .map((option) => `<span>${escapeHtml(option.label || option.id || option.value || '未命名选项')}</span>`)
+              .join('')}</div>`
+          : '<p class="empty">未提供固定选项</p>'
+      }
+    </section>
+  `;
+}
+
 function emptyCypherText(value) {
   return value ? value : '未生成可评测 Cypher';
 }
@@ -225,6 +251,7 @@ function renderOverview(detail) {
     metricCard('生成状态', summary.generation_status || '未提供', summary.generation_status),
     metricCard('最终结论', summary.final_verdict || detail.final_verdict, summary.final_verdict || detail.final_verdict),
     metricCard('当前阶段', summary.current_stage || 'pending'),
+    metricCard('澄清反问', summary.clarification_summary || '未触发澄清'),
     metricCard('更新时间', summary.updated_at || detail.updated_at || '未提供'),
   ].join('');
 }
@@ -245,6 +272,7 @@ function renderCypherGenerator(section) {
       ${codeBlock(section.golden_cypher)}
       <h3>生成 Cypher</h3>
       ${codeBlock(generationCypherText(section))}
+      ${renderClarificationBlock(section.clarification)}
       <h3>LLM 调用提示词</h3>
       ${renderCgaLlmPrompts(section.llm_prompts || {})}
       ${traceLayers.length ? renderCgaTraceLayers(traceLayers) : renderLegacyCgaChainSummary(chain)}

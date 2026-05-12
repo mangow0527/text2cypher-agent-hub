@@ -128,6 +128,50 @@ def test_semantic_pipeline_handles_entity_detail_and_name_filter_queries() -> No
     assert "Tunnel" not in projection.generated_cypher
 
 
+def test_semantic_pipeline_extracts_numeric_filters_and_requested_service_fields() -> None:
+    pipeline = get_semantic_pipeline()
+
+    result = pipeline.parse(
+        question="查询带宽为120的服务的ID和带宽值。",
+        intent_result=IntentRecognitionResult(
+            primary_intent="record_retrieval_query",
+            secondary_intent="attribute_projection_query",
+            confidence=0.9,
+            source="rule",
+            decision="accept",
+        ),
+    )
+
+    assert result.validation.accepted is True
+    assert result.generated_cypher == (
+        "MATCH (s:Service)\n"
+        "WHERE s.bandwidth = 120\n"
+        "RETURN s.id AS service_id, s.bandwidth AS service_bandwidth"
+    )
+
+
+def test_semantic_pipeline_expands_both_side_names_and_latencies_for_service_tunnel_relation() -> None:
+    pipeline = get_semantic_pipeline()
+
+    result = pipeline.parse(
+        question="查询所有服务与隧道的对应关系，并返回双方的名称及延迟值。",
+        intent_result=IntentRecognitionResult(
+            primary_intent="record_retrieval_query",
+            secondary_intent="relationship_detail_query",
+            confidence=0.9,
+            source="rule",
+            decision="accept",
+        ),
+    )
+
+    assert result.validation.accepted is True
+    assert result.generated_cypher == (
+        "MATCH (s:Service)-[:SERVICE_USES_TUNNEL]->(t:Tunnel)\n"
+        "RETURN s.name AS service_name, t.name AS tunnel_name, "
+        "s.latency AS service_latency, t.latency AS tunnel_latency"
+    )
+
+
 def test_semantic_pipeline_handles_common_service_tunnel_multihop_paths() -> None:
     pipeline = get_semantic_pipeline()
     intent = IntentRecognitionResult(
@@ -158,6 +202,204 @@ def test_semantic_pipeline_handles_common_service_tunnel_multihop_paths() -> Non
     assert "[:TUNNEL_DST]->(ne:NetworkElement)" in vendor_breakdown.generated_cypher
     assert "ne.vendor AS network_element_vendor" in vendor_breakdown.generated_cypher
     assert "ORDER BY network_element_count ASC" in vendor_breakdown.generated_cypher
+
+
+def test_semantic_pipeline_groups_metric_ranking_by_location_and_preserves_bottom_limit() -> None:
+    pipeline = get_semantic_pipeline()
+
+    result = pipeline.parse(
+        question="统计使用隧道连接到各位置网元的数量，按数量升序排列，返回数量最少的5个位置及其统计值。",
+        intent_result=IntentRecognitionResult(
+            primary_intent="ranking_query",
+            secondary_intent="metric_ranking_query",
+            confidence=0.9,
+            source="rule",
+            decision="accept",
+        ),
+    )
+
+    assert result.validation.accepted is True
+    assert result.preflight is not None
+    assert result.preflight.accepted is True
+    assert result.generated_cypher == (
+        "MATCH (s:Service)-[:SERVICE_USES_TUNNEL]->(t:Tunnel)-[:TUNNEL_DST]->(ne:NetworkElement)\n"
+        "RETURN ne.location AS network_element_location, count(ne) AS network_element_count\n"
+        "ORDER BY network_element_count ASC\n"
+        "LIMIT 5"
+    )
+
+
+def test_semantic_pipeline_keeps_metric_ranking_grain_and_preserves_service_bandwidth_limit() -> None:
+    pipeline = get_semantic_pipeline()
+
+    result = pipeline.parse(
+        question="统计各带宽服务的源网元数量，按源网元数量升序排列，返回数量最少的3个服务的带宽及统计值。",
+        intent_result=IntentRecognitionResult(
+            primary_intent="ranking_query",
+            secondary_intent="metric_ranking_query",
+            confidence=0.9,
+            source="rule",
+            decision="accept",
+        ),
+    )
+
+    assert result.validation.accepted is True
+    assert result.generated_cypher == (
+        "MATCH (s:Service)-[:SERVICE_USES_TUNNEL]->(t:Tunnel)-[:TUNNEL_SRC]->(ne:NetworkElement)\n"
+        "RETURN s.bandwidth AS service_bandwidth, count(ne) AS network_element_count\n"
+        "ORDER BY network_element_count ASC\n"
+        "LIMIT 3"
+    )
+
+
+def test_semantic_pipeline_covers_tunnel_path_ports_relation_detail_fields() -> None:
+    pipeline = get_semantic_pipeline()
+
+    result = pipeline.parse(
+        question="查询服务、其使用的隧道、隧道经过的网元型号以及网元端口MAC地址的对应关系。",
+        intent_result=IntentRecognitionResult(
+            primary_intent="record_retrieval_query",
+            secondary_intent="relationship_path_query",
+            confidence=0.9,
+            source="rule",
+            decision="accept",
+        ),
+    )
+
+    assert result.validation.accepted is True
+    assert result.generated_cypher == (
+        "MATCH (s:Service)-[:SERVICE_USES_TUNNEL]->(t:Tunnel)-[:PATH_THROUGH]->"
+        "(ne:NetworkElement)-[:HAS_PORT]->(p:Port)\n"
+        "RETURN s.name AS service_name, t.name AS tunnel_name, "
+        "ne.model AS network_element_model, p.mac_address AS port_mac_address"
+    )
+
+
+def test_semantic_pipeline_resolves_directional_path_words_without_clarification() -> None:
+    pipeline = get_semantic_pipeline()
+
+    path_result = pipeline.parse(
+        question="统计服务所经隧道穿过的网元位置，按网元数量降序排列，返回前10个位置。",
+        intent_result=IntentRecognitionResult(
+            primary_intent="ranking_query",
+            secondary_intent="metric_ranking_query",
+            confidence=0.9,
+            source="rule",
+            decision="accept",
+        ),
+    )
+    assert path_result.validation.accepted is True
+    assert path_result.clarification is None
+    assert "[:PATH_THROUGH]->(ne:NetworkElement)" in path_result.generated_cypher
+    assert "RETURN ne.location AS network_element_location, count(ne) AS network_element_count" in path_result.generated_cypher
+
+    destination_ports = pipeline.parse(
+        question="查询业务经隧道到达网元下的端口，返回业务类型、隧道类型、网元型号及端口MAC地址。",
+        intent_result=IntentRecognitionResult(
+            primary_intent="record_retrieval_query",
+            secondary_intent="relationship_detail_query",
+            confidence=0.9,
+            source="rule",
+            decision="accept",
+        ),
+    )
+    assert destination_ports.validation.accepted is True
+    assert destination_ports.clarification is None
+    assert "[:TUNNEL_DST]->(ne:NetworkElement)-[:HAS_PORT]->(p:Port)" in destination_ports.generated_cypher
+    assert "s.elem_type AS service_type" in destination_ports.generated_cypher
+    assert "t.elem_type AS tunnel_type" in destination_ports.generated_cypher
+    assert "ne.model AS network_element_model" in destination_ports.generated_cypher
+    assert "p.mac_address AS port_mac_address" in destination_ports.generated_cypher
+
+    source_ports = pipeline.parse(
+        question="查询服务使用的隧道源网络元素端口，返回端口ID、名称和状态。",
+        intent_result=IntentRecognitionResult(
+            primary_intent="record_retrieval_query",
+            secondary_intent="related_record_query",
+            confidence=0.9,
+            source="rule",
+            decision="accept",
+        ),
+    )
+    assert source_ports.validation.accepted is True
+    assert source_ports.clarification is None
+    assert source_ports.generated_cypher == (
+        "MATCH (s:Service)-[:SERVICE_USES_TUNNEL]->(t:Tunnel)-[:TUNNEL_SRC]->(ne:NetworkElement)-[:HAS_PORT]->(p:Port)\n"
+        "RETURN p.id AS port_id, p.name AS port_name, p.status AS port_status"
+    )
+
+
+def test_semantic_pipeline_routes_path_intents_into_semantic_planner() -> None:
+    pipeline = get_semantic_pipeline()
+
+    result = pipeline.parse(
+        question="查询所有服务经隧道到达的目的网元的ID和名称。",
+        intent_result=IntentRecognitionResult(
+            primary_intent="relationship_path_query",
+            secondary_intent="path_trace_query",
+            confidence=0.9,
+            source="embedding",
+            decision="accept",
+        ),
+    )
+
+    assert result.validation.accepted is True
+    assert result.generated_cypher == (
+        "MATCH (s:Service)-[:SERVICE_USES_TUNNEL]->(t:Tunnel)-[:TUNNEL_DST]->(ne:NetworkElement)\n"
+        "RETURN ne.id AS network_element_id, ne.name AS network_element_name"
+    )
+
+
+def test_semantic_pipeline_counts_requested_non_null_properties() -> None:
+    pipeline = get_semantic_pipeline()
+
+    qos = pipeline.parse(
+        question="统计所有服务中服务质量属性值的总数量。",
+        intent_result=IntentRecognitionResult(
+            primary_intent="metric_query",
+            secondary_intent="count_metric_query",
+            confidence=0.9,
+            source="rule",
+            decision="accept",
+        ),
+    )
+    assert qos.validation.accepted is True
+    assert qos.generated_cypher == "MATCH (s:Service)\nRETURN count(s.quality_of_service) AS service_quality_of_service_count"
+
+    bandwidth = pipeline.parse(
+        question="统计所有服务中带宽属性非空的记录数量。",
+        intent_result=IntentRecognitionResult(
+            primary_intent="metric_query",
+            secondary_intent="count_metric_query",
+            confidence=0.9,
+            source="rule",
+            decision="accept",
+        ),
+    )
+    assert bandwidth.validation.accepted is True
+    assert bandwidth.generated_cypher == "MATCH (s:Service)\nRETURN count(s.bandwidth) AS service_bandwidth_count"
+
+
+def test_semantic_pipeline_preserves_requested_projection_fields() -> None:
+    pipeline = get_semantic_pipeline()
+
+    result = pipeline.parse(
+        question="查询延迟等于21的服务的ID和延迟值。",
+        intent_result=IntentRecognitionResult(
+            primary_intent="record_retrieval_query",
+            secondary_intent="attribute_projection_query",
+            confidence=0.9,
+            source="rule",
+            decision="accept",
+        ),
+    )
+
+    assert result.validation.accepted is True
+    assert result.generated_cypher == (
+        "MATCH (s:Service)\n"
+        "WHERE s.latency = 21\n"
+        "RETURN s.id AS service_id, s.latency AS service_latency"
+    )
 
 
 def test_semantic_pipeline_handles_two_stage_aggregate_ranking() -> None:
@@ -795,4 +1037,191 @@ def test_semantic_pipeline_generates_relationship_existence_query() -> None:
     assert result.generated_cypher == (
         "MATCH (s:Service)-[:SERVICE_USES_TUNNEL]->(t:Tunnel)\n"
         "RETURN count(*) > 0 AS exists"
+    )
+
+
+def test_semantic_pipeline_prefers_source_port_when_source_network_element_owns_port_fields() -> None:
+    pipeline = SemanticPipeline()
+    intent = IntentRecognitionResult(
+        primary_intent="record_retrieval_query",
+        secondary_intent="related_record_query",
+        confidence=0.92,
+        source="rule",
+        decision="accept",
+    )
+
+    result = pipeline.parse(
+        question="查询服务使用的隧道及其源网元厂商和端口MAC地址。",
+        intent_result=intent,
+    )
+
+    assert result.validation.accepted is True
+    assert "[:TUNNEL_SRC]->(ne:NetworkElement)-[:HAS_PORT]->(p:Port)" in result.generated_cypher
+    assert "ne.vendor AS network_element_vendor" in result.generated_cypher
+    assert "p.mac_address AS port_mac_address" in result.generated_cypher
+
+
+def test_semantic_pipeline_returns_network_element_version_for_source_port_path() -> None:
+    pipeline = SemanticPipeline()
+    intent = IntentRecognitionResult(
+        primary_intent="record_retrieval_query",
+        secondary_intent="related_record_query",
+        confidence=0.92,
+        source="rule",
+        decision="accept",
+    )
+
+    result = pipeline.parse(
+        question="查询服务使用的隧道及其源网元端口信息，返回服务名称、隧道标准、网元版本和端口MAC地址。",
+        intent_result=intent,
+    )
+
+    assert result.validation.accepted is True
+    assert "[:TUNNEL_SRC]->(ne:NetworkElement)-[:HAS_PORT]->(p:Port)" in result.generated_cypher
+    assert "ne.software_version AS network_element_software_version" in result.generated_cypher
+
+
+def test_semantic_pipeline_treats_port_detail_and_element_ip_as_source_port_returns() -> None:
+    pipeline = SemanticPipeline()
+    intent = IntentRecognitionResult(
+        primary_intent="record_retrieval_query",
+        secondary_intent="related_record_query",
+        confidence=0.92,
+        source="rule",
+        decision="accept",
+    )
+
+    result = pipeline.parse(
+        question="查询服务使用的隧道源端网络元素上的端口信息，包含端口详情、服务名称、隧道标准及元素IP。",
+        intent_result=intent,
+    )
+
+    assert result.validation.accepted is True
+    assert "[:TUNNEL_SRC]->(ne:NetworkElement)-[:HAS_PORT]->(p:Port)" in result.generated_cypher
+    assert "p" in result.generated_cypher
+    assert "ne.ip_address AS network_element_ip_address" in result.generated_cypher
+
+
+def test_semantic_pipeline_orders_two_stage_aggregate_by_first_count_phrases() -> None:
+    pipeline = SemanticPipeline()
+    intent = IntentRecognitionResult(
+        primary_intent="ranking_query",
+        secondary_intent="metric_ranking_query",
+        confidence=0.92,
+        source="rule",
+        decision="accept",
+    )
+
+    result = pipeline.parse(
+        question="统计各服务关联的目的网元总数，按首次统计数量降序排列，返回前5个服务的名称、时延及两次统计结果。",
+        intent_result=intent,
+    )
+
+    assert result.validation.accepted is True
+    assert "WITH s, count(ne) AS first_total" in result.generated_cypher
+    assert "ORDER BY first_total DESC" in result.generated_cypher
+
+
+def test_semantic_pipeline_keeps_breakdown_dimension_when_intent_is_coarse_metric() -> None:
+    pipeline = SemanticPipeline()
+    intent = IntentRecognitionResult(
+        primary_intent="metric_query",
+        secondary_intent="count_metric_query",
+        confidence=0.66,
+        source="embedding",
+        decision="accept",
+    )
+
+    result = pipeline.parse(
+        question="统计服务所用隧道的目的端网元厂商分布，按数量升序排列，返回前5个厂商。",
+        intent_result=intent,
+    )
+
+    assert result.validation.accepted is True
+    assert "ne.vendor AS network_element_vendor" in result.generated_cypher
+    assert "count(ne) AS network_element_count" in result.generated_cypher
+
+
+def test_semantic_pipeline_uses_path_target_metric_for_location_breakdown_under_coarse_metric_intent() -> None:
+    pipeline = SemanticPipeline()
+    intent = IntentRecognitionResult(
+        primary_intent="metric_query",
+        secondary_intent="count_metric_query",
+        confidence=0.66,
+        source="embedding",
+        decision="accept",
+    )
+
+    result = pipeline.parse(
+        question="统计服务所经隧道穿过的网络元素中，按位置分组统计数量，按数量升序排列的前10个位置及其数量。",
+        intent_result=intent,
+    )
+
+    assert result.validation.accepted is True
+    assert "ne.location AS network_element_location" in result.generated_cypher
+    assert "count(ne) AS network_element_count" in result.generated_cypher
+
+
+def test_semantic_pipeline_includes_service_and_tunnel_context_for_service_tunnel_source_port_query() -> None:
+    pipeline = SemanticPipeline()
+    intent = IntentRecognitionResult(
+        primary_intent="record_retrieval_query",
+        secondary_intent="related_record_query",
+        confidence=0.92,
+        source="rule",
+        decision="accept",
+    )
+
+    result = pipeline.parse(
+        question="查询服务使用的隧道及其源网元厂商和端口MAC地址。",
+        intent_result=intent,
+    )
+
+    assert result.validation.accepted is True
+    assert "s.name AS service_name" in result.generated_cypher
+    assert "t.name AS tunnel_name" in result.generated_cypher
+
+
+def test_semantic_pipeline_does_not_add_context_fields_when_return_clause_is_explicit() -> None:
+    pipeline = SemanticPipeline()
+    intent = IntentRecognitionResult(
+        primary_intent="record_retrieval_query",
+        secondary_intent="related_record_query",
+        confidence=0.92,
+        source="rule",
+        decision="accept",
+    )
+
+    result = pipeline.parse(
+        question="查询所有服务使用的隧道及其目的网元，返回厂商名称和隧道带宽。",
+        intent_result=intent,
+    )
+
+    assert result.validation.accepted is True
+    assert "ne.vendor AS network_element_vendor" in result.generated_cypher
+    assert "t.bandwidth AS tunnel_bandwidth" in result.generated_cypher
+    assert "s.name AS service_name" not in result.generated_cypher
+    assert "t.name AS tunnel_name" not in result.generated_cypher
+
+
+def test_semantic_pipeline_treats_filtered_projection_as_record_query_not_existence() -> None:
+    pipeline = SemanticPipeline()
+    intent = IntentRecognitionResult(
+        primary_intent="existence_query",
+        secondary_intent="attribute_condition_existence_query",
+        confidence=0.62,
+        source="embedding",
+        decision="accept",
+    )
+
+    result = pipeline.parse(
+        question="查询所有服务质量等级为 Gold 的服务名称及其服务质量等级。",
+        intent_result=intent,
+    )
+
+    assert result.validation.accepted is True
+    assert result.generated_cypher == (
+        "MATCH (s:Service)\n"
+        "WHERE s.quality_of_service = 'Gold'\n"
+        "RETURN s.quality_of_service AS service_quality_of_service, s.name AS service_name"
     )

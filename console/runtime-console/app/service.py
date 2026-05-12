@@ -238,6 +238,8 @@ class RuntimeResultsService:
             "difficulty": summary["difficulty"],
             "attempt_no": summary["attempt_no"],
             "generation_status": summary["generation_status"],
+            "clarification": summary["clarification"],
+            "clarification_summary": self._clarification_summary(summary["clarification"]),
             "received_at": (submission or generation_failure or {}).get("received_at"),
             "updated_at": self._latest_timestamp(golden, submission, generation_failure, ticket, analysis),
             "current_stage": self._current_stage(stages),
@@ -257,6 +259,7 @@ class RuntimeResultsService:
         evaluation = (submission or {}).get("evaluation") or {}
         verdict = evaluation.get("verdict")
         final_verdict = self._final_verdict_from_state(state=state, verdict=verdict, generation_failure=generation_failure)
+        clarification = self._clarification_from(record, generation_failure)
         return {
             "id": id,
             "source": "testing_agent",
@@ -264,6 +267,8 @@ class RuntimeResultsService:
             "difficulty": (golden or {}).get("difficulty"),
             "attempt_no": int((submission or {}).get("attempt_no") or 0),
             "generation_status": record.get("generation_status"),
+            "clarification": clarification,
+            "clarification_summary": self._clarification_summary(clarification),
             "received_at": record.get("received_at"),
             "updated_at": self._latest_timestamp(golden, submission, generation_failure),
             "current_stage": self._current_stage_from_state(state=state, generation_failure=generation_failure),
@@ -381,17 +386,34 @@ class RuntimeResultsService:
         analysis: dict[str, Any] | None,
     ) -> dict[str, Any]:
         record = submission or generation_failure or {}
+        clarification = self._clarification_from(record, generation_failure)
         return {
             "id": id,
             "question": record.get("question", ""),
             "difficulty": (golden or {}).get("difficulty") or (ticket or {}).get("difficulty"),
             "attempt_no": int((submission or {}).get("attempt_no") or 0),
             "generation_status": record.get("generation_status"),
+            "clarification": clarification,
+            "clarification_summary": self._clarification_summary(clarification),
             "current_stage": self._current_stage(stages),
             "final_verdict": self._final_verdict(stages),
             "received_at": record.get("received_at"),
             "updated_at": self._latest_timestamp(golden, submission, generation_failure, ticket, analysis),
         }
+
+    def _clarification_from(
+        self,
+        source: dict[str, Any] | None,
+        generation_failure: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        clarification = (source or {}).get("clarification") or (generation_failure or {}).get("clarification")
+        return clarification if isinstance(clarification, dict) else None
+
+    def _clarification_summary(self, clarification: dict[str, Any] | None) -> str:
+        if not clarification:
+            return ""
+        question = clarification.get("question_zh")
+        return str(question) if question else ""
 
     def _build_generation_section(
         self,
