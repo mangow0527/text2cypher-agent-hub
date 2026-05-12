@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Optional
 
 from services.cypher_generator_agent.app.knowledge_context import (
     KnowledgeDocsValidator,
@@ -85,7 +86,7 @@ class KnowledgeDocsValidatorTest(unittest.TestCase):
         knowledge_dir: Path,
         *,
         system_prompt: str = "System prompt",
-        schema: object | None = None,
+        schema: Optional[object] = None,
         cypher_syntax: str = "Cypher syntax",
         business_knowledge: str = "Business knowledge",
         few_shot: str = "Few-shot examples",

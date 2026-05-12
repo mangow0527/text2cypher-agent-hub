@@ -54,7 +54,7 @@ MATCH (n) RETURN n LIMIT 1
 
 ## 在系统中的使用方式
 
-物理 schema 的机器可读事实源是 `services/testing_agent/docs/reference/schema.json`；cypher-generator-agent 通过 `semantic_layer.yaml` 绑定业务语义与该物理 schema，并在生成前执行 Semantic Contract Alignment。
+物理 schema 的机器可读事实源是 `services/testing_agent/docs/reference/schema.json`；cypher-generator-agent 通过 `services/cypher_generator_agent/resources/semantic_views/network_graph_semantic_view.yaml` 绑定图语义视图与该物理 schema，并在生成前执行 Semantic Contract Alignment。
 
 这份 Markdown 只作为人工阅读参考，不参与生成、评测或 repair 流程。
 

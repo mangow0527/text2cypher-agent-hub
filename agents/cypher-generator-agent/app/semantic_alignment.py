@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from . import resource_paths
-from .semantic_layer import SemanticLayer, SemanticLayerConfigError, load_semantic_layer
+from .graph_semantic_view import GraphSemanticView, GraphSemanticViewConfigError, load_graph_semantic_view
 
 
 @dataclass(frozen=True)
@@ -51,7 +51,7 @@ _KNOWLEDGE_REQUIRED_FILES = (
 
 def validate_default_semantic_alignment(*, knowledge_dir: str | Path | None = None) -> SemanticAlignmentReport:
     return validate_semantic_alignment(
-        semantic_layer_path=_default_semantic_layer_path(),
+        semantic_view_path=_default_semantic_view_path(),
         tugraph_schema_path=_default_tugraph_schema_path(),
         knowledge_dir=knowledge_dir,
     )
@@ -59,23 +59,23 @@ def validate_default_semantic_alignment(*, knowledge_dir: str | Path | None = No
 
 def validate_semantic_alignment(
     *,
-    semantic_layer_path: str | Path,
+    semantic_view_path: str | Path,
     tugraph_schema_path: str | Path,
     knowledge_dir: str | Path | None = None,
 ) -> SemanticAlignmentReport:
-    semantic_layer_path = Path(semantic_layer_path)
+    semantic_view_path = Path(semantic_view_path)
     tugraph_schema_path = Path(tugraph_schema_path)
     diagnostics: list[SemanticAlignmentDiagnostic] = []
-    checked_sources = [semantic_layer_path.name, tugraph_schema_path.name]
+    checked_sources = [semantic_view_path.name, tugraph_schema_path.name]
 
     try:
-        semantic_layer = load_semantic_layer(semantic_layer_path, schema_path=tugraph_schema_path)
-    except SemanticLayerConfigError as exc:
+        semantic_view = load_graph_semantic_view(semantic_view_path, schema_path=tugraph_schema_path)
+    except GraphSemanticViewConfigError as exc:
         diagnostics.append(
             SemanticAlignmentDiagnostic(
-                code="semantic_layer_not_aligned_to_tugraph_schema",
+                code="semantic_view_not_aligned_to_tugraph_schema",
                 message=str(exc),
-                source=semantic_layer_path.name,
+                source=semantic_view_path.name,
             )
         )
         return SemanticAlignmentReport(accepted=False, diagnostics=diagnostics, checked_sources=checked_sources)
@@ -84,7 +84,7 @@ def validate_semantic_alignment(
     if knowledge_dir is not None:
         knowledge_path = Path(knowledge_dir)
         _append_knowledge_alignment(
-            semantic_layer=semantic_layer,
+            semantic_view=semantic_view,
             tugraph_schema=tugraph_schema,
             knowledge_dir=knowledge_path,
             diagnostics=diagnostics,
@@ -100,7 +100,7 @@ def validate_semantic_alignment(
 
 def _append_knowledge_alignment(
     *,
-    semantic_layer: SemanticLayer,
+    semantic_view: GraphSemanticView,
     tugraph_schema: _PhysicalSchema,
     knowledge_dir: Path,
     diagnostics: list[SemanticAlignmentDiagnostic],
@@ -140,7 +140,7 @@ def _append_knowledge_alignment(
 
     try:
         knowledge_schema = _load_physical_schema(knowledge_dir / "schema.json")
-    except (json.JSONDecodeError, SemanticLayerConfigError) as exc:
+    except (json.JSONDecodeError, GraphSemanticViewConfigError) as exc:
         diagnostics.append(
             SemanticAlignmentDiagnostic(
                 code="knowledge_schema_invalid",
@@ -155,14 +155,14 @@ def _append_knowledge_alignment(
         knowledge_schema=knowledge_schema,
         diagnostics=diagnostics,
     )
-    _append_semantic_layer_against_knowledge_schema_diagnostics(
-        semantic_layer=semantic_layer,
+    _append_semantic_view_against_knowledge_schema_diagnostics(
+        semantic_view=semantic_view,
         knowledge_schema=knowledge_schema,
         diagnostics=diagnostics,
     )
     for filename in ("business_knowledge.md", "few_shot.md"):
         _append_knowledge_reference_diagnostics(
-            semantic_layer=semantic_layer,
+            semantic_view=semantic_view,
             tugraph_schema=tugraph_schema,
             source=f"knowledge/{filename}",
             text=(knowledge_dir / filename).read_text(encoding="utf-8"),
@@ -217,66 +217,66 @@ def _append_schema_drift_diagnostics(
             )
 
 
-def _append_semantic_layer_against_knowledge_schema_diagnostics(
+def _append_semantic_view_against_knowledge_schema_diagnostics(
     *,
-    semantic_layer: SemanticLayer,
+    semantic_view: GraphSemanticView,
     knowledge_schema: _PhysicalSchema,
     diagnostics: list[SemanticAlignmentDiagnostic],
 ) -> None:
-    for entity in semantic_layer.entities.values():
+    for entity in semantic_view.entities.values():
         if entity.label not in knowledge_schema.vertex_properties:
             diagnostics.append(
                 SemanticAlignmentDiagnostic(
-                    code="semantic_layer_not_aligned_to_knowledge_schema",
+                    code="semantic_view_not_aligned_to_knowledge_schema",
                     message=f"semantic entity {entity.name!r} references label {entity.label!r} missing from knowledge schema",
-                    source="semantic_layer.yaml",
+                    source=resource_paths.graph_semantic_view_path().name,
                 )
             )
 
-    for prop in semantic_layer.properties.values():
-        label = semantic_layer.entities[prop.owner].label
+    for prop in semantic_view.fields.values():
+        label = semantic_view.entities[prop.owner].label
         if prop.property not in knowledge_schema.vertex_properties.get(label, set()):
             diagnostics.append(
                 SemanticAlignmentDiagnostic(
-                    code="semantic_layer_not_aligned_to_knowledge_schema",
-                    message=f"semantic property {prop.name!r} references {label}.{prop.property} missing from knowledge schema",
-                    source="semantic_layer.yaml",
+                    code="semantic_view_not_aligned_to_knowledge_schema",
+                    message=f"semantic field {prop.name!r} references {label}.{prop.property} missing from knowledge schema",
+                    source=resource_paths.graph_semantic_view_path().name,
                 )
             )
 
-    for metric in semantic_layer.metrics.values():
+    for metric in semantic_view.metrics.values():
         if metric.property is None:
             continue
-        label = semantic_layer.entities[metric.owner].label
+        label = semantic_view.entities[metric.target_entity].label
         if metric.property not in knowledge_schema.vertex_properties.get(label, set()):
             diagnostics.append(
                 SemanticAlignmentDiagnostic(
-                    code="semantic_layer_not_aligned_to_knowledge_schema",
+                    code="semantic_view_not_aligned_to_knowledge_schema",
                     message=f"semantic metric {metric.name!r} references {label}.{metric.property} missing from knowledge schema",
-                    source="semantic_layer.yaml",
+                    source=resource_paths.graph_semantic_view_path().name,
                 )
             )
 
-    for relationship in semantic_layer.relationships.values():
-        from_label = semantic_layer.entities[relationship.from_entity].label
-        to_label = semantic_layer.entities[relationship.to_entity].label
+    for relationship in semantic_view.relationships.values():
+        from_label = semantic_view.entities[relationship.from_entity].label
+        to_label = semantic_view.entities[relationship.to_entity].label
         expected = (from_label, to_label)
         if expected not in knowledge_schema.edge_constraints.get(relationship.edge, set()):
             diagnostics.append(
                 SemanticAlignmentDiagnostic(
-                    code="semantic_layer_not_aligned_to_knowledge_schema",
+                    code="semantic_view_not_aligned_to_knowledge_schema",
                     message=(
                         f"semantic relationship {relationship.name!r} references "
                         f"{from_label}-[:{relationship.edge}]->{to_label} missing from knowledge schema"
                     ),
-                    source="semantic_layer.yaml",
+                    source=resource_paths.graph_semantic_view_path().name,
                 )
             )
 
 
 def _append_knowledge_reference_diagnostics(
     *,
-    semantic_layer: SemanticLayer,
+    semantic_view: GraphSemanticView,
     tugraph_schema: _PhysicalSchema,
     source: str,
     text: str,
@@ -293,11 +293,11 @@ def _append_knowledge_reference_diagnostics(
                 )
             )
             continue
-        if not _semantic_layer_exposes_property(semantic_layer, label, property_name):
+        if not _semantic_view_exposes_property(semantic_view, label, property_name):
             diagnostics.append(
                 SemanticAlignmentDiagnostic(
-                    code="knowledge_reference_not_in_semantic_layer",
-                    message=f"knowledge text references {label}.{property_name}, but semantic layer does not expose it",
+                    code="knowledge_reference_not_in_semantic_view",
+                    message=f"knowledge text references {label}.{property_name}, but semantic view does not expose it",
                     source=source,
                 )
             )
@@ -312,39 +312,36 @@ def _append_knowledge_reference_diagnostics(
                 )
             )
             continue
-        if not _semantic_layer_exposes_relationship(semantic_layer, from_label, edge, to_label):
+        if not _semantic_view_exposes_relationship(semantic_view, from_label, edge, to_label):
             diagnostics.append(
                 SemanticAlignmentDiagnostic(
-                    code="knowledge_relationship_not_in_semantic_layer",
-                    message=f"knowledge text references {from_label}-[:{edge}]->{to_label}, but semantic layer does not expose it",
+                    code="knowledge_relationship_not_in_semantic_view",
+                    message=f"knowledge text references {from_label}-[:{edge}]->{to_label}, but semantic view does not expose it",
                     source=source,
                 )
             )
 
 
-def _semantic_layer_exposes_property(semantic_layer: SemanticLayer, label: str, property_name: str) -> bool:
-    owners = {entity.name for entity in semantic_layer.entities.values() if entity.label == label}
-    for prop in semantic_layer.properties.values():
+def _semantic_view_exposes_property(semantic_view: GraphSemanticView, label: str, property_name: str) -> bool:
+    owners = {entity.name for entity in semantic_view.entities.values() if entity.label == label}
+    for prop in semantic_view.fields.values():
         if prop.owner in owners and prop.property == property_name:
             return True
-    for metric in semantic_layer.metrics.values():
-        if metric.owner in owners and metric.property == property_name:
-            return True
-    for mapping in semantic_layer.value_mappings.values():
-        if mapping.owner in owners and mapping.property == property_name:
+    for metric in semantic_view.metrics.values():
+        if metric.target_entity in owners and metric.property == property_name:
             return True
     return False
 
 
-def _semantic_layer_exposes_relationship(
-    semantic_layer: SemanticLayer,
+def _semantic_view_exposes_relationship(
+    semantic_view: GraphSemanticView,
     from_label: str,
     edge: str,
     to_label: str,
 ) -> bool:
-    for relationship in semantic_layer.relationships.values():
-        from_entity = semantic_layer.entities[relationship.from_entity]
-        to_entity = semantic_layer.entities[relationship.to_entity]
+    for relationship in semantic_view.relationships.values():
+        from_entity = semantic_view.entities[relationship.from_entity]
+        to_entity = semantic_view.entities[relationship.to_entity]
         if from_entity.label == from_label and relationship.edge == edge and to_entity.label == to_label:
             return True
     return False
@@ -424,7 +421,7 @@ def _load_physical_schema(path: Path) -> _PhysicalSchema:
         return _schema_from_reference_list(payload)
     if isinstance(payload, dict):
         return _schema_from_mapping(payload)
-    raise SemanticLayerConfigError(f"{path} must contain a JSON list or mapping")
+    raise GraphSemanticViewConfigError(f"{path} must contain a JSON list or mapping")
 
 
 def _schema_from_reference_list(payload: list[Any]) -> _PhysicalSchema:
@@ -512,8 +509,8 @@ def _first_str(payload: dict[str, Any], *keys: str) -> str | None:
     return None
 
 
-def _default_semantic_layer_path() -> Path:
-    return resource_paths.semantic_layer_path()
+def _default_semantic_view_path() -> Path:
+    return resource_paths.graph_semantic_view_path()
 
 
 def _default_tugraph_schema_path() -> Path:

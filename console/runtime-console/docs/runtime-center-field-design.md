@@ -81,7 +81,7 @@ repair-agent 当前落盘子目录：
 | 意图识别层 | 一级意图、二级意图、置信度、来源、判定结果 | `input_prompt_snapshot.intent_recognition.result` | 对应 `IntentRecognitionResult`，页面使用中文标签解释 `source` 和 `decision` |
 | 意图识别层 | 规则命中摘要、向量召回 top-k、LLM 一级/二级判定尝试 | `input_prompt_snapshot.intent_recognition.diagnostics` | LLM 尝试必须展示 prompt 和 raw output；未触发时显示“本次未触发” |
 | 语义视图匹配层 | 匹配到的实体、过滤条件、路径语义、返回对象、置信与歧义 | `input_prompt_snapshot.semantic_view_matching.result` | 对应 `SemanticMatchResult` |
-| 语义视图匹配层 | 候选生成、语义补全、候选打分、LLM 消歧记录 | `input_prompt_snapshot.semantic_view_matching.result.trace` | `trace` 是 `SemanticMatchResult` 的一部分；只展示压缩后的候选卡片和决策证据 |
+| 语义视图匹配层 | 候选生成、语义补全、候选打分、LLM 消歧记录 | `input_prompt_snapshot.semantic_view_matching.result.candidate_trace`、`input_prompt_snapshot.semantic_view_matching.result.trace`、`input_prompt_snapshot.semantic_view_matching.stages` | 候选卡片以 `candidate_trace` 为准；`stages` 只承载阶段摘要 |
 | 规划层 | LogicalQueryPlan 摘要 | `input_prompt_snapshot.logical_query_plan` | 展示答案形态、操作序列、路径引用、渲染提示和 trace 引用 |
 | 图 Schema 路径规划层 | 选中的图路径、候选路径、方向、变量绑定、路径拒绝原因 | `input_prompt_snapshot.schema_path_planning` | 语义明确但路径歧义时，应能定位是否触发澄清 |
 | RAG 知识选择 | 知识来源、检索 query、选中知识卡片、过滤原因 | `input_prompt_snapshot.knowledge_selection` | 只展示被选中或被拒绝的摘要，不重复保存大段知识正文 |
@@ -98,6 +98,7 @@ CGA 区域按触发位置组织 LLM 调用。所有 LLM 调用必须展示 promp
 | --- | --- | --- | --- |
 | 意图识别一级分类 | 意图识别：一级分类 LLM 判定 | `intent_recognition.diagnostics.llm_primary_attempts[]` | 规则和向量召回不能稳定确定一级意图 |
 | 意图识别二级分类 | 意图识别：二级分类 LLM 判定 | `intent_recognition.diagnostics.llm_secondary_attempts[]` | 一级意图已确定，但二级意图候选仍有歧义 |
+| 意图识别兜底 | 意图识别 LLM 兜底提示词 | `intent_recognition.diagnostics.llm_secondary_attempts[]` 中 `stage=intent_recognition_fallback` 的调用 | 规则、向量召回和分层分类不能给出可接受意图时触发；运行中心独立展示，不归入二级分类 |
 | 语义视图消歧 | 语义视图匹配：受控 LLM 消歧 | `semantic_view_matching.result.trace.llm_disambiguation_attempts[]` | 候选分数接近、规则无法消歧，且仍可给出有限候选 |
 | Cypher 兜底生成 | Renderer 失败后的 Cypher 兜底生成 | `generation.cypher_fallback_llm` | 确定性渲染器不覆盖或 preflight 拒绝后允许模型兜底 |
 

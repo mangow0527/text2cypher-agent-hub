@@ -35,12 +35,12 @@ def test_default_semantic_alignment_accepts_tugraph_schema_and_knowledge_context
 
     assert report.accepted is True
     assert report.diagnostics == []
-    assert "semantic_layer.yaml" in report.checked_sources
+    assert "network_graph_semantic_view.yaml" in report.checked_sources
     assert "schema.json" in report.checked_sources
     assert "knowledge/schema.json" in report.checked_sources
 
 
-def test_semantic_alignment_rejects_knowledge_references_outside_semantic_layer(tmp_path: Path) -> None:
+def test_semantic_alignment_rejects_knowledge_references_outside_semantic_view(tmp_path: Path) -> None:
     knowledge_dir = tmp_path / "knowledge"
     _write_knowledge_docs(
         knowledge_dir,
@@ -55,7 +55,7 @@ def test_semantic_alignment_rejects_knowledge_references_outside_semantic_layer(
     assert any(diagnostic.code == "knowledge_reference_not_in_tugraph_schema" for diagnostic in report.diagnostics)
 
 
-def test_semantic_alignment_rejects_knowledge_property_missing_only_from_semantic_layer(tmp_path: Path) -> None:
+def test_semantic_alignment_rejects_knowledge_property_missing_only_from_semantic_view(tmp_path: Path) -> None:
     knowledge_dir = tmp_path / "knowledge"
     _write_knowledge_docs(
         knowledge_dir,
@@ -63,21 +63,19 @@ def test_semantic_alignment_rejects_knowledge_property_missing_only_from_semanti
         business_knowledge="- “链路协议”映射为 `Link.protocol`。",
         few_shot="Question: 查询链路协议\nCypher: MATCH (l:Link) RETURN l.protocol AS link_protocol",
     )
-    semantic_layer_path = tmp_path / "semantic_layer.yaml"
-    semantic_layer_doc = yaml.safe_load(resource_paths.semantic_layer_path().read_text(encoding="utf-8"))
-    semantic_layer_doc["properties"] = [
-        item for item in semantic_layer_doc["properties"] if item["name"] != "link_protocol"
-    ]
-    semantic_layer_path.write_text(yaml.safe_dump(semantic_layer_doc, allow_unicode=True), encoding="utf-8")
+    semantic_view_path = tmp_path / "network_graph_semantic_view.yaml"
+    semantic_view_doc = yaml.safe_load(resource_paths.graph_semantic_view_path().read_text(encoding="utf-8"))
+    semantic_view_doc["dimensions"].pop("link.protocol")
+    semantic_view_path.write_text(yaml.safe_dump(semantic_view_doc, allow_unicode=True), encoding="utf-8")
 
     report = validate_semantic_alignment(
-        semantic_layer_path=semantic_layer_path,
+        semantic_view_path=semantic_view_path,
         tugraph_schema_path=SCHEMA_PATH,
         knowledge_dir=knowledge_dir,
     )
 
     assert report.accepted is False
-    assert any(diagnostic.code == "knowledge_reference_not_in_semantic_layer" for diagnostic in report.diagnostics)
+    assert any(diagnostic.code == "knowledge_reference_not_in_semantic_view" for diagnostic in report.diagnostics)
 
 
 def test_semantic_alignment_rejects_few_shot_alias_property_outside_tugraph_schema(tmp_path: Path) -> None:

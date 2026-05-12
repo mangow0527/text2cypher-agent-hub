@@ -5,7 +5,7 @@ from dataclasses import replace
 from typing import Any
 
 from .intent_recognition import IntentRecognitionResult
-from .semantic_layer import SemanticLayer
+from .graph_semantic_view import GraphSemanticView
 from .semantic_query import (
     SemanticEntityRef,
     SemanticFieldRef,
@@ -66,8 +66,8 @@ class PlanningResult:
 
 
 class LogicalQueryPlanner:
-    def __init__(self, semantic_layer: SemanticLayer) -> None:
-        self.semantic_layer = semantic_layer
+    def __init__(self, semantic_view: GraphSemanticView) -> None:
+        self.semantic_view = semantic_view
 
     def plan(
         self,
@@ -84,7 +84,7 @@ class LogicalQueryPlanner:
         metrics = tuple(self._metric_ref(item.metric_id) for item in semantic_match.metrics)
         kind = _semantic_query_kind(intent_result, metrics, projections)
         if kind == "ranking":
-            projections = _ensure_ranking_name_projection(projections, semantic_match, self.semantic_layer)
+            projections = _ensure_ranking_name_projection(projections, semantic_match, self.semantic_view)
         order_by = tuple(self._order_ref(item, projections, metrics) for item in semantic_match.order_by)
         if kind == "dimension_breakdown" and metrics and not order_by:
             order_by = (SemanticOrderBy(expression=metrics[0].output_alias, direction="DESC"),)
@@ -154,11 +154,11 @@ class LogicalQueryPlanner:
         )
 
     def _entity_ref(self, entity_name: str) -> SemanticEntityRef:
-        entity = self.semantic_layer.entities[entity_name]
+        entity = self.semantic_view.entities[entity_name]
         return SemanticEntityRef(name=entity.name, label=entity.label, alias=entity.alias)
 
     def _relationship_ref(self, relationship_name: str) -> SemanticRelationshipRef:
-        relationship = self.semantic_layer.relationships[relationship_name]
+        relationship = self.semantic_view.relationships[relationship_name]
         return SemanticRelationshipRef(
             name=relationship.name,
             from_entity=relationship.from_entity,
@@ -169,7 +169,7 @@ class LogicalQueryPlanner:
 
     def _filter_ref(self, filter_item: Any) -> SemanticFilterRef:
         owner, property_name = filter_item.field.split(".", 1)
-        entity = self.semantic_layer.entities[owner]
+        entity = self.semantic_view.entities[owner]
         return SemanticFilterRef(
             entity=owner,
             alias=entity.alias,
@@ -180,8 +180,8 @@ class LogicalQueryPlanner:
 
     def _return_ref(self, field_id: str) -> SemanticFieldRef:
         owner, property_name = field_id.split(".", 1)
-        entity = self.semantic_layer.entities[owner]
-        field_name = entity.alias if property_name == "*" else _field_name(self.semantic_layer, owner, property_name)
+        entity = self.semantic_view.entities[owner]
+        field_name = entity.alias if property_name == "*" else _field_name(self.semantic_view, owner, property_name)
         return SemanticFieldRef(
             name=field_name,
             entity=owner,
@@ -191,29 +191,17 @@ class LogicalQueryPlanner:
         )
 
     def _metric_ref(self, metric_id: str) -> SemanticMetricRef:
-        metric = self.semantic_layer.metrics.get(metric_id)
-        if metric is None and metric_id.endswith("_count"):
-            owner = metric_id[: -len("_count")]
-            entity = self.semantic_layer.entities[owner]
-            return SemanticMetricRef(
-                name=metric_id,
-                entity=owner,
-                alias=entity.alias,
-                aggregation="count",
-                expression=f"count({entity.alias})",
-                output_alias=metric_id,
-                property=None,
-            )
+        metric = self.semantic_view.metrics.get(metric_id)
         if metric is None:
             raise KeyError(metric_id)
-        entity = self.semantic_layer.entities[metric.owner]
+        entity = self.semantic_view.entities[metric.target_entity]
         return SemanticMetricRef(
             name=metric.name,
-            entity=metric.owner,
+            entity=metric.target_entity,
             alias=entity.alias,
             aggregation=metric.aggregation,
             expression=metric.expression,
-            output_alias=metric.name,
+            output_alias=metric.default_alias,
             property=metric.property,
         )
 
@@ -272,7 +260,7 @@ class LogicalQueryPlanner:
             first = semantic_query.entities[0]
             operators.append({"op": "scan", "entity": first.name, "as": first.alias})
         for path in semantic_match.paths:
-            last_relationship = self.semantic_layer.relationships[path.relationships[-1]]
+            last_relationship = self.semantic_view.relationships[path.relationships[-1]]
             operators.append(
                 {
                     "op": "traverse",
@@ -325,10 +313,12 @@ class LogicalQueryPlanner:
         return operators
 
 
-def _field_name(semantic_layer: SemanticLayer, owner: str, property_name: str) -> str:
-    for field in semantic_layer.properties.values():
-        if field.owner == owner and field.property == property_name:
-            return field.name
+def _field_name(semantic_view: GraphSemanticView, owner: str, property_name: str) -> str:
+    if property_name == "elem_type":
+        return f"{owner}_type"
+    field = semantic_view.field_by_owner_property(owner, property_name)
+    if field is not None:
+        return field.name.replace(".", "_")
     return f"{owner}_{property_name}"
 
 
@@ -354,14 +344,14 @@ def _semantic_query_kind(
 def _ensure_ranking_name_projection(
     projections: tuple[SemanticFieldRef, ...],
     semantic_match: SemanticMatchResult,
-    semantic_layer: SemanticLayer,
+    semantic_view: GraphSemanticView,
 ) -> tuple[SemanticFieldRef, ...]:
     if any(item.property == "name" for item in projections):
         return projections
     target_entity = projections[0].entity if projections else (semantic_match.entities[-1] if semantic_match.entities else None)
-    if target_entity is None or target_entity not in semantic_layer.entities:
+    if target_entity is None or target_entity not in semantic_view.entities:
         return projections
-    entity = semantic_layer.entities[target_entity]
+    entity = semantic_view.entities[target_entity]
     name_projection = SemanticFieldRef(
         name=f"{target_entity}_name",
         entity=target_entity,

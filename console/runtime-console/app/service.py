@@ -491,7 +491,7 @@ class RuntimeResultsService:
         if "llm_disambiguation_attempts" not in trace and attempts is not None:
             trace["llm_disambiguation_attempts"] = attempts
         candidate_trace = semantic_result.get("candidate_trace")
-        if "candidate_generation" not in trace and isinstance(candidate_trace, list):
+        if isinstance(candidate_trace, list):
             trace["candidate_generation"] = candidate_trace
         return trace
 
@@ -540,6 +540,14 @@ class RuntimeResultsService:
         semantic_view_matching = self._trace_object(snapshot.get("semantic_view_matching"))
         semantic_result = self._trace_object(semantic_view_matching.get("result"))
         semantic_trace = self._semantic_view_trace(semantic_view_matching, semantic_result)
+        secondary_attempts = self._llm_attempts_without_stage(
+            intent_diagnostics.get("llm_secondary_attempts"),
+            {"intent_recognition_fallback"},
+        )
+        fallback_attempts = self._llm_attempts_with_stage(
+            intent_diagnostics.get("llm_secondary_attempts"),
+            {"intent_recognition_fallback"},
+        )
         logical_query_plan = self._trace_object(snapshot.get("logical_query_plan") or snapshot.get("logical_plan"))
         schema_path_planning = self._trace_object(snapshot.get("schema_path_planning"))
         knowledge_selection = self._trace_object(snapshot.get("knowledge_selection"))
@@ -600,7 +608,11 @@ class RuntimeResultsService:
                     ),
                     self._trace_field(
                         "二级 LLM 调用",
-                        self._trace_count(intent_diagnostics.get("llm_secondary_attempts")),
+                        self._trace_count(secondary_attempts),
+                    ),
+                    self._trace_field(
+                        "兜底 LLM 调用",
+                        self._trace_count(fallback_attempts),
                     ),
                 ],
                 "raw": intent_recognition,
@@ -762,6 +774,14 @@ class RuntimeResultsService:
         semantic_result = self._trace_object(semantic_view_matching.get("result"))
         semantic_trace = self._semantic_view_trace(semantic_view_matching, semantic_result)
         generation = self._trace_object(snapshot.get("generation"))
+        secondary_attempts = self._llm_attempts_without_stage(
+            intent_diagnostics.get("llm_secondary_attempts"),
+            {"intent_recognition_fallback"},
+        )
+        fallback_attempts = self._llm_attempts_with_stage(
+            intent_diagnostics.get("llm_secondary_attempts"),
+            {"intent_recognition_fallback"},
+        )
         return {
             "intent_primary_classification": self._llm_prompt_item_from_attempts(
                 "intent_primary_classification",
@@ -773,7 +793,13 @@ class RuntimeResultsService:
                 "intent_secondary_classification",
                 "意图识别：二级分类 LLM 判定",
                 "意图识别：二级分类 LLM 原始返回",
-                intent_diagnostics.get("llm_secondary_attempts"),
+                secondary_attempts,
+            ),
+            "intent_recognition_fallback": self._llm_prompt_item_from_attempts(
+                "intent_recognition_fallback",
+                "意图识别 LLM 兜底提示词",
+                "意图识别 LLM 原始返回",
+                fallback_attempts,
             ),
             "semantic_view_disambiguation": self._llm_prompt_item_from_attempts(
                 "semantic_view_disambiguation",
@@ -789,6 +815,21 @@ class RuntimeResultsService:
             ),
         }
 
+    def _llm_attempts_with_stage(self, raw_attempts: Any, stages: set[str]) -> list[dict[str, Any]]:
+        attempts = self._llm_attempts(raw_attempts)
+        return [attempt for attempt in attempts if attempt.get("stage") in stages]
+
+    def _llm_attempts_without_stage(self, raw_attempts: Any, stages: set[str]) -> list[dict[str, Any]]:
+        attempts = self._llm_attempts(raw_attempts)
+        return [attempt for attempt in attempts if attempt.get("stage") not in stages]
+
+    def _llm_attempts(self, raw_attempts: Any) -> list[dict[str, Any]]:
+        if isinstance(raw_attempts, list):
+            return [attempt for attempt in raw_attempts if isinstance(attempt, dict)]
+        if isinstance(raw_attempts, dict):
+            return [raw_attempts]
+        return []
+
     def _llm_prompt_item_from_attempts(
         self,
         key: str,
@@ -796,12 +837,7 @@ class RuntimeResultsService:
         raw_output_title_zh: str,
         raw_attempts: Any,
     ) -> dict[str, Any]:
-        if isinstance(raw_attempts, list):
-            attempts = [attempt for attempt in raw_attempts if isinstance(attempt, dict)]
-        elif isinstance(raw_attempts, dict):
-            attempts = [raw_attempts]
-        else:
-            attempts = []
+        attempts = self._llm_attempts(raw_attempts)
 
         normalized_attempts = []
         for index, attempt in enumerate(attempts, start=1):
@@ -1455,13 +1491,17 @@ class RuntimeResultsService:
         repair_response = self._read_repair_response(submission) or {}
         analysis_id = repair_response.get("analysis_id")
         if analysis_id:
-            analysis = self._read_json(self._analyses_dir / f"{analysis_id}.json")
-            if analysis is not None:
-                try:
-                    return RepairAnalysisRecord.model_validate(analysis).model_dump(mode="json")
-                except ValidationError:
-                    return None
+            return self._read_analysis_record_by_id(analysis_id)
         return None
+
+    def _read_analysis_record_by_id(self, analysis_id: str) -> dict[str, Any] | None:
+        analysis = self._read_json(self._analyses_dir / f"{analysis_id}.json")
+        if analysis is None:
+            return None
+        try:
+            return RepairAnalysisRecord.model_validate(analysis).model_dump(mode="json")
+        except ValidationError:
+            return None
 
     def _read_repair_response(self, submission: dict[str, Any] | None) -> dict[str, Any] | None:
         payload = (submission or {}).get("repair_response")

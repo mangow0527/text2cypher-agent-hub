@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Optional
 from unittest.mock import patch
 
 import httpx
@@ -1207,14 +1208,14 @@ class _StaticEmbedder:
 class _QuestionAwareStore:
     def __init__(self, sample: IntentEmbeddingSample) -> None:
         self.sample = sample
-        self.seen_query_text: str | None = None
+        self.seen_query_text: Optional[str] = None
 
     def search(
         self,
         query_vector: tuple[float, ...],
         *,
         top_k: int,
-        query_text: str | None = None,
+        query_text: Optional[str] = None,
     ) -> list[tuple[IntentEmbeddingSample, float]]:
         self.seen_query_text = query_text
         return [(self.sample, 1.0)]
@@ -1226,7 +1227,7 @@ class _FailingEmbeddingStore:
         query_vector: tuple[float, ...],
         *,
         top_k: int,
-        query_text: str | None = None,
+        query_text: Optional[str] = None,
     ) -> list[tuple[IntentEmbeddingSample, float]]:
         raise RagIntentSearchError("rag unavailable")
 

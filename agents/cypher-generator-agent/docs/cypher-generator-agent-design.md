@@ -851,7 +851,7 @@ service_failed
 - `services/cypher_generator_agent/resources/semantic_views/network_graph_semantic_view.yaml`：目标语义视图资源文件。
 - RAG 知识 collection：语义查询相关的 schema 解释、业务规则、few-shot、已验证查询和 Cypher 约束。
 
-旧语义资源文件只能作为兼容资产或历史参考。当前设计的主权威是图语义视图、真实 schema 快照和远端 RAG intent collection。
+图语义视图、真实 schema 快照和远端 RAG intent collection 是当前设计的主权威；仓库不保留旧语义资源作为运行时输入。
 
 ## 11. 状态接口
 

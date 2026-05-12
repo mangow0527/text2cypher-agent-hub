@@ -7,9 +7,7 @@ SERVICE_ROOT = Path(__file__).resolve().parents[1]
 RESOURCE_ROOT = SERVICE_ROOT / "resources"
 
 INTENT_RESOURCE_DIR = RESOURCE_ROOT / "intent"
-SLOT_RESOURCE_DIR = RESOURCE_ROOT / "slots"
-BUSINESS_RESOURCE_DIR = RESOURCE_ROOT / "business"
-SEMANTIC_RESOURCE_DIR = RESOURCE_ROOT / "semantic"
+SEMANTIC_VIEW_RESOURCE_DIR = RESOURCE_ROOT / "semantic_views"
 
 
 def intent_taxonomy_path() -> Path:
@@ -36,21 +34,5 @@ def intent_llm_fewshots_path() -> Path:
     return INTENT_RESOURCE_DIR / "llm_fewshots.yaml"
 
 
-def slot_lexicon_path() -> Path:
-    return SLOT_RESOURCE_DIR / "lexicon.yaml"
-
-
-def slot_value_aliases_path() -> Path:
-    return SLOT_RESOURCE_DIR / "value_aliases.yaml"
-
-
-def slot_parse_patterns_path() -> Path:
-    return SLOT_RESOURCE_DIR / "parse_patterns.yaml"
-
-
-def business_slot_schemas_path() -> Path:
-    return BUSINESS_RESOURCE_DIR / "slot_schemas.yaml"
-
-
-def semantic_layer_path() -> Path:
-    return SEMANTIC_RESOURCE_DIR / "semantic_layer.yaml"
+def graph_semantic_view_path() -> Path:
+    return SEMANTIC_VIEW_RESOURCE_DIR / "network_graph_semantic_view.yaml"

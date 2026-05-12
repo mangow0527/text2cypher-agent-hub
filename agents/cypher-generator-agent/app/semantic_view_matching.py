@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field
 import re
 from typing import Any, Literal
 
-from .semantic_layer import SemanticLayer
+from .graph_semantic_view import GraphSemanticView, SemanticEntity, normalize_question
 
 
 SemanticDecision = Literal["accept", "clarify", "reject"]
@@ -106,18 +106,23 @@ class SemanticViewMatchingTrace:
 
 
 class SemanticViewMatcher:
-    """First-pass graph semantic view matcher backed by the current semantic layer resource."""
+    """Graph semantic view matcher backed by the governed network graph semantic view."""
 
-    def __init__(self, semantic_layer: SemanticLayer) -> None:
-        self.semantic_layer = semantic_layer
+    def __init__(self, semantic_view: GraphSemanticView) -> None:
+        self.semantic_view = semantic_view
 
     def match(self, question: str) -> SemanticViewMatchingTrace:
-        text = _normalize_question(question)
-        if _is_ambiguous_service_network_element_question(text):
+        text = normalize_question(question)
+        entities = self._match_entities(text)
+        filters = self._match_filters(text)
+        paths = self._match_paths(text, entities)
+        if len(paths) > 1:
             return SemanticViewMatchingTrace(
-                source="semantic_layer.yaml",
+                source="network_graph_semantic_view.yaml",
                 result=SemanticMatchResult(
                     accepted=False,
+                    entities=tuple(entities),
+                    paths=tuple(paths),
                     needs_clarification=True,
                     clarification_type="path_ambiguity",
                     clarification_question="你说的“对应网元”是指源网元、目的网元，还是路径经过的网元？",
@@ -126,14 +131,18 @@ class SemanticViewMatcher:
                         {"label": "目的网元", "value": "service.tunnel_destination"},
                         {"label": "路径经过的网元", "value": "service.tunnel_path"},
                     ),
-                    trace=("对应网元 -> 多条合法路径语义候选",),
+                    trace=("网元路径语义未唯一命中 -> 多条合法路径语义候选",),
+                    candidate_trace=tuple(_candidate_trace(entities, filters, paths, [], [])),
                 ),
-                stages={"candidate_generation": {"decision": "clarify", "reason": "ambiguous_service_network_element"}},
+                stages={
+                    "candidate_generation": {"decision": "clarify", "reason": "ambiguous_service_network_element"},
+                    "disambiguation_rules": [
+                        rule.rule_id
+                        for rule in self.semantic_view.disambiguation_rules
+                        if rule.prefer in {path.path_semantic for path in paths}
+                    ],
+                },
             )
-
-        entities = self._match_entities(text)
-        filters = self._match_filters(text)
-        paths = self._match_paths(text, entities)
         returns = self._match_returns(text, entities, paths)
         metrics = self._match_metrics(text, entities)
         order_by = self._match_order_by(text, returns, metrics)
@@ -146,11 +155,11 @@ class SemanticViewMatcher:
             returns=returns,
             metrics=metrics,
             order_by=order_by,
-            semantic_layer=self.semantic_layer,
+            semantic_view=self.semantic_view,
         )
         if not entities:
             return SemanticViewMatchingTrace(
-                source="semantic_layer.yaml",
+                source="network_graph_semantic_view.yaml",
                 result=SemanticMatchResult(
                     accepted=False,
                     rejection_reason="no_semantic_view_candidate",
@@ -174,31 +183,35 @@ class SemanticViewMatcher:
             candidate_trace=tuple(_candidate_trace(entities, filters, paths, returns, metrics)),
         )
         return SemanticViewMatchingTrace(
-            source="semantic_layer.yaml",
+            source="network_graph_semantic_view.yaml",
             result=result,
             stages={
                 "candidate_generation": {"decision": "accept", "candidate_count": len(result.candidate_trace)},
                 "semantic_completion": {"decision": "accept"},
-                "candidate_ranking": {"decision": "accept", "reason": "规则唯一命中或无竞争候选"},
+                "candidate_ranking": {"decision": "accept", "reason": "语义视图规则唯一命中或无竞争候选"},
             },
         )
 
     def _match_entities(self, text: str) -> list[str]:
         matches: list[str] = []
-        for entity in self.semantic_layer.entities.values():
-            terms = [entity.name, entity.label, *entity.synonyms]
+        for entity in self.semantic_view.entities.values():
+            terms = [entity.name, entity.name_zh, entity.label, *entity.synonyms]
             if any(_contains(text, term) for term in terms):
                 matches.append(entity.name)
         return _unique(matches)
 
     def _match_filters(self, text: str) -> list[SemanticMatchedFilter]:
         filters: list[SemanticMatchedFilter] = []
-        for mapping in self.semantic_layer.value_mappings.values():
-            for raw_value, normalized in mapping.values.items():
-                if _contains(text, raw_value):
+        for field in self.semantic_view.fields.values():
+            if not field.value_aliases:
+                continue
+            for normalized, aliases in field.value_aliases.items():
+                for raw_value in (normalized, *aliases):
+                    if not _contains(text, raw_value):
+                        continue
                     filters.append(
                         SemanticMatchedFilter(
-                            field=f"{mapping.owner}.{mapping.property}",
+                            field=field.name,
                             operator="=",
                             value=normalized,
                             evidence=raw_value,
@@ -215,72 +228,29 @@ class SemanticViewMatcher:
                     evidence=f"名称为{name_match.group(1)}",
                 )
             )
-        return filters
+        return _unique_filters(filters)
 
     def _match_paths(self, text: str, entities: list[str]) -> list[SemanticMatchedPath]:
         paths: list[SemanticMatchedPath] = []
-        if _has_relationships(self.semantic_layer, ("service_uses_tunnel", "path_through", "has_port")) and (
-            _contains(text, "经过网元上的端口")
-            or (_contains(text, "经过网元") and _contains(text, "端口"))
-            or (_contains(text, "所经过网元") and _contains(text, "端口"))
-        ):
-            paths.append(
-                SemanticMatchedPath(
-                    path_semantic="service.tunnel_path_ports",
-                    relationships=("service_uses_tunnel", "path_through", "has_port"),
-                    evidence=_first_evidence(text, ("经过网元上的端口", "所经过网元", "端口")),
+        for path in self.semantic_view.path_semantics.values():
+            if any(_contains(text, phrase) for phrase in path.negative_phrases):
+                continue
+            evidence = _first_evidence(text, path.trigger_phrases)
+            if evidence:
+                paths.append(
+                    SemanticMatchedPath(
+                        path_semantic=path.name,
+                        relationships=path.relationships,
+                        evidence=evidence,
+                    )
                 )
-            )
-        elif _has_relationships(self.semantic_layer, ("service_uses_tunnel", "path_through")) and (
-            _contains(text, "经过网元")
-            or _contains(text, "所经过网元")
-            or _contains(text, "路径经过")
-        ):
-            paths.append(
-                SemanticMatchedPath(
-                    path_semantic="service.tunnel_path",
-                    relationships=("service_uses_tunnel", "path_through"),
-                    evidence=_first_evidence(text, ("所经过网元", "经过网元", "路径经过")),
-                )
-            )
-        elif _has_relationships(self.semantic_layer, ("service_uses_tunnel", "tunnel_dst")) and (
-            _contains(text, "目的端网元")
-            or _contains(text, "目的网元")
-            or _contains(text, "目的端")
-        ):
-            paths.append(
-                SemanticMatchedPath(
-                    path_semantic="service.tunnel_destination",
-                    relationships=("service_uses_tunnel", "tunnel_dst"),
-                    evidence=_first_evidence(text, ("目的端网元", "目的网元", "目的端")),
-                )
-            )
-        elif _has_relationships(self.semantic_layer, ("service_uses_tunnel", "tunnel_src")) and (
-            _contains(text, "源端网元")
-            or _contains(text, "源网元")
-            or _contains(text, "源端")
-        ):
-            paths.append(
-                SemanticMatchedPath(
-                    path_semantic="service.tunnel_source",
-                    relationships=("service_uses_tunnel", "tunnel_src"),
-                    evidence=_first_evidence(text, ("源端网元", "源网元", "源端")),
-                )
-            )
-        elif self.semantic_layer.relationships.get("service_uses_tunnel") and (
-            ("service" in entities and "tunnel" in entities)
-            or _contains(text, "使用的隧道")
-            or _contains(text, "服务使用隧道")
-            or _contains(text, "承载")
-        ):
-            paths.append(
-                SemanticMatchedPath(
-                    path_semantic="service.uses_tunnel",
-                    relationships=("service_uses_tunnel",),
-                    evidence=_first_evidence(text, ("使用的隧道", "服务使用隧道", "承载", "使用")),
-                )
-            )
-        return paths
+        if not paths:
+            paths.extend(_infer_paths_from_entities(text, entities, self.semantic_view))
+        paths = _apply_disambiguation_rules(text, paths, self.semantic_view)
+        ranked_paths = _unique_paths(sorted(paths, key=lambda item: (-len(item.relationships), -len(item.evidence), item.path_semantic)))
+        if len(ranked_paths) > 1 and {path.evidence for path in ranked_paths} == {"实体组合命中"}:
+            return ranked_paths
+        return ranked_paths[:1]
 
     def _match_returns(
         self,
@@ -289,23 +259,23 @@ class SemanticViewMatcher:
         paths: list[SemanticMatchedPath],
     ) -> list[SemanticMatchedReturn]:
         returns: list[SemanticMatchedReturn] = []
-        path_target = _path_target_entity(paths, self.semantic_layer)
+        path_target = _path_target_entity(paths, self.semantic_view)
         if _contains(text, "详细信息") or _contains(text, "节点信息"):
             target = path_target or (entities[-1] if entities else None)
             if target is not None:
                 return [SemanticMatchedReturn(field=f"{target}.*", evidence="详细信息")]
 
         ordered_fields = sorted(
-            self.semantic_layer.properties.values(),
+            self.semantic_view.fields.values(),
             key=lambda field: (0 if field.owner in entities else 1, field.owner, field.name),
         )
         for field in ordered_fields:
             if field.property == "id" and not _contains(text, "ID") and not _contains(text, "编号"):
                 continue
-            terms = [field.name, f"{field.owner}.{field.property}", *field.synonyms]
-            owner = self.semantic_layer.entities.get(field.owner)
+            terms = [field.name, f"{field.owner}.{field.property}", field.name_zh, *field.synonyms]
+            owner = self.semantic_view.entities.get(field.owner)
             if owner is not None:
-                for entity_term in (owner.name, owner.label, *owner.synonyms):
+                for entity_term in (owner.name, owner.name_zh, owner.label, *owner.synonyms):
                     if field.property == "id":
                         terms.append(f"{entity_term}编号")
                     if field.property == "name":
@@ -319,46 +289,18 @@ class SemanticViewMatcher:
                     path_target is None or has_generic_owner_context
                 )
                 if can_use_generic_field:
-                    if field.property == "name" and _contains(text, "名称"):
-                        returns.append(
-                            SemanticMatchedReturn(
-                                field=f"{field.owner}.{field.property}",
-                                evidence=_generic_field_evidence(text, owner, field.property, "名称"),
-                            )
-                        )
-                        continue
-                    if field.property == "id" and _contains(text, "编号"):
-                        returns.append(
-                            SemanticMatchedReturn(
-                                field=f"{field.owner}.{field.property}",
-                                evidence=_generic_field_evidence(text, owner, field.property, "编号"),
-                            )
-                        )
-                        continue
-                    if field.property == "bandwidth" and _contains(text, "带宽"):
-                        returns.append(
-                            SemanticMatchedReturn(
-                                field=f"{field.owner}.{field.property}",
-                                evidence=_generic_field_evidence(text, owner, field.property, "带宽"),
-                            )
-                        )
-                        continue
-                    if field.property == "latency" and _contains(text, "时延"):
-                        returns.append(
-                            SemanticMatchedReturn(
-                                field=f"{field.owner}.{field.property}",
-                                evidence=_generic_field_evidence(text, owner, field.property, "时延"),
-                            )
-                        )
+                    generic_evidence = _generic_return_evidence(text, owner, field.property)
+                    if generic_evidence is not None:
+                        returns.append(SemanticMatchedReturn(field=field.name, evidence=generic_evidence))
                         continue
                 if field.property == "elem_type" and field.owner in entities and _contains(text, "类型"):
-                    returns.append(SemanticMatchedReturn(field=f"{field.owner}.{field.property}", evidence="类型"))
+                    returns.append(SemanticMatchedReturn(field=field.name, evidence="类型"))
                     continue
             if any(_contains(text, term) for term in terms):
-                returns.append(SemanticMatchedReturn(field=f"{field.owner}.{field.property}", evidence=_field_evidence(text, terms)))
+                returns.append(SemanticMatchedReturn(field=field.name, evidence=_field_evidence(text, terms)))
 
         if not returns and _contains(text, "所有"):
-            target = _path_target_entity(paths, self.semantic_layer) or (entities[-1] if entities else None)
+            target = _path_target_entity(paths, self.semantic_view) or (entities[-1] if entities else None)
             if target is not None:
                 returns.extend(
                     [
@@ -367,20 +309,23 @@ class SemanticViewMatcher:
                     ]
                 )
         if not returns and paths:
-            last_relationship = self.semantic_layer.relationships[paths[0].relationships[-1]]
-            returns.append(SemanticMatchedReturn(field=f"{last_relationship.to_entity}.name", evidence="默认返回路径终点名称"))
-        return _prune_return_owners(_sort_returns_by_evidence(text, _unique_returns(returns)), entities, paths, self.semantic_layer)
+            returns.extend(
+                SemanticMatchedReturn(field=field, evidence="return_policies.default_return_fields")
+                for field in self.semantic_view.path_semantics[paths[0].path_semantic].default_return_fields
+                if field.split(".", 1)[0] == self.semantic_view.path_semantics[paths[0].path_semantic].target_entity
+            )
+        return _prune_return_owners(_sort_returns_by_evidence(text, _unique_returns(returns)), entities, paths, self.semantic_view)
 
     def _match_metrics(self, text: str, entities: list[str]) -> list[SemanticMatchedMetric]:
         metrics: list[SemanticMatchedMetric] = []
-        for metric in self.semantic_layer.metrics.values():
-            terms = [metric.name, *metric.synonyms]
+        for metric in self.semantic_view.metrics.values():
+            terms = [metric.name, metric.name_zh, *metric.synonyms]
             if any(_contains(text, term) for term in terms):
                 metrics.append(SemanticMatchedMetric(metric_id=metric.name, evidence=_field_evidence(text, terms)))
         if not metrics and (_contains(text, "数量") or _contains(text, "多少") or _contains(text, "统计")):
-            owner = _metric_owner(text, entities)
-            metric_name = f"{owner}_count"
-            metrics.append(SemanticMatchedMetric(metric_id=metric_name, evidence="数量"))
+            metric_name = f"{_metric_owner(text, entities)}_count"
+            if metric_name in self.semantic_view.metrics:
+                metrics.append(SemanticMatchedMetric(metric_id=metric_name, evidence="数量"))
         return _unique_metrics(metrics)
 
     def _match_order_by(
@@ -406,14 +351,10 @@ class SemanticViewMatcher:
         return []
 
 
-def _has_relationships(semantic_layer: SemanticLayer, relationship_names: tuple[str, ...]) -> bool:
-    return all(name in semantic_layer.relationships for name in relationship_names)
-
-
-def _path_target_entity(paths: list[SemanticMatchedPath], semantic_layer: SemanticLayer) -> str | None:
+def _path_target_entity(paths: list[SemanticMatchedPath], semantic_view: GraphSemanticView) -> str | None:
     if not paths:
         return None
-    relationship = semantic_layer.relationships.get(paths[0].relationships[-1])
+    relationship = semantic_view.relationships.get(paths[0].relationships[-1])
     return relationship.to_entity if relationship is not None else None
 
 
@@ -442,7 +383,7 @@ def _metric_owner(text: str, entities: list[str]) -> str:
     return entities[-1] if entities else "service"
 
 
-def _has_field_owner_context(text: str, owner: object, property_name: str) -> bool:
+def _has_field_owner_context(text: str, owner: SemanticEntity, property_name: str) -> bool:
     word = {
         "id": "编号",
         "name": "名称",
@@ -452,10 +393,7 @@ def _has_field_owner_context(text: str, owner: object, property_name: str) -> bo
     }.get(property_name)
     if not word:
         return False
-    owner_name = getattr(owner, "name", "")
-    owner_label = getattr(owner, "label", "")
-    owner_synonyms = getattr(owner, "synonyms", ())
-    for term in (owner_name, owner_label, *owner_synonyms):
+    for term in (owner.name, owner.name_zh, owner.label, *owner.synonyms):
         if _contains(text, f"{term}{word}") or _contains(text, f"{term}的{word}"):
             return True
         if property_name == "latency" and _contains(text, f"{term}的名称、时延"):
@@ -463,33 +401,32 @@ def _has_field_owner_context(text: str, owner: object, property_name: str) -> bo
     return False
 
 
-def _generic_field_evidence(text: str, owner: object, property_name: str, fallback: str) -> str:
+def _generic_return_evidence(text: str, owner: SemanticEntity, property_name: str) -> str | None:
     word = {
         "id": "编号",
         "name": "名称",
         "bandwidth": "带宽",
         "latency": "时延",
         "elem_type": "类型",
-    }.get(property_name, fallback)
-    owner_name = getattr(owner, "name", "")
-    owner_label = getattr(owner, "label", "")
-    owner_synonyms = getattr(owner, "synonyms", ())
-    for term in (owner_name, owner_label, *owner_synonyms):
+    }.get(property_name)
+    if word is None or not _contains(text, word):
+        return None
+    for term in (owner.name, owner.name_zh, owner.label, *owner.synonyms):
         for candidate in (f"{term}{word}", f"{term}的{word}"):
             if _contains(text, candidate):
                 return candidate
-    return fallback
+    return word
 
 
 def _prune_return_owners(
     returns: list[SemanticMatchedReturn],
     entities: list[str],
     paths: list[SemanticMatchedPath],
-    semantic_layer: SemanticLayer,
+    semantic_view: GraphSemanticView,
 ) -> list[SemanticMatchedReturn]:
     if not returns:
         return []
-    path_target = _path_target_entity(paths, semantic_layer)
+    path_target = _path_target_entity(paths, semantic_view)
     allowed = set(entities)
     if path_target is not None:
         allowed.add(path_target)
@@ -509,18 +446,10 @@ def _sort_returns_by_evidence(text: str, returns: list[SemanticMatchedReturn]) -
     return sorted(returns, key=key)
 
 
-def _normalize_question(question: str) -> str:
-    return question.replace(" ", "").replace("\u3000", "")
-
-
 def _contains(text: str, term: str | None) -> bool:
     if not term:
         return False
     return str(term).replace(" ", "") in text
-
-
-def _is_ambiguous_service_network_element_question(text: str) -> bool:
-    return _contains(text, "服务") and (_contains(text, "对应的网元") or _contains(text, "对应网元"))
 
 
 def _complete_entities(
@@ -531,12 +460,12 @@ def _complete_entities(
     returns: list[SemanticMatchedReturn],
     metrics: list[SemanticMatchedMetric],
     order_by: list[dict[str, str]],
-    semantic_layer: SemanticLayer,
+    semantic_view: GraphSemanticView,
 ) -> list[str]:
     completed = [] if paths else list(entities)
     for path in paths:
         for relationship_name in path.relationships:
-            relationship = semantic_layer.relationships.get(relationship_name)
+            relationship = semantic_view.relationships.get(relationship_name)
             if relationship is not None:
                 completed.extend([relationship.from_entity, relationship.to_entity])
     for item in filters:
@@ -544,15 +473,15 @@ def _complete_entities(
     for item in returns:
         completed.append(item.field.split(".", 1)[0])
     for item in metrics:
-        metric = semantic_layer.metrics.get(item.metric_id)
+        metric = semantic_view.metrics.get(item.metric_id)
         if metric is not None:
-            completed.append(metric.owner)
+            completed.append(metric.target_entity)
     for item in order_by:
         field = item.get("field", "")
         if "." in field:
             completed.append(field.split(".", 1)[0])
-        elif field in semantic_layer.metrics:
-            completed.append(semantic_layer.metrics[field].owner)
+        elif field in semantic_view.metrics:
+            completed.append(semantic_view.metrics[field].target_entity)
     completed.extend(entities)
     return _unique(completed)
 
@@ -601,11 +530,11 @@ def _field_evidence(text: str, terms: list[str]) -> str:
     return terms[0] if terms else ""
 
 
-def _first_evidence(text: str, terms: tuple[str, ...]) -> str:
+def _first_evidence(text: str, terms: tuple[str, ...]) -> str | None:
     for term in terms:
         if _contains(text, term):
             return term
-    return terms[-1]
+    return None
 
 
 def _match_limit(text: str) -> int | None:
@@ -637,6 +566,17 @@ def _unique_returns(values: list[SemanticMatchedReturn]) -> list[SemanticMatched
     return result
 
 
+def _unique_filters(values: list[SemanticMatchedFilter]) -> list[SemanticMatchedFilter]:
+    result: list[SemanticMatchedFilter] = []
+    seen: set[tuple[str, str, str]] = set()
+    for value in values:
+        key = (value.field, value.operator, str(value.value))
+        if key not in seen:
+            seen.add(key)
+            result.append(value)
+    return result
+
+
 def _unique_metrics(values: list[SemanticMatchedMetric]) -> list[SemanticMatchedMetric]:
     result: list[SemanticMatchedMetric] = []
     seen: set[str] = set()
@@ -645,3 +585,68 @@ def _unique_metrics(values: list[SemanticMatchedMetric]) -> list[SemanticMatched
             seen.add(value.metric_id)
             result.append(value)
     return result
+
+
+def _unique_paths(values: list[SemanticMatchedPath]) -> list[SemanticMatchedPath]:
+    result: list[SemanticMatchedPath] = []
+    seen: set[str] = set()
+    for value in values:
+        if value.path_semantic not in seen:
+            seen.add(value.path_semantic)
+            result.append(value)
+    return result
+
+
+def _infer_paths_from_entities(
+    text: str,
+    entities: list[str],
+    semantic_view: GraphSemanticView,
+) -> list[SemanticMatchedPath]:
+    inferred: list[SemanticMatchedPath] = []
+    entity_set = set(entities)
+    for path in semantic_view.path_semantics.values():
+        if path.source_entity in entity_set and path.target_entity in entity_set:
+            inferred.append(
+                SemanticMatchedPath(
+                    path_semantic=path.name,
+                    relationships=path.relationships,
+                    evidence="实体组合命中",
+                )
+            )
+    if not inferred and "service" in entity_set and _contains(text, "隧道"):
+        path = semantic_view.path_semantics.get("service.uses_tunnel")
+        if path is not None:
+            inferred.append(
+                SemanticMatchedPath(
+                    path_semantic=path.name,
+                    relationships=path.relationships,
+                    evidence=path.trigger_phrases[0],
+                )
+            )
+    return inferred
+
+
+def _apply_disambiguation_rules(
+    text: str,
+    paths: list[SemanticMatchedPath],
+    semantic_view: GraphSemanticView,
+) -> list[SemanticMatchedPath]:
+    if not paths:
+        return []
+    by_name = {path.path_semantic: path for path in paths}
+    for rule in semantic_view.disambiguation_rules:
+        if not any(_contains(text, pattern) for pattern in rule.positive_patterns):
+            continue
+        preferred = by_name.get(rule.prefer)
+        if preferred is not None:
+            return [preferred]
+        preferred_path = semantic_view.path_semantics.get(rule.prefer)
+        if preferred_path is not None and not any(_contains(text, phrase) for phrase in preferred_path.negative_phrases):
+            return [
+                SemanticMatchedPath(
+                    path_semantic=preferred_path.name,
+                    relationships=preferred_path.relationships,
+                    evidence=_first_evidence(text, rule.positive_patterns) or rule.positive_patterns[0],
+                )
+            ]
+    return paths

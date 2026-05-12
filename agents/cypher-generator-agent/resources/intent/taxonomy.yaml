@@ -3,7 +3,7 @@ domain: nl2cypher_chatbi
 name_zh: NL2Cypher ChatBI 意图分类
 description: >
   NL2Cypher ChatBI 场景下的意图分类体系。intent 描述用户最终想得到的答案形态；
-  业务对象、属性、指标、关系和值由 slot、schema linking 和 metric linking 承接；
+  业务对象、属性、指标、关系和值由语义视图匹配与逻辑规划层承接；
   路径、跳数、过滤、聚合函数、排序、limit、时间粒度等由结构特征承接。
 
 output_schema:

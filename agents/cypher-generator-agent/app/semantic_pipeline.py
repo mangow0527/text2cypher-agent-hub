@@ -7,14 +7,6 @@ from functools import lru_cache
 from typing import Any
 
 from .clients import CypherLLMClient, OpenAIChatCompletionCypherGenerator
-from .business_slot_schema import (
-    BusinessSlotSchemaConfigError,
-    BusinessSlotCompletenessResult,
-    BusinessSlotFiller,
-    BusinessSlotFrame,
-    BusinessSlotSchemaRegistry,
-    get_default_business_slot_schema_registry,
-)
 from .cypher_renderer import CypherRenderer
 from .intent_recognition import IntentRecognitionResult, get_hybrid_intent_recognizer
 from .knowledge_selection import KnowledgeSelector, SelectedKnowledgeContext
@@ -23,13 +15,10 @@ from .models import GenerationFailureReason, PreflightCheck
 from .config import get_settings
 from .parser import parse_model_output
 from .prompt_runtime import render_controlled_semantic_prompt, render_intent_recognition_fallback_prompt
-from .schema_linking import LinkedSemantics, SchemaLinker
 from .semantic_cypher_preflight import run_semantic_cypher_preflight
-from .semantic_layer import get_default_semantic_layer
-from .semantic_query import SemanticQueryBuilder, SemanticQuerySpec
-from .semantic_validation import SemanticDiagnostic, SemanticValidationResult, SemanticValidator
+from .graph_semantic_view import get_default_graph_semantic_view
+from .semantic_query import SemanticQuerySpec
 from .semantic_view_matching import SemanticMatchResult, SemanticViewMatcher, SemanticViewMatchingTrace
-from .slot_matching import SlotMatcher
 
 
 def _empty_llm_prompts() -> dict[str, str | None]:
@@ -47,16 +36,33 @@ def _empty_llm_responses() -> dict[str, str | None]:
 
 
 @dataclass(frozen=True)
+class SemanticDiagnostic:
+    code: str
+    message: str
+
+    def to_dict(self) -> dict[str, str]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class SemanticValidationResult:
+    accepted: bool
+    diagnostics: list[SemanticDiagnostic] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "accepted": self.accepted,
+            "diagnostics": [diagnostic.to_dict() for diagnostic in self.diagnostics],
+        }
+
+
+@dataclass(frozen=True)
 class SemanticParseResult:
     id: str | None
     question: str
     generation_run_id: str | None
     generation_mode: str | None
     intent: IntentRecognitionResult
-    slots: object
-    business_slots: BusinessSlotFrame | None
-    slot_completeness: BusinessSlotCompletenessResult
-    linked_semantics: LinkedSemantics | None
     validation: SemanticValidationResult
     semantic_query: SemanticQuerySpec | None
     generated_cypher: str | None
@@ -107,29 +113,17 @@ class SemanticPipeline:
     def __init__(
         self,
         *,
-        semantic_layer: object | None = None,
-        slot_matcher: SlotMatcher | None = None,
-        linker: SchemaLinker | None = None,
-        business_slot_schema_registry: BusinessSlotSchemaRegistry | None = None,
-        business_slot_filler: BusinessSlotFiller | None = None,
-        validator: SemanticValidator | None = None,
-        semantic_query_builder: SemanticQueryBuilder | None = None,
+        semantic_view: object | None = None,
         renderer: CypherRenderer | None = None,
         llm_client: Any | None = None,
         knowledge_selector: KnowledgeSelector | None = None,
     ) -> None:
-        self.semantic_layer = semantic_layer or get_default_semantic_layer()
-        self.slot_matcher = slot_matcher or SlotMatcher.from_default_config()
-        self.linker = linker or SchemaLinker(self.semantic_layer)
-        self.business_slot_schema_registry = business_slot_schema_registry or get_default_business_slot_schema_registry()
-        self.business_slot_filler = business_slot_filler or BusinessSlotFiller()
-        self.validator = validator or SemanticValidator(self.semantic_layer)
-        self.semantic_query_builder = semantic_query_builder or SemanticQueryBuilder()
+        self.semantic_view = semantic_view or get_default_graph_semantic_view()
         self.renderer = renderer or CypherRenderer()
         self.llm_client = llm_client
         self.knowledge_selector = knowledge_selector
-        self.semantic_view_matcher = SemanticViewMatcher(self.semantic_layer)
-        self.logical_planner = LogicalQueryPlanner(self.semantic_layer)
+        self.semantic_view_matcher = SemanticViewMatcher(self.semantic_view)
+        self.logical_planner = LogicalQueryPlanner(self.semantic_view)
 
     def parse(
         self,
@@ -199,7 +193,6 @@ class SemanticPipeline:
         intent_result: IntentRecognitionResult | None,
     ) -> "SemanticParseResult | _SemanticPipelineContext":
         intent = intent_result or get_hybrid_intent_recognizer().recognize(question)
-        empty_slots = self.slot_matcher.empty_result() if hasattr(self.slot_matcher, "empty_result") else None
         if intent.decision != "accept" or intent.primary_intent is None or intent.secondary_intent is None:
             return SemanticParseResult(
                 id=id,
@@ -207,10 +200,6 @@ class SemanticPipeline:
                 generation_run_id=generation_run_id,
                 generation_mode=None,
                 intent=intent,
-                slots=empty_slots,
-                business_slots=None,
-                slot_completeness=BusinessSlotCompletenessResult.not_applicable(),
-                linked_semantics=None,
                 validation=SemanticValidationResult(
                     accepted=False,
                     diagnostics=[
@@ -228,123 +217,11 @@ class SemanticPipeline:
                 preflight=None,
             )
 
-        view_result = self._try_semantic_view_pipeline(
+        return self._try_semantic_view_pipeline(
             id=id,
             question=question,
             generation_run_id=generation_run_id,
             intent=intent,
-            empty_slots=empty_slots,
-        )
-        if view_result is not None:
-            return view_result
-
-        slots = self.slot_matcher.match(question)
-        try:
-            business_slot_schema = self.business_slot_schema_registry.select(intent)
-        except BusinessSlotSchemaConfigError as exc:
-            return SemanticParseResult(
-                id=id,
-                question=question,
-                generation_run_id=generation_run_id,
-                generation_mode=None,
-                intent=intent,
-                slots=slots,
-                business_slots=None,
-                slot_completeness=BusinessSlotCompletenessResult.not_applicable(),
-                linked_semantics=None,
-                validation=SemanticValidationResult(
-                    accepted=False,
-                    diagnostics=[
-                        SemanticDiagnostic(
-                            code="unsupported_business_slot_schema",
-                            message=str(exc),
-                        )
-                    ],
-                ),
-                semantic_query=None,
-                semantic_view_matching=None,
-                logical_plan=None,
-                schema_path_planning=None,
-                generated_cypher=None,
-                preflight=None,
-            )
-        business_slots = self.business_slot_filler.fill(
-            schema=business_slot_schema,
-            intent=intent,
-            low_level_slots=slots,
-        )
-        slot_completeness = self.business_slot_schema_registry.validate(
-            schema=business_slot_schema,
-            frame=business_slots,
-        )
-        if not slot_completeness.accepted:
-            return SemanticParseResult(
-                id=id,
-                question=question,
-                generation_run_id=generation_run_id,
-                generation_mode=None,
-                intent=intent,
-                slots=slots,
-                business_slots=business_slots,
-                slot_completeness=slot_completeness,
-                linked_semantics=None,
-                validation=SemanticValidationResult(
-                    accepted=False,
-                    diagnostics=[
-                        SemanticDiagnostic(
-                            code="missing_required_business_slot",
-                            message="Required business slots are missing for this intent before semantic linking.",
-                        )
-                    ],
-                ),
-                semantic_query=None,
-                semantic_view_matching=None,
-                logical_plan=None,
-                schema_path_planning=None,
-                generated_cypher=None,
-                preflight=None,
-            )
-        linked = self.linker.link(slots)
-        validation = self.validator.validate(linked)
-        if not validation.accepted:
-            return SemanticParseResult(
-                id=id,
-                question=question,
-                generation_run_id=generation_run_id,
-                generation_mode=None,
-                intent=intent,
-                slots=slots,
-                business_slots=business_slots,
-                slot_completeness=slot_completeness,
-                linked_semantics=linked,
-                validation=validation,
-                semantic_query=None,
-                semantic_view_matching=None,
-                logical_plan=None,
-                schema_path_planning=None,
-                generated_cypher=None,
-                preflight=None,
-            )
-
-        semantic_query = self.semantic_query_builder.build(
-            intent_result=intent,
-            linked_semantics=linked,
-            business_slots=business_slots,
-        )
-        return _SemanticPipelineContext(
-            id=id,
-            question=question,
-            generation_run_id=generation_run_id,
-            intent=intent,
-            slots=slots,
-            business_slots=business_slots,
-            slot_completeness=slot_completeness,
-            linked_semantics=linked,
-            validation=validation,
-            semantic_query=semantic_query,
-            semantic_view_matching=None,
-            logical_plan=None,
-            schema_path_planning=None,
         )
 
     def _try_semantic_view_pipeline(
@@ -354,8 +231,7 @@ class SemanticPipeline:
         question: str,
         generation_run_id: str | None,
         intent: IntentRecognitionResult,
-        empty_slots: object,
-    ) -> "SemanticParseResult | _SemanticPipelineContext | None":
+    ) -> "SemanticParseResult | _SemanticPipelineContext":
         if intent.primary_intent not in {
             "record_retrieval_query",
             "metric_query",
@@ -363,7 +239,28 @@ class SemanticPipeline:
             "ranking_query",
             "existence_query",
         }:
-            return None
+            return SemanticParseResult(
+                id=id,
+                question=question,
+                generation_run_id=generation_run_id,
+                generation_mode=None,
+                intent=intent,
+                validation=SemanticValidationResult(
+                    accepted=False,
+                    diagnostics=[
+                        SemanticDiagnostic(
+                            code="unsupported_semantic_view_intent",
+                            message="Intent is accepted but has no semantic-view planner support.",
+                        )
+                    ],
+                ),
+                semantic_query=None,
+                semantic_view_matching=None,
+                logical_plan=None,
+                schema_path_planning=None,
+                generated_cypher=None,
+                preflight=None,
+            )
         matching = self.semantic_view_matcher.match(question)
         if matching.result.needs_clarification:
             clarification = _clarification_payload(matching.result)
@@ -373,10 +270,6 @@ class SemanticPipeline:
                 generation_run_id=generation_run_id,
                 generation_mode=None,
                 intent=intent,
-                slots=empty_slots,
-                business_slots=None,
-                slot_completeness=BusinessSlotCompletenessResult.not_applicable(),
-                linked_semantics=None,
                 validation=SemanticValidationResult(
                     accepted=False,
                     diagnostics=[
@@ -395,7 +288,28 @@ class SemanticPipeline:
                 clarification=clarification,
             )
         if not matching.result.accepted:
-            return None
+            return SemanticParseResult(
+                id=id,
+                question=question,
+                generation_run_id=generation_run_id,
+                generation_mode=None,
+                intent=intent,
+                validation=SemanticValidationResult(
+                    accepted=False,
+                    diagnostics=[
+                        SemanticDiagnostic(
+                            code="semantic_match_rejected",
+                            message=matching.result.rejection_reason or "Semantic view matching did not produce an accepted candidate.",
+                        )
+                    ],
+                ),
+                semantic_query=None,
+                semantic_view_matching=matching,
+                logical_plan=None,
+                schema_path_planning=None,
+                generated_cypher=None,
+                preflight=None,
+            )
         planning = self.logical_planner.plan(
             question=question,
             intent_result=intent,
@@ -407,10 +321,6 @@ class SemanticPipeline:
             question=question,
             generation_run_id=generation_run_id,
             intent=intent,
-            slots=empty_slots,
-            business_slots=None,
-            slot_completeness=BusinessSlotCompletenessResult.not_applicable(),
-            linked_semantics=None,
             validation=SemanticValidationResult(accepted=True),
             semantic_query=planning.semantic_query,
             semantic_view_matching=matching,
@@ -561,10 +471,6 @@ class _SemanticPipelineContext:
     question: str
     generation_run_id: str | None
     intent: IntentRecognitionResult
-    slots: object
-    business_slots: BusinessSlotFrame | None
-    slot_completeness: BusinessSlotCompletenessResult
-    linked_semantics: LinkedSemantics | None
     validation: SemanticValidationResult
     semantic_query: SemanticQuerySpec
     semantic_view_matching: SemanticViewMatchingTrace | None = None
@@ -607,10 +513,6 @@ class _SemanticPipelineContext:
             generation_run_id=self.generation_run_id,
             generation_mode=generation_mode,
             intent=self.intent,
-            slots=self.slots,
-            business_slots=self.business_slots,
-            slot_completeness=self.slot_completeness,
-            linked_semantics=self.linked_semantics,
             validation=self.validation,
             semantic_query=self.semantic_query,
             semantic_view_matching=self.semantic_view_matching,
@@ -733,7 +635,7 @@ def _intent_trace(
             "llm_primary_attempts": [],
             "llm_secondary_attempts": [
                 {
-                    "stage": "legacy_single_step_fallback",
+                    "stage": "intent_recognition_fallback",
                     "prompt": fallback_prompt,
                     "raw_output": fallback_response,
                 }
@@ -756,10 +658,10 @@ def _service_context_trace(uses_semantic_view: bool) -> dict[str, object]:
     settings = get_settings()
     rag_endpoint = f"{settings.rag_service_url.rstrip('/')}/api/v1/retrieve"
     return {
-        "active_mode": "semantic_view_pipeline" if uses_semantic_view else "semantic_pipeline_compat",
+        "active_mode": "semantic_view_pipeline",
         "model": settings.llm_model,
         "knowledge_context_source": settings.knowledge_context_source,
-        "semantic_view_version": "semantic_layer.yaml",
+        "semantic_view_version": "network_graph_semantic_view.yaml",
         "rag_source": rag_endpoint if settings.knowledge_context_source == "rag" else settings.knowledge_docs_dir,
     }
 

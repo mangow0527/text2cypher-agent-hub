@@ -74,7 +74,7 @@ def test_semantic_cypher_preflight_rejects_missing_filter_from_semantic_query() 
     result = run_semantic_cypher_preflight(cypher, semantic_query=spec)
 
     assert result.accepted is False
-    assert result.reason == "semantic_query_mismatch"
+    assert result.reason == "logical_plan_mismatch"
 
 
 def test_semantic_cypher_preflight_rejects_missing_projection_from_semantic_query() -> None:
@@ -88,7 +88,7 @@ def test_semantic_cypher_preflight_rejects_missing_projection_from_semantic_quer
     result = run_semantic_cypher_preflight(cypher, semantic_query=spec)
 
     assert result.accepted is False
-    assert result.reason == "semantic_query_mismatch"
+    assert result.reason == "logical_plan_mismatch"
 
 
 def test_semantic_cypher_preflight_rejects_missing_order_and_limit_from_semantic_query() -> None:
@@ -98,7 +98,7 @@ def test_semantic_cypher_preflight_rejects_missing_order_and_limit_from_semantic
     result = run_semantic_cypher_preflight(cypher, semantic_query=spec)
 
     assert result.accepted is False
-    assert result.reason == "semantic_query_mismatch"
+    assert result.reason == "logical_plan_mismatch"
 
 
 def _service_tunnel_spec() -> SemanticQuerySpec:

@@ -138,6 +138,7 @@ function renderCgaLlmPrompts(prompts = {}) {
   const traceV2Order = [
     ['intent_primary_classification', '意图识别：一级分类 LLM 判定', '意图识别：一级分类 LLM 原始返回'],
     ['intent_secondary_classification', '意图识别：二级分类 LLM 判定', '意图识别：二级分类 LLM 原始返回'],
+    ['intent_recognition_fallback', '意图识别 LLM 兜底提示词', '意图识别 LLM 原始返回'],
     ['semantic_view_disambiguation', '语义视图匹配：受控 LLM 消歧', '语义视图匹配：受控 LLM 消歧原始返回'],
     ['cypher_generation_fallback', 'Renderer 失败后的 Cypher 兜底生成', 'Cypher 兜底生成 LLM 原始返回'],
   ];
