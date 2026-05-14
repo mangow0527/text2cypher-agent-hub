@@ -10,7 +10,7 @@
 #   - services/testing_agent/docs/reference/network_schema_v10_profile.md
 #   - 当前远端 testing-agent 同步配置中的 TuGraph:
 #       graph: network_schema_v10
-#       probed_at: 2026-05-13
+#       probed_at: 2026-05-14
 #
 # 在线探测摘要:
 #   - NetworkElement: 40
@@ -37,6 +37,11 @@ model_paradigm: graph_native
 draft_only: true
 source_schema: services/testing_agent/docs/reference/schema.json
 
+# 格式约定:
+#   - 语义对象(concepts/traversals/patterns/capabilities)使用 block map,便于读注释和扩展字段。
+#   - properties/metrics 中的简单条目保留单行 map,把它们当作字段表/指标表阅读。
+#   - 只有确实需要多字段解释的属性和指标展开成 block map。
+
 # ==============================================================================
 # 数据画像(Data Profile)
 # ------------------------------------------------------------------------------
@@ -52,7 +57,7 @@ source_schema: services/testing_agent/docs/reference/schema.json
 # ==============================================================================
 data_profile:
   graph: network_schema_v10
-  probed_at: "2026-05-13"
+  probed_at: "2026-05-14"
   node_counts:
     network_element: 40
     tunnel: 20
@@ -345,7 +350,9 @@ concepts:
   # ---------------------------------------------------------------------------
   service:
     name_zh: 服务
-    backed_by: {type: direct, node_type: service}
+    backed_by:
+      type: direct
+      node_type: service
     primary_key: id
     display_fields: [id, name]
     default_order_by: name
@@ -353,7 +360,9 @@ concepts:
 
   tunnel:
     name_zh: 隧道
-    backed_by: {type: direct, node_type: tunnel}
+    backed_by:
+      type: direct
+      node_type: tunnel
     primary_key: id
     display_fields: [id, name]
     default_order_by: name
@@ -361,7 +370,9 @@ concepts:
 
   network_element:
     name_zh: 网元
-    backed_by: {type: direct, node_type: network_element}
+    backed_by:
+      type: direct
+      node_type: network_element
     primary_key: id
     display_fields: [id, name]
     default_order_by: name
@@ -369,7 +380,9 @@ concepts:
 
   port:
     name_zh: 端口
-    backed_by: {type: direct, node_type: port}
+    backed_by:
+      type: direct
+      node_type: port
     primary_key: id
     display_fields: [id, name]
     default_order_by: name
@@ -377,7 +390,9 @@ concepts:
 
   link:
     name_zh: 链路
-    backed_by: {type: direct, node_type: link}
+    backed_by:
+      type: direct
+      node_type: link
     primary_key: id
     display_fields: [id, name]
     default_order_by: name
@@ -385,7 +400,9 @@ concepts:
 
   fiber:
     name_zh: 光纤
-    backed_by: {type: direct, node_type: fiber}
+    backed_by:
+      type: direct
+      node_type: fiber
     primary_key: id
     display_fields: [id, name]
     default_order_by: name
@@ -393,7 +410,9 @@ concepts:
 
   protocol:
     name_zh: 协议
-    backed_by: {type: direct, node_type: protocol}
+    backed_by:
+      type: direct
+      node_type: protocol
     primary_key: id
     display_fields: [id, name]
     availability: schema_only
@@ -407,7 +426,10 @@ concepts:
     backed_by:
       type: filtered_node
       base_concept: service
-      where: {property: service.quality_of_service, operator: "=", value: Gold}
+      where:
+        property: service.quality_of_service
+        operator: "="
+        value: Gold
     synonyms: [金牌服务, 金牌业务, Gold 服务, 高等级服务, 高优服务]
 
   silver_service:
@@ -415,7 +437,10 @@ concepts:
     backed_by:
       type: filtered_node
       base_concept: service
-      where: {property: service.quality_of_service, operator: "=", value: Silver}
+      where:
+        property: service.quality_of_service
+        operator: "="
+        value: Silver
     synonyms: [银牌服务, 银牌业务, Silver 服务]
 
   bronze_service:
@@ -423,7 +448,10 @@ concepts:
     backed_by:
       type: filtered_node
       base_concept: service
-    where: {property: service.quality_of_service, operator: "=", value: Bronze}
+      where:
+        property: service.quality_of_service
+        operator: "="
+        value: Bronze
     synonyms: [铜牌服务, 铜牌业务, Bronze 服务]
 
   # ---------------------------------------------------------------------------
@@ -589,7 +617,9 @@ traversals:
     type: direct
     name_zh: 服务使用隧道
     from_concept: service
-    via: {edge: SERVICE_USES_TUNNEL, direction: out}
+    via:
+      edge: SERVICE_USES_TUNNEL
+      direction: out
     to_concept: tunnel
     trigger_phrases: [使用的隧道, 服务使用隧道, 服务与隧道, 承载隧道, 依赖隧道]
     default_return_fields: [service.name, tunnel.name]
@@ -599,7 +629,9 @@ traversals:
     type: direct
     name_zh: 网元拥有端口
     from_concept: network_element
-    via: {edge: HAS_PORT, direction: out}
+    via:
+      edge: HAS_PORT
+      direction: out
     to_concept: port
     trigger_phrases: [拥有的端口, 包含的端口, 网元端口, 连接的端口]
     default_return_fields: [network_element.name, port.name, port.status]
@@ -609,7 +641,9 @@ traversals:
     type: direct
     name_zh: 隧道源网元
     from_concept: tunnel
-    via: {edge: TUNNEL_SRC, direction: out}
+    via:
+      edge: TUNNEL_SRC
+      direction: out
     to_concept: network_element
     trigger_phrases: [隧道源网元, 隧道源端, 源端网元]
     negative_phrases: [目的网元, 经过网元]
@@ -620,7 +654,9 @@ traversals:
     type: direct
     name_zh: 隧道目的网元
     from_concept: tunnel
-    via: {edge: TUNNEL_DST, direction: out}
+    via:
+      edge: TUNNEL_DST
+      direction: out
     to_concept: network_element
     trigger_phrases: [隧道目的网元, 隧道目的端, 目的端网元, 隧道终点]
     negative_phrases: [源网元, 经过网元]
@@ -652,8 +688,11 @@ traversals:
     name_zh: 服务隧道源网元
     from_concept: service
     steps:
-      - {edge: SERVICE_USES_TUNNEL, direction: out, intermediate_concept: tunnel}
-      - {edge: TUNNEL_SRC, direction: out}
+      - edge: SERVICE_USES_TUNNEL
+        direction: out
+        intermediate_concept: tunnel
+      - edge: TUNNEL_SRC
+        direction: out
     to_concept: network_element
     ordered: false
     trigger_phrases: [源网元, 源端网元, 源网元IP, 源端网元IP地址]
@@ -666,8 +705,11 @@ traversals:
     name_zh: 服务隧道目的网元
     from_concept: service
     steps:
-      - {edge: SERVICE_USES_TUNNEL, direction: out, intermediate_concept: tunnel}
-      - {edge: TUNNEL_DST, direction: out}
+      - edge: SERVICE_USES_TUNNEL
+        direction: out
+        intermediate_concept: tunnel
+      - edge: TUNNEL_DST
+        direction: out
     to_concept: network_element
     ordered: false
     trigger_phrases: [目的网元, 目的端网元, 到达的目的网元, 隧道终点, 终点网元]
@@ -681,8 +723,12 @@ traversals:
     description: 服务使用的隧道路径经过的所有网元,按 PATH_THROUGH.hop_order 排序。
     from_concept: service
     steps:
-      - {edge: SERVICE_USES_TUNNEL, direction: out, intermediate_concept: tunnel}
-      - {edge: PATH_THROUGH, direction: out, order_by: PATH_THROUGH.hop_order}
+      - edge: SERVICE_USES_TUNNEL
+        direction: out
+        intermediate_concept: tunnel
+      - edge: PATH_THROUGH
+        direction: out
+        order_by: PATH_THROUGH.hop_order
     to_concept: network_element
     ordered: true
     trigger_phrases: [经过网元, 路径经过, 所经过网元, 所经网元, 穿过的网元, 隧道路径中经过]
@@ -695,9 +741,14 @@ traversals:
     name_zh: 服务隧道源网元端口
     from_concept: service
     steps:
-      - {edge: SERVICE_USES_TUNNEL, direction: out, intermediate_concept: tunnel}
-      - {edge: TUNNEL_SRC, direction: out, intermediate_concept: network_element}
-      - {edge: HAS_PORT, direction: out}
+      - edge: SERVICE_USES_TUNNEL
+        direction: out
+        intermediate_concept: tunnel
+      - edge: TUNNEL_SRC
+        direction: out
+        intermediate_concept: network_element
+      - edge: HAS_PORT
+        direction: out
     to_concept: port
     trigger_phrases: [源网元端口, 源端网元上的端口, 源网元上的端口, 源网元端口信息]
     negative_phrases: [目的网元, 经过网元]
@@ -709,9 +760,14 @@ traversals:
     name_zh: 服务隧道目的网元端口
     from_concept: service
     steps:
-      - {edge: SERVICE_USES_TUNNEL, direction: out, intermediate_concept: tunnel}
-      - {edge: TUNNEL_DST, direction: out, intermediate_concept: network_element}
-      - {edge: HAS_PORT, direction: out}
+      - edge: SERVICE_USES_TUNNEL
+        direction: out
+        intermediate_concept: tunnel
+      - edge: TUNNEL_DST
+        direction: out
+        intermediate_concept: network_element
+      - edge: HAS_PORT
+        direction: out
     to_concept: port
     trigger_phrases: [目的网元端口, 目的端网元端口, 到达网元端口, 目的网元下的端口]
     negative_phrases: [源网元, 经过网元]
@@ -950,9 +1006,12 @@ constraints:
       and_no_direction_keyword: true
     clarification_question: 您说的是哪种网元?
     options:
-      - {id: service_tunnel_source, label: 源网元}
-      - {id: service_tunnel_destination, label: 目的网元}
-      - {id: service_tunnel_path, label: 路径经过的网元}
+      - id: service_tunnel_source
+        label: 源网元
+      - id: service_tunnel_destination
+        label: 目的网元
+      - id: service_tunnel_path
+        label: 路径经过的网元
 
   - id: protocol_data_empty_guard
     name_zh: 协议数据为空保护
@@ -980,18 +1039,58 @@ constraints:
 # 结果结构完全不同。提前声明 shape 可以约束 renderer 和前端展示。
 # ==============================================================================
 answer_shapes:
-  record_table: {description: 表格记录, visualization: table}
-  scalar_value: {description: 单一数值, visualization: kpi_card}
-  grouped_table: {description: 分组表格, visualization: grouped_table}
-  ranked_list: {description: 排名列表, visualization: ranked_table}
-  boolean: {description: 是/否结果, visualization: boolean_indicator}
-  path: {description: 单条路径, visualization: path_diagram}
-  ordered_node_list: {description: 按 hop_order 排序的节点序列, visualization: sequence_diagram}
-  subgraph: {description: 节点和边组成的子图, visualization: graph_view}
-  reachability_set: {description: 可达或受影响实体集合, visualization: layered_graph}
-  boolean_or_reachability_set: {description: 可根据问题返回布尔值或可达集合, visualization: boolean_or_layered_graph}
-  pattern_instances: {description: 拓扑模式匹配实例, visualization: pattern_grid}
-  concept_list: {description: 概念实例列表, visualization: table}
+  record_table:
+    description: 表格记录。
+    visualization: table
+
+  scalar_value:
+    description: 单一数值。
+    visualization: kpi_card
+    status: reserved
+
+  grouped_table:
+    description: 分组表格。
+    visualization: grouped_table
+    status: reserved
+
+  ranked_list:
+    description: 排名列表。
+    visualization: ranked_table
+
+  boolean:
+    description: 是/否结果。
+    visualization: boolean_indicator
+    status: reserved
+
+  path:
+    description: 单条路径。
+    visualization: path_diagram
+    status: reserved
+
+  ordered_node_list:
+    description: 按 hop_order 排序的节点序列。
+    visualization: sequence_diagram
+
+  subgraph:
+    description: 节点和边组成的子图。
+    visualization: graph_view
+
+  reachability_set:
+    description: 可达或受影响实体集合。
+    visualization: layered_graph
+
+  boolean_or_reachability_set:
+    description: 可根据问题返回布尔值或可达集合。
+    visualization: boolean_or_layered_graph
+
+  pattern_instances:
+    description: 拓扑模式匹配实例。
+    visualization: pattern_grid
+
+  concept_list:
+    description: 概念实例列表。
+    visualization: table
+    status: reserved
 
 # ==============================================================================
 # 第三层:查询层 - 分析能力(Analytical Capabilities)
