@@ -1,0 +1,1058 @@
+# ==============================================================================
+# 网络图原生语义模型草稿
+# ==============================================================================
+# 状态:
+#   - draft_only: true
+#   - 当前不被 cypher-generator-agent 加载,不参与生成、评测或 repair。
+#
+# 事实来源:
+#   - services/testing_agent/docs/reference/schema.json
+#   - services/testing_agent/docs/reference/network_schema_v10_profile.md
+#   - 当前远端 testing-agent 同步配置中的 TuGraph:
+#       graph: network_schema_v10
+#       probed_at: 2026-05-13
+#
+# 在线探测摘要:
+#   - NetworkElement: 40
+#   - Tunnel: 20
+#   - Service: 10
+#   - Port: 104
+#   - Fiber: 52
+#   - Link: 52
+#   - Protocol: 0
+#   - PATH_THROUGH: 72, 带 hop_order
+#   - SERVICE_USES_TUNNEL: 20
+#   - TUNNEL_PROTO: 0
+#
+# 设计目标:
+#   用图原生的 concepts / traversals / patterns / capabilities 描述真实网络图谱,
+#   先作为人工评审材料,暂不改变现有 network_graph_semantic_view.yaml。
+# ==============================================================================
+
+version: 2
+view_id: network_graph_semantic_model
+name_zh: 网络图原生语义模型
+description: 基于真实 TuGraph network_schema_v10 的 NL2Cypher 图原生语义模型草稿。
+model_paradigm: graph_native
+draft_only: true
+source_schema: services/testing_agent/docs/reference/schema.json
+
+# ==============================================================================
+# 数据画像(Data Profile)
+# ------------------------------------------------------------------------------
+# 这一节不是语义定义本身,而是本草稿的事实锚点:
+#   1. 记录这份 YAML 是按哪张 TuGraph 图探测出来的。
+#   2. 记录真实节点/边数量,避免后面建模时把“schema 存在”误判为“数据存在”。
+#   3. 记录当前枚举值和已观察到的不变量,帮助评审哪些能力当前能跑出结果。
+#
+# 重要例子:
+#   - Protocol label 存在于 schema,但当前节点数为 0。
+#   - TUNNEL_PROTO edge 存在于 schema,但当前边数为 0。
+#   - PATH_THROUGH 当前有 hop_order,所以路径类查询必须保序。
+# ==============================================================================
+data_profile:
+  graph: network_schema_v10
+  probed_at: "2026-05-13"
+  node_counts:
+    network_element: 40
+    tunnel: 20
+    service: 10
+    port: 104
+    fiber: 52
+    link: 52
+    protocol: 0
+  edge_counts:
+    HAS_PORT: 104
+    FIBER_SRC: 52
+    FIBER_DST: 52
+    LINK_SRC: 52
+    LINK_DST: 52
+    TUNNEL_SRC: 20
+    TUNNEL_DST: 20
+    TUNNEL_PROTO: 0
+    PATH_THROUGH: 72
+    SERVICE_USES_TUNNEL: 20
+  observed_values:
+    network_element.elem_type: [router]
+    network_element.vendor: [VendorA]
+    network_element.location: [Site_01, Site_02, Site_03, Site_04, Site_05]
+    service.quality_of_service: [Gold, Silver, Bronze]
+    service.elem_type: [MPLS-VPN]
+    tunnel.elem_type: [MPLS-TE]
+    tunnel.ietf_standard: ["RFC 3209"]
+    port.status: [up]
+    port.elem_type: [physical]
+    link.status: [up]
+    link.admin_status: [up]
+    link.elem_type: [ethernet]
+    fiber.elem_type: [single-mode]
+    fiber.wavelength: [1550nm]
+  observed_invariants:
+    - 每个 Service 当前使用 2 条 Tunnel。
+    - 每条 Tunnel 当前有 3 到 4 个 PATH_THROUGH 网元。
+    - PATH_THROUGH.hop_order 当前从 0 开始,最大为 2 或 3。
+    - 当前没有 Protocol 节点,也没有 TUNNEL_PROTO 边;协议相关查询应降级到 Tunnel.ietf_standard 或 Link.protocol。
+    - 当前不存在多服务共享同一 Tunnel 的样本。
+    - 当前存在多个 Tunnel 共享同一 NetworkElement 的样本。
+
+# 说明:
+#   本文件不定义独立的全局 matching_strategy 或 planner_policy。
+#   候选对象为什么被命中、为什么排斥其他解释,应尽量内聚到对象自身:
+#     - concepts 使用 synonyms / backed_by 描述业务概念边界。
+#     - traversals 使用 trigger_phrases / negative_phrases 描述路径意图边界。
+#     - patterns 使用 trigger_phrases 描述拓扑模式意图。
+#     - analytical_capabilities 使用 typical_triggers / routing 描述高层意图入口。
+#     - constraints 只表达系统无法自决、必须澄清或降级的情况。
+
+# ==============================================================================
+# 第一层:本体层(Ontology Layer)
+# ------------------------------------------------------------------------------
+# 本体层回答“真实图谱里有什么”。
+#
+# node_types:
+#   对应 TuGraph vertex label,并补充本体角色。角色不是物理字段,而是告诉
+#   NL2Cypher planner 这个节点在图里扮演什么身份:物理实体、逻辑实体、
+#   业务实体或分类节点。
+#
+# edge_types:
+#   对应 TuGraph edge label,并补充方向语义、配对关系、是否有序等图论性质。
+#   这些性质直接影响 Cypher 渲染,例如 PATH_THROUGH 必须按 hop_order 排序。
+#
+# schema_invariants:
+#   记录“查询时可以依赖的事实”或“当前数据画像”。它们不是用户可查询对象,
+#   而是用于规划、校验和解释空结果。
+# ==============================================================================
+ontology:
+
+  # ---------------------------------------------------------------------------
+  # 节点类型(Node Types)
+  # ---------------------------------------------------------------------------
+  # 字段读法:
+  #   label: TuGraph 中的真实 vertex label。
+  #   ontological_role: 图谱角色,用于帮助 LLM 区分物理资源、逻辑资源和业务对象。
+  #   identity_property/display_property: 默认过滤和展示字段。
+  #   observed_count: 当前远端图中的真实数量,用于评估能力是否有数据支撑。
+  #   availability: schema_only 表示 schema 有定义,但当前数据为空。
+  # ---------------------------------------------------------------------------
+  node_types:
+    network_element:
+      label: NetworkElement
+      ontological_role: physical_entity
+      description: 网络设备或网元。
+      identity_property: id
+      display_property: name
+      observed_count: 40
+
+    port:
+      label: Port
+      ontological_role: physical_entity
+      composition_of: network_element
+      description: 网元上的物理端口。
+      identity_property: id
+      display_property: name
+      observed_count: 104
+
+    fiber:
+      label: Fiber
+      ontological_role: physical_entity
+      description: 连接端口的物理光纤。
+      identity_property: id
+      display_property: name
+      observed_count: 52
+
+    link:
+      label: Link
+      ontological_role: logical_entity
+      description: 端口之间的逻辑/物理链路抽象。
+      identity_property: id
+      display_property: name
+      observed_count: 52
+
+    tunnel:
+      label: Tunnel
+      ontological_role: logical_entity
+      description: 承载业务流量的 MPLS-TE 隧道。
+      identity_property: id
+      display_property: name
+      observed_count: 20
+
+    service:
+      label: Service
+      ontological_role: business_entity
+      description: 网络上承载的业务服务。
+      identity_property: id
+      display_property: name
+      observed_count: 10
+
+    protocol:
+      label: Protocol
+      ontological_role: category
+      description: 网络协议标准定义。当前数据为空,仅作为 schema 能力保留。
+      identity_property: id
+      display_property: name
+      observed_count: 0
+      availability: schema_only
+
+  # ---------------------------------------------------------------------------
+  # 边类型(Edge Types)
+  # ---------------------------------------------------------------------------
+  # 字段读法:
+  #   from/to: TuGraph schema 中允许的起止 label。
+  #   semantic_category: 业务语义类别,用于 planner 判断这条边更像组成、端点、
+  #     分类、空间路径还是功能依赖。
+  #   paired_with: 源/目的端这类成对边的另一半。
+  #   properties: 边的图论性质,不是边上的业务字段。
+  #   edge_properties: 边上真实存在的属性,例如 PATH_THROUGH.hop_order。
+  # ---------------------------------------------------------------------------
+  edge_types:
+    HAS_PORT:
+      from: NetworkElement
+      to: Port
+      semantic_category: structural
+      cardinality: one_to_many
+      properties:
+        transitive: false
+        symmetric: false
+      edge_properties:
+        admin_status:
+          value_type: string
+      description: 网元拥有端口。
+
+    FIBER_SRC:
+      from: Fiber
+      to: Port
+      semantic_category: functional
+      paired_with: FIBER_DST
+      description: 光纤源端口。
+
+    FIBER_DST:
+      from: Fiber
+      to: Port
+      semantic_category: functional
+      paired_with: FIBER_SRC
+      description: 光纤目的端口。
+
+    LINK_SRC:
+      from: Link
+      to: Port
+      semantic_category: functional
+      paired_with: LINK_DST
+      description: 链路源端口。
+
+    LINK_DST:
+      from: Link
+      to: Port
+      semantic_category: functional
+      paired_with: LINK_SRC
+      description: 链路目的端口。
+
+    TUNNEL_SRC:
+      from: Tunnel
+      to: NetworkElement
+      semantic_category: functional
+      paired_with: TUNNEL_DST
+      description: 隧道源端网元。
+
+    TUNNEL_DST:
+      from: Tunnel
+      to: NetworkElement
+      semantic_category: functional
+      paired_with: TUNNEL_SRC
+      description: 隧道目的端网元。
+
+    TUNNEL_PROTO:
+      from: Tunnel
+      to: Protocol
+      semantic_category: taxonomic
+      availability: no_current_data
+      description: 隧道使用协议。当前边数量为 0。
+
+    PATH_THROUGH:
+      from: Tunnel
+      to: NetworkElement
+      semantic_category: spatial
+      properties:
+        ordered: true
+        transitive: false
+      edge_properties:
+        hop_order:
+          value_type: integer
+          description: 路径顺序,0 表示源端,最大 hop_order 表示目的端。
+      description: 隧道路径经过的网元,顺序由 hop_order 决定。
+
+    SERVICE_USES_TUNNEL:
+      from: Service
+      to: Tunnel
+      semantic_category: functional
+      cardinality: many_to_many
+      properties:
+        transitive: false
+        symmetric: false
+      description: 服务使用隧道。
+
+  # ---------------------------------------------------------------------------
+  # 图不变量(Schema Invariants)
+  # ---------------------------------------------------------------------------
+  # 这些规则有两类:
+  #   - schema 约束: 例如每条 Tunnel 应有源端和目的端。
+  #   - observed 事实: 例如当前每个 Service 使用 2 条 Tunnel。
+  #
+  # 它们的作用是约束生成和解释结果,不是替代查询本身。
+  # ---------------------------------------------------------------------------
+  schema_invariants:
+    - id: service_currently_uses_two_tunnels
+      description: 当前数据中每个 Service 使用 2 条 Tunnel。
+      enforces: observed_cardinality
+      pattern: "(s:Service)-[:SERVICE_USES_TUNNEL]->(:Tunnel)"
+      observed_count_each: 2
+      implication: 当前“单隧道服务”类查询应返回空集,但作为异常/未来数据场景保留。
+
+    - id: tunnel_has_two_endpoints
+      description: 每条 Tunnel 有源端和目的端网元。
+      enforces: cardinality_exact
+      patterns:
+        - "(t:Tunnel)-[:TUNNEL_SRC]->(:NetworkElement)"
+        - "(t:Tunnel)-[:TUNNEL_DST]->(:NetworkElement)"
+      exact_count_each: 1
+
+    - id: tunnel_path_is_ordered
+      description: Tunnel 到 NetworkElement 的 PATH_THROUGH 边必须按 hop_order 排序。
+      enforces: ordering
+      pattern: "(t:Tunnel)-[r:PATH_THROUGH]->(ne:NetworkElement)"
+      order_property: hop_order
+      implication: 路径查询必须 ORDER BY r.hop_order,不能仅返回无序集合。
+
+    - id: protocol_currently_empty
+      description: 当前 Protocol 节点与 TUNNEL_PROTO 边为空。
+      enforces: data_availability
+      implication: 问到隧道协议时优先使用 tunnel.ietf_standard;问到链路协议时使用 link.protocol。
+
+# ==============================================================================
+# 第二层:业务层 - 概念(Concepts)
+# ------------------------------------------------------------------------------
+# concepts 是用户语言中的“东西”。它不要求一一对应物理节点:
+#   - direct: 直接由某个 node_type 支撑,如 service/tunnel/network_element。
+#   - filtered_node: 在基础概念上加固定过滤条件,如 gold_service。
+#   - subgraph_pattern: 由子图模式定义的虚拟概念,如 multi_tunnel_service。
+#
+# 设计原则:
+#   用户说“金牌服务”“关键网元”“冗余服务”时,系统应该命中业务概念,
+#   而不是让 LLM 临时猜 property filter 或 count 逻辑。
+# ==============================================================================
+concepts:
+  # ---------------------------------------------------------------------------
+  # 直接概念:与真实 vertex label 一一对应。
+  # ---------------------------------------------------------------------------
+  service:
+    name_zh: 服务
+    backed_by: {type: direct, node_type: service}
+    primary_key: id
+    display_fields: [id, name]
+    default_order_by: name
+    synonyms: [服务, 业务]
+
+  tunnel:
+    name_zh: 隧道
+    backed_by: {type: direct, node_type: tunnel}
+    primary_key: id
+    display_fields: [id, name]
+    default_order_by: name
+    synonyms: [隧道, tunnel]
+
+  network_element:
+    name_zh: 网元
+    backed_by: {type: direct, node_type: network_element}
+    primary_key: id
+    display_fields: [id, name]
+    default_order_by: name
+    synonyms: [网元, 网络元素, 网络设备, 设备, 路由器, 交换机, 防火墙]
+
+  port:
+    name_zh: 端口
+    backed_by: {type: direct, node_type: port}
+    primary_key: id
+    display_fields: [id, name]
+    default_order_by: name
+    synonyms: [端口, 接口]
+
+  link:
+    name_zh: 链路
+    backed_by: {type: direct, node_type: link}
+    primary_key: id
+    display_fields: [id, name]
+    default_order_by: name
+    synonyms: [链路, 连接]
+
+  fiber:
+    name_zh: 光纤
+    backed_by: {type: direct, node_type: fiber}
+    primary_key: id
+    display_fields: [id, name]
+    default_order_by: name
+    synonyms: [光纤, 纤芯]
+
+  protocol:
+    name_zh: 协议
+    backed_by: {type: direct, node_type: protocol}
+    primary_key: id
+    display_fields: [id, name]
+    availability: schema_only
+    synonyms: [协议, 网络协议]
+
+  # ---------------------------------------------------------------------------
+  # 过滤概念:由基础节点加固定业务条件得到。
+  # ---------------------------------------------------------------------------
+  gold_service:
+    name_zh: 金牌服务
+    backed_by:
+      type: filtered_node
+      base_concept: service
+      where: {property: service.quality_of_service, operator: "=", value: Gold}
+    synonyms: [金牌服务, 金牌业务, Gold 服务, 高等级服务, 高优服务]
+
+  silver_service:
+    name_zh: 银牌服务
+    backed_by:
+      type: filtered_node
+      base_concept: service
+      where: {property: service.quality_of_service, operator: "=", value: Silver}
+    synonyms: [银牌服务, 银牌业务, Silver 服务]
+
+  bronze_service:
+    name_zh: 铜牌服务
+    backed_by:
+      type: filtered_node
+      base_concept: service
+    where: {property: service.quality_of_service, operator: "=", value: Bronze}
+    synonyms: [铜牌服务, 铜牌业务, Bronze 服务]
+
+  # ---------------------------------------------------------------------------
+  # 子图概念:由拓扑结构或聚合条件定义,是图原生建模的核心之一。
+  # ---------------------------------------------------------------------------
+  multi_tunnel_service:
+    name_zh: 多隧道服务
+    description: 使用多条隧道的服务。当前所有服务都属于该概念。
+    backed_by:
+      type: subgraph_pattern
+      pattern: |
+        (s:Service)-[:SERVICE_USES_TUNNEL]->(t:Tunnel)
+        WITH s, count(DISTINCT t) AS tunnel_count
+        WHERE tunnel_count > 1
+      result_concept: service
+    synonyms: [多隧道服务, 冗余服务, 有备份的服务, 容灾服务]
+
+  critical_network_element:
+    name_zh: 关键网元
+    description: 被多条隧道路径经过或作为多条隧道端点的网元。
+    backed_by:
+      type: subgraph_pattern
+      pattern: |
+        (ne:NetworkElement)<-[:PATH_THROUGH|TUNNEL_SRC|TUNNEL_DST]-(t:Tunnel)
+        WITH ne, count(DISTINCT t) AS tunnel_count
+        WHERE tunnel_count >= 3
+      result_concept: network_element
+    synonyms: [关键网元, 核心网元, 重要节点, 瓶颈网元]
+
+# ==============================================================================
+# 第二层:业务层 - 属性(Properties)
+# ------------------------------------------------------------------------------
+# properties 把用户说的字段名映射到真实 vertex property。
+#
+# 字段读法:
+#   of_concept: 该属性属于哪个业务概念。
+#   physical_property: TuGraph 中真实属性名。
+#   value_type/unit/enum_values: 约束值类型、单位和枚举值,减少 LLM 乱造值。
+#   roles:
+#     - filter: 可用于 WHERE
+#     - return: 可用于 RETURN
+#     - group_by: 可用于分组
+#     - order_by: 可用于排序
+#     - aggregate: 可用于聚合
+#   synonyms/value_aliases: 用户自然语言到属性/枚举值的映射。
+#
+# 注意:
+#   当前枚举值来自远端真实数据探测,不是完整业务宇宙。后续真实数据扩展后
+#   应重新探测并更新 observed values。
+# ==============================================================================
+properties:
+  # ---------------------------------------------------------------------------
+  # Service 属性:业务层服务对象的标识、类型、QoS、带宽和时延。
+  # ---------------------------------------------------------------------------
+  service.id: {of_concept: service, physical_property: id, value_type: string, roles: [filter, return], synonyms: [服务编号, 业务编号, 服务ID, 业务ID]}
+  service.name: {of_concept: service, physical_property: name, value_type: string, roles: [filter, return], synonyms: [服务名称, 业务名称]}
+  service.quality_of_service:
+    of_concept: service
+    physical_property: quality_of_service
+    value_type: enum
+    enum_values: [Gold, Silver, Bronze]
+    value_aliases:
+      Gold: [金牌, Gold, 黄金, 高等级, 高优]
+      Silver: [银牌, Silver]
+      Bronze: [铜牌, Bronze]
+    roles: [filter, return, group_by]
+    synonyms: [QoS, 服务等级, 服务质量, 服务质量等级]
+  service.elem_type: {of_concept: service, physical_property: elem_type, value_type: enum, enum_values: [MPLS-VPN], roles: [filter, return, group_by], synonyms: [服务类型, 业务类型]}
+  service.bandwidth: {of_concept: service, physical_property: bandwidth, value_type: number, unit: Mbps, roles: [filter, return, order_by, aggregate], default_aggregations: [avg, max, min, sum], synonyms: [服务带宽, 业务带宽]}
+  service.latency: {of_concept: service, physical_property: latency, value_type: number, unit: ms, roles: [filter, return, order_by, aggregate], default_aggregations: [avg, max, min], synonyms: [服务时延, 业务时延, 服务延迟]}
+
+  # ---------------------------------------------------------------------------
+  # Tunnel 属性:隧道标识、MPLS-TE 类型、RFC 标准、带宽和时延。
+  # ---------------------------------------------------------------------------
+  tunnel.id: {of_concept: tunnel, physical_property: id, value_type: string, roles: [filter, return], synonyms: [隧道编号, 隧道ID]}
+  tunnel.name: {of_concept: tunnel, physical_property: name, value_type: string, roles: [filter, return], synonyms: [隧道名称]}
+  tunnel.elem_type: {of_concept: tunnel, physical_property: elem_type, value_type: enum, enum_values: [MPLS-TE], roles: [filter, return, group_by], synonyms: [隧道类型]}
+  tunnel.ietf_standard: {of_concept: tunnel, physical_property: ietf_standard, value_type: enum, enum_values: ["RFC 3209"], roles: [filter, return, group_by], synonyms: [隧道标准, IETF标准, RFC标准, 隧道协议标准]}
+  tunnel.latency: {of_concept: tunnel, physical_property: latency, value_type: number, unit: ms, roles: [filter, return, order_by, aggregate], default_aggregations: [avg, max, min], synonyms: [隧道时延, 隧道延迟, 时延]}
+  tunnel.bandwidth: {of_concept: tunnel, physical_property: bandwidth, value_type: number, unit: Mbps, roles: [filter, return, order_by, aggregate], default_aggregations: [avg, max, min], synonyms: [隧道带宽, 带宽]}
+
+  # ---------------------------------------------------------------------------
+  # NetworkElement 属性:网元身份、厂商、位置、IP、型号和软件版本。
+  # ---------------------------------------------------------------------------
+  network_element.id: {of_concept: network_element, physical_property: id, value_type: string, roles: [filter, return], synonyms: [网元编号, 设备编号, 网元ID, 设备ID]}
+  network_element.name: {of_concept: network_element, physical_property: name, value_type: string, roles: [filter, return], synonyms: [设备名称, 网元名称]}
+  network_element.vendor: {of_concept: network_element, physical_property: vendor, value_type: enum, enum_values: [VendorA], roles: [filter, return, group_by], synonyms: [厂商, 设备厂商]}
+  network_element.elem_type: {of_concept: network_element, physical_property: elem_type, value_type: enum, enum_values: [router], roles: [filter, return, group_by], synonyms: [设备类型, 网元类型]}
+  network_element.location: {of_concept: network_element, physical_property: location, value_type: enum, enum_values: [Site_01, Site_02, Site_03, Site_04, Site_05], roles: [filter, return, group_by], synonyms: [位置, 地点, 站点, 省份]}
+  network_element.ip_address: {of_concept: network_element, physical_property: ip_address, value_type: string, roles: [filter, return], synonyms: [IP地址, 网元IP, 管理地址]}
+  network_element.model: {of_concept: network_element, physical_property: model, value_type: string, roles: [filter, return], synonyms: [型号, 设备型号]}
+  network_element.software_version: {of_concept: network_element, physical_property: software_version, value_type: string, roles: [filter, return], synonyms: [软件版本, 网元版本]}
+
+  # ---------------------------------------------------------------------------
+  # Port 属性:端口身份、状态、MAC、VLAN 和速率。
+  # ---------------------------------------------------------------------------
+  port.id: {of_concept: port, physical_property: id, value_type: string, roles: [filter, return], synonyms: [端口编号, 端口ID, 接口ID]}
+  port.name: {of_concept: port, physical_property: name, value_type: string, roles: [filter, return], synonyms: [端口名称, 接口名称]}
+  port.status: {of_concept: port, physical_property: status, value_type: enum, enum_values: [up], roles: [filter, return, group_by], synonyms: [端口状态, 接口状态]}
+  port.elem_type: {of_concept: port, physical_property: elem_type, value_type: enum, enum_values: [physical], roles: [filter, return, group_by], synonyms: [端口类型, 接口类型]}
+  port.mac_address: {of_concept: port, physical_property: mac_address, value_type: string, roles: [filter, return], synonyms: [MAC地址, 端口MAC, 接口MAC]}
+  port.vlan_id: {of_concept: port, physical_property: vlan_id, value_type: string, roles: [filter, return, group_by], synonyms: [VLAN]}
+  port.speed: {of_concept: port, physical_property: speed, value_type: number, unit: Mbps, roles: [filter, return, order_by, aggregate], default_aggregations: [avg, max, min], synonyms: [端口速率, 接口速率]}
+
+  # ---------------------------------------------------------------------------
+  # Link 属性:链路状态、管理状态、协议、VLAN、带宽、时延和 MTU。
+  # ---------------------------------------------------------------------------
+  link.id: {of_concept: link, physical_property: id, value_type: string, roles: [filter, return], synonyms: [链路编号]}
+  link.name: {of_concept: link, physical_property: name, value_type: string, roles: [filter, return], synonyms: [链路名称]}
+  link.status: {of_concept: link, physical_property: status, value_type: enum, enum_values: [up], roles: [filter, return, group_by], synonyms: [链路状态]}
+  link.admin_status: {of_concept: link, physical_property: admin_status, value_type: enum, enum_values: [up], roles: [filter, return, group_by], synonyms: [管理状态]}
+  link.elem_type: {of_concept: link, physical_property: elem_type, value_type: enum, enum_values: [ethernet], roles: [filter, return, group_by], synonyms: [链路类型]}
+  link.protocol: {of_concept: link, physical_property: protocol, value_type: enum, enum_values: [Ethernet], roles: [filter, return, group_by], synonyms: [链路协议, 以太网协议]}
+  link.vlan_id: {of_concept: link, physical_property: vlan_id, value_type: string, roles: [filter, return, group_by], synonyms: [链路VLAN]}
+  link.bandwidth: {of_concept: link, physical_property: bandwidth, value_type: number, unit: Mbps, roles: [filter, return, order_by, aggregate], default_aggregations: [avg, max, min], synonyms: [链路带宽]}
+  link.latency: {of_concept: link, physical_property: latency, value_type: number, unit: ms, roles: [filter, return, order_by, aggregate], default_aggregations: [avg, max, min], synonyms: [链路时延]}
+  link.mtu: {of_concept: link, physical_property: mtu, value_type: number, roles: [filter, return, order_by, aggregate], default_aggregations: [avg, max, min], synonyms: [MTU]}
+
+  # ---------------------------------------------------------------------------
+  # Fiber 属性:光纤身份、位置、波长、长度和容量。
+  # ---------------------------------------------------------------------------
+  fiber.id: {of_concept: fiber, physical_property: id, value_type: string, roles: [filter, return], synonyms: [光纤编号]}
+  fiber.name: {of_concept: fiber, physical_property: name, value_type: string, roles: [filter, return], synonyms: [光纤名称]}
+  fiber.elem_type: {of_concept: fiber, physical_property: elem_type, value_type: enum, enum_values: [single-mode], roles: [filter, return, group_by], synonyms: [光纤类型, 单模]}
+  fiber.location: {of_concept: fiber, physical_property: location, value_type: string, roles: [filter, return, group_by], synonyms: [光纤位置]}
+  fiber.wavelength: {of_concept: fiber, physical_property: wavelength, value_type: enum, enum_values: [1550nm], roles: [filter, return], synonyms: [波长]}
+  fiber.length: {of_concept: fiber, physical_property: length, value_type: number, unit: km, roles: [filter, return, order_by, aggregate], default_aggregations: [avg, max, min, sum], synonyms: [光纤长度, 长度]}
+  fiber.bandwidth_capacity: {of_concept: fiber, physical_property: bandwidth_capacity, value_type: number, unit: Mbps, roles: [filter, return, order_by, aggregate], default_aggregations: [avg, max, min], synonyms: [光纤容量, 带宽容量]}
+
+  # ---------------------------------------------------------------------------
+  # Protocol 属性:当前 schema 有定义但数据为空,保留用于未来数据接入。
+  # ---------------------------------------------------------------------------
+  protocol.id: {of_concept: protocol, physical_property: id, value_type: string, roles: [filter, return], availability: schema_only, synonyms: [协议编号]}
+  protocol.name: {of_concept: protocol, physical_property: name, value_type: string, roles: [filter, return], availability: schema_only, synonyms: [协议名称]}
+  protocol.version: {of_concept: protocol, physical_property: version, value_type: string, roles: [filter, return], availability: schema_only, synonyms: [协议版本]}
+  protocol.standard: {of_concept: protocol, physical_property: standard, value_type: string, roles: [filter, return], availability: schema_only, synonyms: [协议标准]}
+  protocol.ietf_category: {of_concept: protocol, physical_property: ietf_category, value_type: string, roles: [filter, return, group_by], availability: schema_only, synonyms: [IETF分类]}
+
+# ==============================================================================
+# 第二层:业务层 - 遍历(Traversals)
+# ------------------------------------------------------------------------------
+# traversals 是“命名好的图路径能力”。它比裸 relationship 更接近用户意图:
+#   用户说“服务经过哪些网元”,命中的应是 service_tunnel_path,
+#   而不是让 LLM 临时拼 SERVICE_USES_TUNNEL + PATH_THROUGH。
+#
+# type 读法:
+#   direct: 单跳关系。
+#   direct_ordered_path: 单跳边但边上有顺序属性,如 PATH_THROUGH.hop_order。
+#   fixed_path: 固定多跳路径。
+#   variable_length: 多种边组成的可展开资源子图。
+#   spreading: 故障影响域这类分层传播。
+#   neighborhood: 起点周围 N 跳子图。
+#   reachability: 可达性判断或可达集合。
+#
+# 关键约束:
+#   只要经过 PATH_THROUGH,都必须保留 hop_order 语义。
+# ==============================================================================
+traversals:
+  # ---------------------------------------------------------------------------
+  # 类型 1: direct 单跳关系。
+  # ---------------------------------------------------------------------------
+  service_uses_tunnel:
+    type: direct
+    name_zh: 服务使用隧道
+    from_concept: service
+    via: {edge: SERVICE_USES_TUNNEL, direction: out}
+    to_concept: tunnel
+    trigger_phrases: [使用的隧道, 服务使用隧道, 服务与隧道, 承载隧道, 依赖隧道]
+    default_return_fields: [service.name, tunnel.name]
+    answer_shape: record_table
+
+  network_element_has_port:
+    type: direct
+    name_zh: 网元拥有端口
+    from_concept: network_element
+    via: {edge: HAS_PORT, direction: out}
+    to_concept: port
+    trigger_phrases: [拥有的端口, 包含的端口, 网元端口, 连接的端口]
+    default_return_fields: [network_element.name, port.name, port.status]
+    answer_shape: record_table
+
+  tunnel_source:
+    type: direct
+    name_zh: 隧道源网元
+    from_concept: tunnel
+    via: {edge: TUNNEL_SRC, direction: out}
+    to_concept: network_element
+    trigger_phrases: [隧道源网元, 隧道源端, 源端网元]
+    negative_phrases: [目的网元, 经过网元]
+    default_return_fields: [tunnel.name, network_element.name, network_element.ip_address]
+    answer_shape: record_table
+
+  tunnel_destination:
+    type: direct
+    name_zh: 隧道目的网元
+    from_concept: tunnel
+    via: {edge: TUNNEL_DST, direction: out}
+    to_concept: network_element
+    trigger_phrases: [隧道目的网元, 隧道目的端, 目的端网元, 隧道终点]
+    negative_phrases: [源网元, 经过网元]
+    default_return_fields: [tunnel.name, network_element.name, network_element.location]
+    answer_shape: record_table
+
+  # ---------------------------------------------------------------------------
+  # 类型 2: 有序路径。PATH_THROUGH 是一跳边,但 hop_order 让它成为路径序列。
+  # ---------------------------------------------------------------------------
+  tunnel_ordered_path:
+    type: direct_ordered_path
+    name_zh: 隧道经过网元顺序
+    from_concept: tunnel
+    via:
+      edge: PATH_THROUGH
+      direction: out
+      order_by: PATH_THROUGH.hop_order
+    to_concept: network_element
+    ordered: true
+    trigger_phrases: [隧道经过, 隧道路径, 网络设备顺序, 经过的网络设备顺序, 路径顺序]
+    default_return_fields: [tunnel.name, PATH_THROUGH.hop_order, network_element.name]
+    answer_shape: ordered_node_list
+
+  # ---------------------------------------------------------------------------
+  # 类型 3: fixed_path 固定多跳。用于服务 -> 隧道 -> 网元/端口。
+  # ---------------------------------------------------------------------------
+  service_tunnel_source:
+    type: fixed_path
+    name_zh: 服务隧道源网元
+    from_concept: service
+    steps:
+      - {edge: SERVICE_USES_TUNNEL, direction: out, intermediate_concept: tunnel}
+      - {edge: TUNNEL_SRC, direction: out}
+    to_concept: network_element
+    ordered: false
+    trigger_phrases: [源网元, 源端网元, 源网元IP, 源端网元IP地址]
+    negative_phrases: [目的网元, 经过网元, 穿过]
+    default_return_fields: [service.name, tunnel.name, network_element.name, network_element.ip_address]
+    answer_shape: record_table
+
+  service_tunnel_destination:
+    type: fixed_path
+    name_zh: 服务隧道目的网元
+    from_concept: service
+    steps:
+      - {edge: SERVICE_USES_TUNNEL, direction: out, intermediate_concept: tunnel}
+      - {edge: TUNNEL_DST, direction: out}
+    to_concept: network_element
+    ordered: false
+    trigger_phrases: [目的网元, 目的端网元, 到达的目的网元, 隧道终点, 终点网元]
+    negative_phrases: [源网元, 经过网元, 穿过]
+    default_return_fields: [service.name, tunnel.name, network_element.name, network_element.location]
+    answer_shape: record_table
+
+  service_tunnel_path:
+    type: fixed_path
+    name_zh: 服务隧道经过网元
+    description: 服务使用的隧道路径经过的所有网元,按 PATH_THROUGH.hop_order 排序。
+    from_concept: service
+    steps:
+      - {edge: SERVICE_USES_TUNNEL, direction: out, intermediate_concept: tunnel}
+      - {edge: PATH_THROUGH, direction: out, order_by: PATH_THROUGH.hop_order}
+    to_concept: network_element
+    ordered: true
+    trigger_phrases: [经过网元, 路径经过, 所经过网元, 所经网元, 穿过的网元, 隧道路径中经过]
+    negative_phrases: [源网元, 目的网元]
+    default_return_fields: [service.name, tunnel.name, PATH_THROUGH.hop_order, network_element.name]
+    answer_shape: ordered_node_list
+
+  service_tunnel_source_ports:
+    type: fixed_path
+    name_zh: 服务隧道源网元端口
+    from_concept: service
+    steps:
+      - {edge: SERVICE_USES_TUNNEL, direction: out, intermediate_concept: tunnel}
+      - {edge: TUNNEL_SRC, direction: out, intermediate_concept: network_element}
+      - {edge: HAS_PORT, direction: out}
+    to_concept: port
+    trigger_phrases: [源网元端口, 源端网元上的端口, 源网元上的端口, 源网元端口信息]
+    negative_phrases: [目的网元, 经过网元]
+    default_return_fields: [service.name, tunnel.name, network_element.name, port.id, port.name]
+    answer_shape: record_table
+
+  service_tunnel_destination_ports:
+    type: fixed_path
+    name_zh: 服务隧道目的网元端口
+    from_concept: service
+    steps:
+      - {edge: SERVICE_USES_TUNNEL, direction: out, intermediate_concept: tunnel}
+      - {edge: TUNNEL_DST, direction: out, intermediate_concept: network_element}
+      - {edge: HAS_PORT, direction: out}
+    to_concept: port
+    trigger_phrases: [目的网元端口, 目的端网元端口, 到达网元端口, 目的网元下的端口]
+    negative_phrases: [源网元, 经过网元]
+    default_return_fields: [service.name, tunnel.name, network_element.name, port.id, port.name]
+    answer_shape: record_table
+
+  # ---------------------------------------------------------------------------
+  # 类型 4: variable_length 资源拓扑。用于返回完整子图而不是平面表格。
+  # ---------------------------------------------------------------------------
+  service_full_resource_topology:
+    type: variable_length
+    name_zh: 服务完整资源拓扑
+    description: 服务关联的隧道、路径网元、端口、链路和光纤资源子图。
+    from_concept: service
+    via_edges: [SERVICE_USES_TUNNEL, TUNNEL_SRC, TUNNEL_DST, PATH_THROUGH, HAS_PORT, LINK_SRC, LINK_DST, FIBER_SRC, FIBER_DST]
+    direction: both
+    min_hops: 1
+    max_hops: 5
+    collect_at_each_step: true
+    trigger_phrases: [完整资源拓扑, 关联的完整资源, 端到端资源, 业务拓扑, 服务拓扑, 整体拓扑]
+    answer_shape: subgraph
+
+  # ---------------------------------------------------------------------------
+  # 类型 5: spreading 影响传播。用于故障影响域/受影响资源分析。
+  # ---------------------------------------------------------------------------
+  network_element_blast_radius:
+    type: spreading
+    name_zh: 网元故障影响域
+    description: 给定网元故障,反向追溯受影响的隧道和服务。
+    from_concept: network_element
+    direction: reverse
+    propagation_edges:
+      - hop_1:
+          edges: [PATH_THROUGH, TUNNEL_SRC, TUNNEL_DST]
+          direction: in
+          collect_concept: tunnel
+      - hop_2:
+          edges: [SERVICE_USES_TUNNEL]
+          direction: in
+          collect_concept: service
+    trigger_phrases: [网元故障影响, 故障影响, 影响范围, 影响域, 受影响的服务, 牵连的业务]
+    answer_shape: reachability_set
+
+  port_blast_radius:
+    type: spreading
+    name_zh: 端口故障影响域
+    description: 给定端口故障,追溯相关网元、链路、光纤、隧道和服务。
+    from_concept: port
+    direction: mixed
+    propagation_edges:
+      - hop_1:
+          edges: [HAS_PORT, FIBER_SRC, FIBER_DST, LINK_SRC, LINK_DST]
+          direction: both
+          collect_concepts: [network_element, fiber, link]
+      - hop_2:
+          edges: [PATH_THROUGH, TUNNEL_SRC, TUNNEL_DST]
+          direction: in
+          collect_concept: tunnel
+      - hop_3:
+          edges: [SERVICE_USES_TUNNEL]
+          direction: in
+          collect_concept: service
+    trigger_phrases: [端口故障影响, 端口影响, 故障端口所在设备集合, 端口受损]
+    answer_shape: reachability_set
+
+  # ---------------------------------------------------------------------------
+  # 类型 6: neighborhood/reachability。用于周边拓扑和是否可达。
+  # ---------------------------------------------------------------------------
+  network_element_neighborhood:
+    type: neighborhood
+    name_zh: 网元周边拓扑
+    description: 查询某网元周围指定跳数内的网络资源拓扑。
+    from_concept: network_element
+    via_edges: [HAS_PORT, PATH_THROUGH, TUNNEL_SRC, TUNNEL_DST, LINK_SRC, LINK_DST, FIBER_SRC, FIBER_DST]
+    direction: both
+    default_hops: 2
+    max_hops: 3
+    trigger_phrases: [周边拓扑, 两跳拓扑, 三跳内, 周围两跳, 附近拓扑]
+    answer_shape: subgraph
+
+  service_reaches_port:
+    type: reachability
+    name_zh: 服务可达端口判断
+    from_concept: service
+    to_concept: port
+    via_edges: [SERVICE_USES_TUNNEL, TUNNEL_SRC, TUNNEL_DST, PATH_THROUGH, HAS_PORT]
+    max_hops: 4
+    trigger_phrases: [是否能到达端口, 可以到达哪些端口, 业务可达端口]
+    answer_shape: boolean_or_reachability_set
+
+# ==============================================================================
+# 第二层:业务层 - 拓扑模式(Patterns)
+# ------------------------------------------------------------------------------
+# patterns 把“拓扑结构本身”命名为业务对象。
+#
+# 与 traversal 的区别:
+#   - traversal 关注从 A 到 B 怎么走。
+#   - pattern 关注图里是否存在某种结构,例如共享、冗余、跨站点、瓶颈。
+#
+# 当前数据影响:
+#   - service_redundancy 有数据支撑,因为每个服务当前都有 2 条隧道。
+#   - shared_critical_network_element 有数据支撑。
+#   - shared_tunnel 当前为空,但作为业务问题保留。
+# ==============================================================================
+patterns:
+  service_redundancy:
+    name_zh: 服务隧道冗余
+    description: 同一服务使用多条隧道。当前所有服务都有 2 条隧道。
+    template: |
+      (s:Service)-[:SERVICE_USES_TUNNEL]->(t1:Tunnel),
+      (s)-[:SERVICE_USES_TUNNEL]->(t2:Tunnel)
+      WHERE id(t1) < id(t2)
+    return_fields: [s.name, t1.name, t2.name]
+    trigger_phrases: [冗余隧道, 备份隧道, 多隧道, 容灾配置, 有备份的服务]
+    answer_shape: pattern_instances
+
+  shared_critical_network_element:
+    name_zh: 共享关键网元
+    description: 多条隧道路径经过同一网元。当前真实数据存在该模式。
+    template: |
+      (t1:Tunnel)-[:PATH_THROUGH]->(ne:NetworkElement)<-[:PATH_THROUGH]-(t2:Tunnel)
+      WHERE id(t1) < id(t2)
+    return_fields: [ne.name, t1.name, t2.name]
+    trigger_phrases: [瓶颈网元, 多隧道共享网元, 关键节点, 共享网元, 拥挤网元]
+    answer_shape: pattern_instances
+
+  shared_tunnel:
+    name_zh: 共享隧道
+    description: 多个服务共用同一条隧道。当前真实数据中该模式为空,但作为业务能力保留。
+    availability: currently_empty
+    template: |
+      (s1:Service)-[:SERVICE_USES_TUNNEL]->(t:Tunnel)<-[:SERVICE_USES_TUNNEL]-(s2:Service)
+      WHERE id(s1) < id(s2)
+    return_fields: [s1.name, s2.name, t.name]
+    trigger_phrases: [共享隧道, 共用隧道, 同一条隧道, 哪些服务共用]
+    answer_shape: pattern_instances
+
+  services_share_network_element:
+    name_zh: 服务共享网元
+    description: 两个服务的隧道路径经过同一网元。
+    template: |
+      (s1:Service)-[:SERVICE_USES_TUNNEL]->(:Tunnel)-[:PATH_THROUGH]->(ne:NetworkElement)<-[:PATH_THROUGH]-(:Tunnel)<-[:SERVICE_USES_TUNNEL]-(s2:Service)
+      WHERE id(s1) < id(s2)
+    return_fields: [s1.name, s2.name, ne.name]
+    trigger_phrases: [两个业务都经过的网元, 共同经过的网元, 共享路径网元]
+    answer_shape: pattern_instances
+
+  cross_site_tunnel:
+    name_zh: 跨站点隧道
+    description: 隧道源端和目的端位于不同 Site。
+    template: |
+      (t:Tunnel)-[:TUNNEL_SRC]->(src:NetworkElement),
+      (t)-[:TUNNEL_DST]->(dst:NetworkElement)
+      WHERE src.location <> dst.location
+    return_fields: [t.name, src.location, dst.location]
+    trigger_phrases: [跨站点隧道, 跨位置隧道, 不同站点之间的隧道]
+    answer_shape: pattern_instances
+
+# ==============================================================================
+# 第二层:业务层 - 指标(Metrics)
+# ------------------------------------------------------------------------------
+# metrics 是可复用的数值口径。
+#
+# 类型读法:
+#   aggregate: 普通聚合,如 count/avg/max。
+#   degree_metric: 图度数/负载类指标,如服务使用隧道数、网元经过隧道数。
+#   path_metric: 路径类指标,如隧道 hop 数。
+#
+# 注意:
+#   这里不直接写最终 Cypher,而是定义“指标口径”。渲染层可根据 of_concept、
+#   of_property、via_edge、based_on_traversal 等字段生成具体查询。
+# ==============================================================================
+metrics:
+  # ---------------------------------------------------------------------------
+  # 传统聚合指标:实体数量和数值属性聚合。
+  # ---------------------------------------------------------------------------
+  service_count: {type: aggregate, name_zh: 服务数量, aggregation: count, of_concept: service, default_alias: service_count, synonyms: [服务数量, 业务数量, 服务总数]}
+  tunnel_count: {type: aggregate, name_zh: 隧道数量, aggregation: count, of_concept: tunnel, default_alias: tunnel_count, synonyms: [隧道数量, 隧道总数]}
+  network_element_count: {type: aggregate, name_zh: 网元数量, aggregation: count, of_concept: network_element, default_alias: network_element_count, synonyms: [网元数量, 设备数量, 网络设备数量]}
+  port_count: {type: aggregate, name_zh: 端口数量, aggregation: count, of_concept: port, default_alias: port_count, synonyms: [端口数量, 接口数量]}
+  fiber_count: {type: aggregate, name_zh: 光纤数量, aggregation: count, of_concept: fiber, default_alias: fiber_count, synonyms: [光纤数量, 纤芯数量]}
+  link_count: {type: aggregate, name_zh: 链路数量, aggregation: count, of_concept: link, default_alias: link_count, synonyms: [链路数量, 连接数量]}
+  avg_service_bandwidth: {type: aggregate, name_zh: 平均服务带宽, aggregation: avg, of_property: service.bandwidth, default_alias: avg_service_bandwidth, synonyms: [平均服务带宽, 平均业务带宽]}
+  avg_tunnel_latency: {type: aggregate, name_zh: 平均隧道时延, aggregation: avg, of_property: tunnel.latency, default_alias: avg_tunnel_latency, synonyms: [平均隧道时延, 平均时延]}
+  max_link_bandwidth: {type: aggregate, name_zh: 最大链路带宽, aggregation: max, of_property: link.bandwidth, default_alias: max_link_bandwidth, synonyms: [最大链路带宽, 链路最大带宽]}
+  avg_port_speed: {type: aggregate, name_zh: 平均端口速率, aggregation: avg, of_property: port.speed, default_alias: avg_port_speed, synonyms: [平均端口速率, 平均接口速率]}
+
+  # ---------------------------------------------------------------------------
+  # 图指标:度数、路径长度和拓扑负载。
+  # ---------------------------------------------------------------------------
+  service_tunnel_count:
+    type: degree_metric
+    name_zh: 服务使用隧道数
+    of_concept: service
+    via_edge: SERVICE_USES_TUNNEL
+    direction: out
+    observed_value_each: 2
+    default_alias: tunnel_count
+    synonyms: [服务使用的隧道数量, 隧道数量, 备份数, 冗余度]
+
+  tunnel_hop_count:
+    type: path_metric
+    name_zh: 隧道路径跳数
+    based_on_traversal: tunnel_ordered_path
+    measure: count_path_nodes
+    order_property: PATH_THROUGH.hop_order
+    observed_range: [3, 4]
+    default_alias: hop_count
+    synonyms: [跳数, 路径长度, 经过几个网元, 隧道跳数]
+
+  network_element_tunnel_load:
+    type: degree_metric
+    name_zh: 网元经过隧道数
+    of_concept: network_element
+    via_edges: [PATH_THROUGH, TUNNEL_SRC, TUNNEL_DST]
+    direction: in
+    default_alias: tunnel_load
+    synonyms: [网元负载, 经过的隧道数, 承载隧道数]
+
+# ==============================================================================
+# 第二层:业务层 - 约束(Constraints)
+# ------------------------------------------------------------------------------
+# constraints 用于“必须澄清”或“必须降级”的场景。
+#
+# 它们不是查询对象,而是生成前的保护规则:
+#   - 用户只说“网元”但没有说源/目的/经过时,应澄清。
+#   - 当前 Protocol 数据为空时,协议问题应优先转到可用字段。
+#   - 当前状态值只有 up,down/故障类问题允许返回空集,不要误判为生成错误。
+# ==============================================================================
+constraints:
+  - id: source_destination_path_disambiguation
+    name_zh: 源目的路径澄清
+    triggers_clarification:
+      when_question_mentions: 网元
+      and_traversal_kind: service_tunnel_related
+      and_no_direction_keyword: true
+    clarification_question: 您说的是哪种网元?
+    options:
+      - {id: service_tunnel_source, label: 源网元}
+      - {id: service_tunnel_destination, label: 目的网元}
+      - {id: service_tunnel_path, label: 路径经过的网元}
+
+  - id: protocol_data_empty_guard
+    name_zh: 协议数据为空保护
+    enforcement: prefer_available_property
+    when_question_mentions: [协议, 网络协议, 隧道协议]
+    if_requested_concept: protocol
+    fallback:
+      - tunnel.ietf_standard
+      - link.protocol
+    note: 当前 Protocol 节点为空,TUNNEL_PROTO 边为 0。
+
+  - id: status_value_currently_only_up
+    name_zh: 状态值当前只有 up
+    enforcement: allow_empty_result
+    when_question_mentions: [down, 故障, 异常, 不可用]
+    affected_properties: [port.status, link.status, link.admin_status]
+    note: 当前真实数据中端口和链路状态均为 up;down 类查询可能返回空集。
+
+# ==============================================================================
+# 第三层:查询层 - 答案形态(Answer Shapes)
+# ------------------------------------------------------------------------------
+# answer_shapes 描述结果应该怎样被消费或展示。
+#
+# 这一步很重要:同样是 Cypher 查询,返回表格、路径、子图、影响域集合的
+# 结果结构完全不同。提前声明 shape 可以约束 renderer 和前端展示。
+# ==============================================================================
+answer_shapes:
+  record_table: {description: 表格记录, visualization: table}
+  scalar_value: {description: 单一数值, visualization: kpi_card}
+  grouped_table: {description: 分组表格, visualization: grouped_table}
+  ranked_list: {description: 排名列表, visualization: ranked_table}
+  boolean: {description: 是/否结果, visualization: boolean_indicator}
+  path: {description: 单条路径, visualization: path_diagram}
+  ordered_node_list: {description: 按 hop_order 排序的节点序列, visualization: sequence_diagram}
+  subgraph: {description: 节点和边组成的子图, visualization: graph_view}
+  reachability_set: {description: 可达或受影响实体集合, visualization: layered_graph}
+  boolean_or_reachability_set: {description: 可根据问题返回布尔值或可达集合, visualization: boolean_or_layered_graph}
+  pattern_instances: {description: 拓扑模式匹配实例, visualization: pattern_grid}
+  concept_list: {description: 概念实例列表, visualization: table}
+
+# ==============================================================================
+# 第三层:查询层 - 分析能力(Analytical Capabilities)
+# ------------------------------------------------------------------------------
+# analytical_capabilities 把用户的高层业务意图路由到具体语义对象。
+#
+# 例子:
+#   - “故障会影响什么”不是一个单独关系,而是 impact_analysis 能力,
+#     再根据起点是网元还是端口路由到对应 spreading traversal。
+#   - “拓扑健康”会组合关键网元概念、共享网元 pattern 和负载 metric。
+#
+# 这一层是 NL2Cypher 从“图 schema 查询”升级到“业务分析查询”的入口。
+# ==============================================================================
+analytical_capabilities:
+  path_trace:
+    name_zh: 路径追踪
+    description: 查询隧道或服务路径经过的网元顺序。
+    primary_traversals: [tunnel_ordered_path, service_tunnel_path]
+    typical_triggers: [路径, 经过, 穿过, 顺序, 完整路径]
+    default_answer_shape: ordered_node_list
+
+  resource_topology:
+    name_zh: 资源拓扑展示
+    description: 展示服务或网元周边资源子图。
+    primary_traversals: [service_full_resource_topology, network_element_neighborhood]
+    typical_triggers: [拓扑, 完整资源, 周边拓扑, 两跳拓扑, 画一下]
+    default_answer_shape: subgraph
+
+  impact_analysis:
+    name_zh: 故障影响分析
+    description: 给定网元或端口故障,追溯受影响的隧道、服务和资源。
+    primary_traversals: [network_element_blast_radius, port_blast_radius]
+    typical_triggers: [故障影响, 影响范围, 影响域, 受影响, 牵连, 波及]
+    routing:
+      by_starting_concept:
+        network_element: network_element_blast_radius
+        port: port_blast_radius
+      fallback: clarification_required
+    default_answer_shape: reachability_set
+
+  redundancy_audit:
+    name_zh: 冗余审计
+    description: 检查服务是否使用多条隧道以及隧道冗余情况。
+    primary_concepts: [multi_tunnel_service]
+    primary_patterns: [service_redundancy]
+    primary_metrics: [service_tunnel_count]
+    typical_triggers: [冗余, 备份, 容灾, 多隧道, 高可用]
+    default_answer_shape: pattern_instances
+
+  topology_health_check:
+    name_zh: 拓扑健康诊断
+    description: 识别共享关键网元和高负载网元。
+    primary_concepts: [critical_network_element]
+    primary_patterns: [shared_critical_network_element]
+    primary_metrics: [network_element_tunnel_load]
+    typical_triggers: [拓扑健康, 风险点, 关键节点, 瓶颈, 单点]
+    default_answer_shape: ranked_list
+
+  shared_resource_analysis:
+    name_zh: 共享资源分析
+    description: 分析服务、隧道共享网元或隧道的情况。
+    primary_patterns: [shared_critical_network_element, shared_tunnel, services_share_network_element]
+    typical_triggers: [共享, 共用, 共同, 都经过, 都使用]
+    default_answer_shape: pattern_instances

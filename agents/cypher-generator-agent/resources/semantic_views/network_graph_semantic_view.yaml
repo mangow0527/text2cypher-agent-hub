@@ -151,22 +151,8 @@ relationships:
     synonyms: [使用, 承载于, 依赖隧道]
 
 dimensions:
-  service.id:
-    name_zh: 服务编号
-    owner: service
-    property: id
-    description: 服务唯一标识
-    synonyms: [服务编号, 业务编号, 服务ID, 服务 ID, 业务ID, 业务 ID]
-    roles: [filter, return]
-    value_type: string
-  service.name:
-    name_zh: 服务名称
-    owner: service
-    property: name
-    description: 服务名称
-    synonyms: [服务名称, 业务名称]
-    roles: [filter, return]
-    value_type: string
+  service.id: {name_zh: 服务编号, owner: service, property: id, description: 服务唯一标识, synonyms: [服务编号, 业务编号, 服务ID, 服务 ID, 业务ID, 业务 ID], roles: [filter, return], value_type: string}
+  service.name: {name_zh: 服务名称, owner: service, property: name, description: 服务名称, synonyms: [服务名称, 业务名称], roles: [filter, return], value_type: string}
   service.quality_of_service:
     name_zh: 服务质量等级
     owner: service
@@ -180,403 +166,61 @@ dimensions:
       Gold: [金牌, Gold]
       Silver: [银牌, Silver]
       Bronze: [铜牌, Bronze]
-  service.elem_type:
-    name_zh: 服务类型
-    owner: service
-    property: elem_type
-    description: 服务类型
-    synonyms: [服务类型, 业务类型]
-    roles: [filter, return, group_by]
-    value_type: string
-  tunnel.id:
-    name_zh: 隧道编号
-    owner: tunnel
-    property: id
-    description: 隧道唯一标识
-    synonyms: [隧道编号, 隧道ID, 隧道 ID]
-    roles: [filter, return]
-    value_type: string
-  tunnel.name:
-    name_zh: 隧道名称
-    owner: tunnel
-    property: name
-    description: 隧道名称
-    synonyms: [隧道名称]
-    roles: [filter, return]
-    value_type: string
-  tunnel.elem_type:
-    name_zh: 隧道类型
-    owner: tunnel
-    property: elem_type
-    description: 隧道类型
-    synonyms: [隧道类型]
-    roles: [filter, return, group_by]
-    value_type: string
-  tunnel.ietf_standard:
-    name_zh: 隧道 IETF 标准
-    owner: tunnel
-    property: ietf_standard
-    description: 隧道关联的 IETF 标准
-    synonyms: [隧道标准, 隧道IETF标准, 隧道 IETF 标准, IETF标准, IETF 标准, RFC标准, RFC 标准]
-    roles: [filter, return]
-    value_type: string
-  network_element.id:
-    name_zh: 网元编号
-    owner: network_element
-    property: id
-    description: 网元唯一标识
-    synonyms: [网元编号, 设备编号, 网元ID, 网元 ID, 设备ID, 设备 ID]
-    roles: [filter, return]
-    value_type: string
-  network_element.name:
-    name_zh: 网元名称
-    owner: network_element
-    property: name
-    description: 网元名称
-    synonyms: [设备名称, 网元名称]
-    roles: [filter, return]
-    value_type: string
-  network_element.vendor:
-    name_zh: 网元厂商
-    owner: network_element
-    property: vendor
-    description: 网元厂商
-    synonyms: [厂商, 设备厂商]
-    roles: [filter, return, group_by]
-    value_type: string
-  network_element.elem_type:
-    name_zh: 网元类型
-    owner: network_element
-    property: elem_type
-    description: 网元类型
-    synonyms: [设备类型, 网元类型]
-    roles: [filter, return, group_by]
-    value_type: string
-  network_element.location:
-    name_zh: 网元位置
-    owner: network_element
-    property: location
-    description: 网元所在位置
-    synonyms: [位置, 地点]
-    roles: [filter, return, group_by]
-    value_type: string
-  network_element.ip_address:
-    name_zh: 网元 IP 地址
-    owner: network_element
-    property: ip_address
-    description: 网元 IP 地址
-    synonyms: [IP 地址, IP地址, 网元IP地址, 网元 IP 地址, 设备IP地址, 设备 IP 地址, 元素IP, 元素 IP, 网络元素IP, 网络元素 IP, 管理地址]
-    roles: [filter, return]
-    value_type: string
-  network_element.model:
-    name_zh: 网元型号
-    owner: network_element
-    property: model
-    description: 网元型号
-    synonyms: [型号, 设备型号]
-    roles: [filter, return]
-    value_type: string
-  network_element.software_version:
-    name_zh: 软件版本
-    owner: network_element
-    property: software_version
-    description: 网元软件版本
-    synonyms: [软件版本, 网元版本, 元素版本, 网络元素版本]
-    roles: [filter, return]
-    value_type: string
-  port.id:
-    name_zh: 端口编号
-    owner: port
-    property: id
-    description: 端口唯一标识
-    synonyms: [端口编号, 端口ID, 端口 ID, 接口ID, 接口 ID]
-    roles: [filter, return]
-    value_type: string
-  port.name:
-    name_zh: 端口名称
-    owner: port
-    property: name
-    description: 端口名称
-    synonyms: [端口名称, 接口名称]
-    roles: [filter, return]
-    value_type: string
-  port.status:
-    name_zh: 端口状态
-    owner: port
-    property: status
-    description: 端口运行状态
-    synonyms: [端口状态]
-    roles: [filter, return, group_by]
-    value_type: string
-  port.elem_type:
-    name_zh: 端口类型
-    owner: port
-    property: elem_type
-    description: 端口类型
-    synonyms: [端口类型, 接口类型]
-    roles: [filter, return, group_by]
-    value_type: string
-  port.mac_address:
-    name_zh: 端口 MAC 地址
-    owner: port
-    property: mac_address
-    description: 端口 MAC 地址
-    synonyms: [MAC 地址, MAC地址, 端口MAC地址, 端口 MAC 地址, 接口MAC地址, 接口 MAC 地址]
-    roles: [filter, return]
-    value_type: string
-  port.vlan_id:
-    name_zh: 端口 VLAN
-    owner: port
-    property: vlan_id
-    description: 端口 VLAN 编号
-    synonyms: [VLAN]
-    roles: [filter, return, group_by]
-    value_type: string
-  link.id:
-    name_zh: 链路编号
-    owner: link
-    property: id
-    description: 链路唯一标识
-    synonyms: [链路编号]
-    roles: [filter, return]
-    value_type: string
-  link.name:
-    name_zh: 链路名称
-    owner: link
-    property: name
-    description: 链路名称
-    synonyms: [链路名称]
-    roles: [filter, return]
-    value_type: string
-  link.status:
-    name_zh: 链路状态
-    owner: link
-    property: status
-    description: 链路运行状态
-    synonyms: [链路状态]
-    roles: [filter, return, group_by]
-    value_type: string
-  link.admin_status:
-    name_zh: 链路管理状态
-    owner: link
-    property: admin_status
-    description: 链路管理状态
-    synonyms: [管理状态]
-    roles: [filter, return, group_by]
-    value_type: string
-  link.elem_type:
-    name_zh: 链路类型
-    owner: link
-    property: elem_type
-    description: 链路类型
-    synonyms: [链路类型]
-    roles: [filter, return, group_by]
-    value_type: string
-  link.protocol:
-    name_zh: 链路协议
-    owner: link
-    property: protocol
-    description: 链路协议
-    synonyms: [链路协议]
-    roles: [filter, return, group_by]
-    value_type: string
-  link.vlan_id:
-    name_zh: 链路 VLAN
-    owner: link
-    property: vlan_id
-    description: 链路 VLAN 编号
-    synonyms: [链路 VLAN]
-    roles: [filter, return, group_by]
-    value_type: string
-  fiber.id:
-    name_zh: 光纤编号
-    owner: fiber
-    property: id
-    description: 光纤唯一标识
-    synonyms: [光纤编号]
-    roles: [filter, return]
-    value_type: string
-  fiber.name:
-    name_zh: 光纤名称
-    owner: fiber
-    property: name
-    description: 光纤名称
-    synonyms: [光纤名称]
-    roles: [filter, return]
-    value_type: string
-  fiber.elem_type:
-    name_zh: 光纤类型
-    owner: fiber
-    property: elem_type
-    description: 光纤类型
-    synonyms: [光纤类型]
-    roles: [filter, return, group_by]
-    value_type: string
-  fiber.location:
-    name_zh: 光纤位置
-    owner: fiber
-    property: location
-    description: 光纤所在位置
-    synonyms: [光纤位置]
-    roles: [filter, return, group_by]
-    value_type: string
-  fiber.wavelength:
-    name_zh: 光纤波长
-    owner: fiber
-    property: wavelength
-    description: 光纤波长
-    synonyms: [波长]
-    roles: [filter, return]
-    value_type: string
-  protocol.id:
-    name_zh: 协议编号
-    owner: protocol
-    property: id
-    description: 协议唯一标识
-    synonyms: [协议编号]
-    roles: [filter, return]
-    value_type: string
-  protocol.name:
-    name_zh: 协议名称
-    owner: protocol
-    property: name
-    description: 协议名称
-    synonyms: [协议名称]
-    roles: [filter, return]
-    value_type: string
-  protocol.version:
-    name_zh: 协议版本
-    owner: protocol
-    property: version
-    description: 协议版本
-    synonyms: [协议版本]
-    roles: [filter, return]
-    value_type: string
-  protocol.standard:
-    name_zh: 协议标准
-    owner: protocol
-    property: standard
-    description: 协议标准
-    synonyms: [协议标准]
-    roles: [filter, return]
-    value_type: string
-  protocol.ietf_category:
-    name_zh: IETF 分类
-    owner: protocol
-    property: ietf_category
-    description: 协议 IETF 分类
-    synonyms: [IETF 分类]
-    roles: [filter, return, group_by]
-    value_type: string
+  service.elem_type: {name_zh: 服务类型, owner: service, property: elem_type, description: 服务类型, synonyms: [服务类型, 业务类型], roles: [filter, return, group_by], value_type: string}
+  tunnel.id: {name_zh: 隧道编号, owner: tunnel, property: id, description: 隧道唯一标识, synonyms: [隧道编号, 隧道ID, 隧道 ID], roles: [filter, return], value_type: string}
+  tunnel.name: {name_zh: 隧道名称, owner: tunnel, property: name, description: 隧道名称, synonyms: [隧道名称], roles: [filter, return], value_type: string}
+  tunnel.elem_type: {name_zh: 隧道类型, owner: tunnel, property: elem_type, description: 隧道类型, synonyms: [隧道类型], roles: [filter, return, group_by], value_type: string}
+  tunnel.ietf_standard: {name_zh: 隧道 IETF 标准, owner: tunnel, property: ietf_standard, description: 隧道关联的 IETF 标准, synonyms: [隧道标准, 隧道IETF标准, 隧道 IETF 标准, IETF标准, IETF 标准, RFC标准, RFC 标准], roles: [filter, return], value_type: string}
+  network_element.id: {name_zh: 网元编号, owner: network_element, property: id, description: 网元唯一标识, synonyms: [网元编号, 设备编号, 网元ID, 网元 ID, 设备ID, 设备 ID], roles: [filter, return], value_type: string}
+  network_element.name: {name_zh: 网元名称, owner: network_element, property: name, description: 网元名称, synonyms: [设备名称, 网元名称], roles: [filter, return], value_type: string}
+  network_element.vendor: {name_zh: 网元厂商, owner: network_element, property: vendor, description: 网元厂商, synonyms: [厂商, 设备厂商], roles: [filter, return, group_by], value_type: string}
+  network_element.elem_type: {name_zh: 网元类型, owner: network_element, property: elem_type, description: 网元类型, synonyms: [设备类型, 网元类型], roles: [filter, return, group_by], value_type: string}
+  network_element.location: {name_zh: 网元位置, owner: network_element, property: location, description: 网元所在位置, synonyms: [位置, 地点], roles: [filter, return, group_by], value_type: string}
+  network_element.ip_address: {name_zh: 网元 IP 地址, owner: network_element, property: ip_address, description: 网元 IP 地址, synonyms: [IP 地址, IP地址, 网元IP地址, 网元 IP 地址, 设备IP地址, 设备 IP 地址, 元素IP, 元素 IP, 网络元素IP, 网络元素 IP, 管理地址], roles: [filter, return], value_type: string}
+  network_element.model: {name_zh: 网元型号, owner: network_element, property: model, description: 网元型号, synonyms: [型号, 设备型号], roles: [filter, return], value_type: string}
+  network_element.software_version: {name_zh: 软件版本, owner: network_element, property: software_version, description: 网元软件版本, synonyms: [软件版本, 网元版本, 元素版本, 网络元素版本], roles: [filter, return], value_type: string}
+  port.id: {name_zh: 端口编号, owner: port, property: id, description: 端口唯一标识, synonyms: [端口编号, 端口ID, 端口 ID, 接口ID, 接口 ID], roles: [filter, return], value_type: string}
+  port.name: {name_zh: 端口名称, owner: port, property: name, description: 端口名称, synonyms: [端口名称, 接口名称], roles: [filter, return], value_type: string}
+  port.status: {name_zh: 端口状态, owner: port, property: status, description: 端口运行状态, synonyms: [端口状态], roles: [filter, return, group_by], value_type: string}
+  port.elem_type: {name_zh: 端口类型, owner: port, property: elem_type, description: 端口类型, synonyms: [端口类型, 接口类型], roles: [filter, return, group_by], value_type: string}
+  port.mac_address: {name_zh: 端口 MAC 地址, owner: port, property: mac_address, description: 端口 MAC 地址, synonyms: [MAC 地址, MAC地址, 端口MAC地址, 端口 MAC 地址, 接口MAC地址, 接口 MAC 地址], roles: [filter, return], value_type: string}
+  port.vlan_id: {name_zh: 端口 VLAN, owner: port, property: vlan_id, description: 端口 VLAN 编号, synonyms: [VLAN], roles: [filter, return, group_by], value_type: string}
+  link.id: {name_zh: 链路编号, owner: link, property: id, description: 链路唯一标识, synonyms: [链路编号], roles: [filter, return], value_type: string}
+  link.name: {name_zh: 链路名称, owner: link, property: name, description: 链路名称, synonyms: [链路名称], roles: [filter, return], value_type: string}
+  link.status: {name_zh: 链路状态, owner: link, property: status, description: 链路运行状态, synonyms: [链路状态], roles: [filter, return, group_by], value_type: string}
+  link.admin_status: {name_zh: 链路管理状态, owner: link, property: admin_status, description: 链路管理状态, synonyms: [管理状态], roles: [filter, return, group_by], value_type: string}
+  link.elem_type: {name_zh: 链路类型, owner: link, property: elem_type, description: 链路类型, synonyms: [链路类型], roles: [filter, return, group_by], value_type: string}
+  link.protocol: {name_zh: 链路协议, owner: link, property: protocol, description: 链路协议, synonyms: [链路协议], roles: [filter, return, group_by], value_type: string}
+  link.vlan_id: {name_zh: 链路 VLAN, owner: link, property: vlan_id, description: 链路 VLAN 编号, synonyms: [链路 VLAN], roles: [filter, return, group_by], value_type: string}
+  fiber.id: {name_zh: 光纤编号, owner: fiber, property: id, description: 光纤唯一标识, synonyms: [光纤编号], roles: [filter, return], value_type: string}
+  fiber.name: {name_zh: 光纤名称, owner: fiber, property: name, description: 光纤名称, synonyms: [光纤名称], roles: [filter, return], value_type: string}
+  fiber.elem_type: {name_zh: 光纤类型, owner: fiber, property: elem_type, description: 光纤类型, synonyms: [光纤类型], roles: [filter, return, group_by], value_type: string}
+  fiber.location: {name_zh: 光纤位置, owner: fiber, property: location, description: 光纤所在位置, synonyms: [光纤位置], roles: [filter, return, group_by], value_type: string}
+  fiber.wavelength: {name_zh: 光纤波长, owner: fiber, property: wavelength, description: 光纤波长, synonyms: [波长], roles: [filter, return], value_type: string}
+  protocol.id: {name_zh: 协议编号, owner: protocol, property: id, description: 协议唯一标识, synonyms: [协议编号], roles: [filter, return], value_type: string}
+  protocol.name: {name_zh: 协议名称, owner: protocol, property: name, description: 协议名称, synonyms: [协议名称], roles: [filter, return], value_type: string}
+  protocol.version: {name_zh: 协议版本, owner: protocol, property: version, description: 协议版本, synonyms: [协议版本], roles: [filter, return], value_type: string}
+  protocol.standard: {name_zh: 协议标准, owner: protocol, property: standard, description: 协议标准, synonyms: [协议标准], roles: [filter, return], value_type: string}
+  protocol.ietf_category: {name_zh: IETF 分类, owner: protocol, property: ietf_category, description: 协议 IETF 分类, synonyms: [IETF 分类], roles: [filter, return, group_by], value_type: string}
 
 facts:
-  service.bandwidth:
-    name_zh: 服务带宽
-    owner: service
-    property: bandwidth
-    description: 服务带宽
-    synonyms: [服务带宽, 业务带宽, 服务带宽值, 业务带宽值]
-    roles: [filter, return, order_by]
-    value_type: number
-    unit: Mbps
-    default_aggregations: [avg, max, min]
-  service.latency:
-    name_zh: 服务时延
-    owner: service
-    property: latency
-    description: 服务时延
-    synonyms: [服务时延, 业务时延, 服务延迟, 业务延迟]
-    roles: [filter, return, order_by]
-    value_type: number
-    unit: ms
-    default_aggregations: [avg, max, min]
-  tunnel.latency:
-    name_zh: 隧道时延
-    owner: tunnel
-    property: latency
-    description: 隧道时延
-    synonyms: [隧道时延, 隧道延迟, 时延, 延迟值]
-    roles: [filter, return, order_by]
-    value_type: number
-    unit: ms
-    default_aggregations: [avg, max, min]
-  tunnel.bandwidth:
-    name_zh: 隧道带宽
-    owner: tunnel
-    property: bandwidth
-    description: 隧道带宽
-    synonyms: [隧道带宽, 带宽]
-    roles: [filter, return, order_by]
-    value_type: number
-    unit: Mbps
-    default_aggregations: [avg, max, min]
-  port.speed:
-    name_zh: 端口速率
-    owner: port
-    property: speed
-    description: 端口速率
-    synonyms: [端口速率, 接口速率]
-    roles: [filter, return, order_by]
-    value_type: number
-    unit: Mbps
-    default_aggregations: [avg, max, min]
-  link.bandwidth:
-    name_zh: 链路带宽
-    owner: link
-    property: bandwidth
-    description: 链路带宽
-    synonyms: [链路带宽]
-    roles: [filter, return, order_by]
-    value_type: number
-    unit: Mbps
-    default_aggregations: [avg, max, min]
-  link.latency:
-    name_zh: 链路时延
-    owner: link
-    property: latency
-    description: 链路时延
-    synonyms: [链路时延]
-    roles: [filter, return, order_by]
-    value_type: number
-    unit: ms
-    default_aggregations: [avg, max, min]
-  link.mtu:
-    name_zh: 链路 MTU
-    owner: link
-    property: mtu
-    description: 链路 MTU
-    synonyms: [MTU]
-    roles: [filter, return, order_by]
-    value_type: number
-    default_aggregations: [avg, max, min]
-  fiber.length:
-    name_zh: 光纤长度
-    owner: fiber
-    property: length
-    description: 光纤长度
-    synonyms: [光纤长度, 长度]
-    roles: [filter, return, order_by]
-    value_type: number
-    unit: km
-    default_aggregations: [avg, max, min]
-  fiber.bandwidth_capacity:
-    name_zh: 光纤带宽容量
-    owner: fiber
-    property: bandwidth_capacity
-    description: 光纤带宽容量
-    synonyms: [光纤容量, 带宽容量]
-    roles: [filter, return, order_by]
-    value_type: number
-    unit: Mbps
-    default_aggregations: [avg, max, min]
+  service.bandwidth: {name_zh: 服务带宽, owner: service, property: bandwidth, description: 服务带宽, synonyms: [服务带宽, 业务带宽, 服务带宽值, 业务带宽值], roles: [filter, return, order_by], value_type: number, unit: Mbps, default_aggregations: [avg, max, min]}
+  service.latency: {name_zh: 服务时延, owner: service, property: latency, description: 服务时延, synonyms: [服务时延, 业务时延, 服务延迟, 业务延迟], roles: [filter, return, order_by], value_type: number, unit: ms, default_aggregations: [avg, max, min]}
+  tunnel.latency: {name_zh: 隧道时延, owner: tunnel, property: latency, description: 隧道时延, synonyms: [隧道时延, 隧道延迟, 时延, 延迟值], roles: [filter, return, order_by], value_type: number, unit: ms, default_aggregations: [avg, max, min]}
+  tunnel.bandwidth: {name_zh: 隧道带宽, owner: tunnel, property: bandwidth, description: 隧道带宽, synonyms: [隧道带宽, 带宽], roles: [filter, return, order_by], value_type: number, unit: Mbps, default_aggregations: [avg, max, min]}
+  port.speed: {name_zh: 端口速率, owner: port, property: speed, description: 端口速率, synonyms: [端口速率, 接口速率], roles: [filter, return, order_by], value_type: number, unit: Mbps, default_aggregations: [avg, max, min]}
+  link.bandwidth: {name_zh: 链路带宽, owner: link, property: bandwidth, description: 链路带宽, synonyms: [链路带宽], roles: [filter, return, order_by], value_type: number, unit: Mbps, default_aggregations: [avg, max, min]}
+  link.latency: {name_zh: 链路时延, owner: link, property: latency, description: 链路时延, synonyms: [链路时延], roles: [filter, return, order_by], value_type: number, unit: ms, default_aggregations: [avg, max, min]}
+  link.mtu: {name_zh: 链路 MTU, owner: link, property: mtu, description: 链路 MTU, synonyms: [MTU], roles: [filter, return, order_by], value_type: number, default_aggregations: [avg, max, min]}
+  fiber.length: {name_zh: 光纤长度, owner: fiber, property: length, description: 光纤长度, synonyms: [光纤长度, 长度], roles: [filter, return, order_by], value_type: number, unit: km, default_aggregations: [avg, max, min]}
+  fiber.bandwidth_capacity: {name_zh: 光纤带宽容量, owner: fiber, property: bandwidth_capacity, description: 光纤带宽容量, synonyms: [光纤容量, 带宽容量], roles: [filter, return, order_by], value_type: number, unit: Mbps, default_aggregations: [avg, max, min]}
 
 metrics:
   service_count:
     name_zh: 服务数量
     description: 服务记录数量。
     aggregation: count
-    target:
-      entity: service
+    target: {entity: service}
     expression: count(s)
     synonyms: [服务数量, 业务数量]
     default_alias: service_count
@@ -584,8 +228,7 @@ metrics:
     name_zh: 隧道数量
     description: 隧道记录数量。
     aggregation: count
-    target:
-      entity: tunnel
+    target: {entity: tunnel}
     expression: count(t)
     synonyms: [隧道数量]
     default_alias: tunnel_count
@@ -593,8 +236,7 @@ metrics:
     name_zh: 网元数量
     description: 网元或网络设备记录数量。
     aggregation: count
-    target:
-      entity: network_element
+    target: {entity: network_element}
     expression: count(ne)
     synonyms: [网元数量, 网络设备数量, 设备数量, 网元总数, 网络设备总数, 设备总数]
     default_alias: network_element_count
@@ -602,8 +244,7 @@ metrics:
     name_zh: 端口数量
     description: 端口或接口记录数量。
     aggregation: count
-    target:
-      entity: port
+    target: {entity: port}
     expression: count(p)
     synonyms: [端口数量, 接口数量, 端口总数, 接口总数]
     default_alias: port_count
@@ -611,8 +252,7 @@ metrics:
     name_zh: 光纤数量
     description: 光纤记录数量。
     aggregation: count
-    target:
-      entity: fiber
+    target: {entity: fiber}
     expression: count(f)
     synonyms: [光纤数量, 纤芯数量, 光纤总数, 纤芯总数]
     default_alias: fiber_count
@@ -620,8 +260,7 @@ metrics:
     name_zh: 链路数量
     description: 链路记录数量。
     aggregation: count
-    target:
-      entity: link
+    target: {entity: link}
     expression: count(l)
     synonyms: [链路数量, 连接数量, 链路总数]
     default_alias: link_count
@@ -629,8 +268,7 @@ metrics:
     name_zh: 协议数量
     description: 协议记录数量。
     aggregation: count
-    target:
-      entity: protocol
+    target: {entity: protocol}
     expression: count(proto)
     synonyms: [协议数量, 网络协议数量, 协议总数]
     default_alias: protocol_count
@@ -638,9 +276,7 @@ metrics:
     name_zh: 平均隧道时延
     description: 对隧道时延求平均值。
     aggregation: avg
-    target:
-      entity: tunnel
-      field: latency
+    target: {entity: tunnel, field: latency}
     expression: avg(t.latency)
     synonyms: [平均隧道时延, 平均时延]
     default_alias: avg_tunnel_latency
@@ -648,9 +284,7 @@ metrics:
     name_zh: 最大隧道带宽
     description: 对隧道带宽取最大值。
     aggregation: max
-    target:
-      entity: tunnel
-      field: bandwidth
+    target: {entity: tunnel, field: bandwidth}
     expression: max(t.bandwidth)
     synonyms: [最大隧道带宽, 最大带宽]
     default_alias: max_tunnel_bandwidth
