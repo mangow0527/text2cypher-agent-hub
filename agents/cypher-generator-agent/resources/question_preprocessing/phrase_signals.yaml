@@ -1,0 +1,216 @@
+# 自然语言问题预处理：短语和结构信号配置
+#
+# 这个文件用于第 2 步“识别短语和结构信号”。
+# 本配置只标注文本证据和轻量范围信号，不做业务语义映射，不提取查询结构字段。
+
+version: 1
+resource_id: phrase_signals_dictionary
+name_zh: 自然语言问题短语和结构信号词典
+description: >
+  用于从 cleaned_question 中识别寒暄、背景边界、自我修正词、
+  查询动作词、连接词、返回引导词、礼貌语和上下文指代。
+  识别结果只作为后续自我修正、背景剥离、复合检测和准入判断的文本证据。
+
+# -----------------------------------------------------------------------------
+# 1. 匹配策略
+# -----------------------------------------------------------------------------
+matching_policy:
+  prefer_longer_span: true
+  preserve_offsets: true
+  overlap_priority:
+    - self_correction_marker
+    - query_intro
+    - background_transition
+    - return_intro
+    - sequence_connector
+    - cross_turn_reference
+    - reference_marker
+    - greeting
+    - filler
+    - politeness
+
+# -----------------------------------------------------------------------------
+# 2. 短语信号组
+# -----------------------------------------------------------------------------
+phrase_groups:
+  greetings:
+    kind: greeting
+    action: safe_to_strip
+    match_type: phrase
+    items:
+      - id: greeting_hello
+        text: 你好
+      - id: greeting_polite_hello
+        text: 您好
+
+  fillers:
+    kind: filler
+    action: safe_to_strip
+    match_type: phrase
+    items:
+      - id: filler_now_just
+        text: 现在就是
+      - id: filler_actually
+        text: 其实
+      - id: filler_acknowledgement_um
+        text: 嗯
+      - id: filler_hesitation_er
+        text: 呃
+      - id: filler_hesitation_alt
+        text: 额
+
+  background_transitions:
+    kind: background_transition
+    action: boundary_signal
+    match_type: phrase
+    items:
+      - id: background_so
+        text: 所以
+      - id: background_therefore
+        text: 因此
+      - id: background_need_query
+        text: 需要查询一下
+      - id: background_want_query
+        text: 想查询一下
+
+  query_intros:
+    kind: query_intro
+    action: query_signal
+    match_type: phrase
+    items:
+      - id: query_intro_query
+        text: 查询
+      - id: query_intro_query_once
+        text: 查询一下
+      - id: query_intro_find
+        text: 查一下
+      - id: query_intro_look
+        text: 看一下
+      - id: query_intro_help_find
+        text: 帮我查
+
+  self_correction_markers:
+    kind: self_correction_marker
+    action: correction_signal
+    match_type: phrase
+    items:
+      - id: correction_marker_oops_wrong
+        text: 哦不对
+      - id: correction_marker_wait_wrong
+        text: 啊不对
+      - id: correction_marker_wrong
+        text: 不对
+      - id: correction_marker_not
+        text: 不是
+      - id: correction_marker_change_to
+        text: 改成
+      - id: correction_marker_replace_with
+        text: 改为
+      - id: correction_marker_should_be
+        text: 应该是
+      - id: correction_marker_correction
+        text: 更正一下
+
+  sequence_connectors:
+    kind: sequence_connector
+    action: connector_signal
+    match_type: phrase
+    items:
+      - id: connector_then
+        text: 然后
+      - id: connector_and
+        text: 以及
+      - id: connector_also
+        text: 同时
+      - id: connector_and_also
+        text: 并且
+
+  return_intros:
+    kind: return_intro
+    action: expression_wrapper
+    match_type: phrase
+    items:
+      - id: return_intro_return
+        text: 返回
+      - id: return_intro_give_me_return
+        text: 给我返回
+      - id: return_intro_need_return
+        text: 需要返回
+      - id: return_intro_i_need_return
+        text: 我需要返回
+      - id: return_intro_you_need_give_me_return
+        text: 你需要给我返回
+      - id: return_intro_provide_to_me
+        text: 给我提供
+
+  politeness:
+    kind: politeness
+    action: safe_to_strip
+    match_type: phrase
+    items:
+      - id: politeness_thanks
+        text: 谢谢
+      - id: politeness_thanks_particle
+        text: 谢谢啦
+      - id: politeness_trouble
+        text: 麻烦了
+      - id: politeness_please
+        text: 麻烦
+
+  reference_markers:
+    kind: reference_marker
+    action: reference_signal
+    match_type: phrase
+    items:
+      - id: reference_marker_this
+        text: 这个
+      - id: reference_marker_that
+        text: 那个
+      - id: reference_marker_his
+        text: 他的
+      - id: reference_marker_it
+        text: 它
+      - id: reference_marker_them
+        text: 它们
+
+  cross_turn_references:
+    kind: cross_turn_reference
+    action: context_required_signal
+    match_type: phrase
+    items:
+      - id: cross_turn_reference_above_one
+        text: 上面那个
+      - id: cross_turn_reference_previous_that_one
+        text: 刚才的那个
+      - id: cross_turn_reference_previous_one
+        text: 刚才的
+      - id: cross_turn_reference_mentioned_before
+        text: 前面说的
+      - id: cross_turn_reference_last_time
+        text: 上一次那个
+
+# -----------------------------------------------------------------------------
+# 3. 结构信号汇总规则
+# -----------------------------------------------------------------------------
+scope_signal_rules:
+  has_query_signal:
+    any_kind:
+      - query_intro
+  has_self_correction:
+    any_kind:
+      - self_correction_marker
+  has_background_boundary:
+    any_kind:
+      - background_transition
+  has_sequence_connector:
+    any_kind:
+      - sequence_connector
+  has_return_intro:
+    any_kind:
+      - return_intro
+  has_reference_marker:
+    any_kind:
+      - reference_marker
+  has_cross_turn_reference:
+    any_kind:
+      - cross_turn_reference

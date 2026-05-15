@@ -1,0 +1,125 @@
+# 自然语言问题预处理：文本清洗配置
+#
+# 这个文件只维护文本清洗策略。
+# 通用标点识别优先交给 Unicode / regex / zhon 等能力；
+# 本配置负责定义：
+# - 重复标点如何压缩；
+# - 多余空格如何清理；
+# - 某些边界短语前如何补轻量标点；
+# - 哪些常见词允许做断词修复。
+#
+# 边界：不删除口语噪声，不做业务语义映射，不提取查询结构，不改写问题。
+
+version: 1
+resource_id: text_cleaning_dictionary
+name_zh: 自然语言问题文本清洗字典
+description: >
+  用于自然语言问题预处理第 1 步“文本清洗”的表层规范化配置。
+  本配置只服务重复标点、多余空格、缺失轻量标点和高确定性断词修复，
+  不做业务语义映射，不引用图谱 label、edge 或 property。
+
+# -----------------------------------------------------------------------------
+# 1. 通用标点识别能力
+# -----------------------------------------------------------------------------
+# 用通用库识别标点类别，再用本配置决定处理方式。
+unicode_detection:
+  preferred_sources:
+    - name: python_unicodedata
+      usage: 通过 Unicode category 判断字符类别。
+    - name: regex_unicode_properties
+      usage: 使用 \p{P}、\p{S} 等 Unicode 属性匹配标点和符号。
+    - name: zhon_hanzi_punctuation
+      usage: 作为中文标点集合的补充来源。
+  punctuation_categories:
+    - Pc # Connector punctuation，例如下划线类连接符。
+    - Pd # Dash punctuation，例如连字符、破折号。
+    - Ps # Open punctuation，例如左括号。
+    - Pe # Close punctuation，例如右括号。
+    - Pi # Initial quote，例如左引号。
+    - Pf # Final quote，例如右引号。
+    - Po # Other punctuation，例如逗号、句号、问号、顿号。
+# -----------------------------------------------------------------------------
+# 2. 空格清洗策略
+# -----------------------------------------------------------------------------
+whitespace_policy:
+  collapse_whitespace:
+    enabled: true
+    description: 合并连续空白、换行和制表符。
+  remove_safe_chinese_inner_spaces:
+    enabled: true
+    description: 删除中文字符之间明显多余的空格。
+
+# -----------------------------------------------------------------------------
+# 3. 标点清洗策略
+# -----------------------------------------------------------------------------
+punctuation_policy:
+  # 中文常见标点本身不需要改变，但要进入“可识别、可压缩”的集合。
+  chinese_punctuation_keep:
+    - ，
+    - 。
+    - 、
+    - ？
+    - ！
+    - ；
+    - ：
+    - （
+    - ）
+    - …
+
+  # 连续重复标点压缩。
+  collapse_rules:
+    - chars: ["，", ","]
+      to: ，
+    - chars: ["。", "."]
+      to: 。
+    - chars: ["、"]
+      to: 、
+    - chars: ["？", "?"]
+      to: ？
+    - chars: ["！", "!"]
+      to: ！
+    - chars: ["；", ";"]
+      to: ；
+    - chars: ["：", ":"]
+      to: ：
+    - chars: ["…", "."]
+      to: …
+
+  # 缺失轻量标点补齐。
+  light_punctuation_insertion:
+    before_phrases:
+      enabled: true
+      punctuation: ，
+      # 这些只是“补标点触发短语”，不是自我修正规则。
+      # 文本清洗只在短语前补轻量标点，不判断谁修正了谁。
+      items:
+        - 哦不对
+        - 啊不对
+        - 更正一下
+        - 改一下
+        - 换一下
+        - 改成
+        - 改为
+        - 换成
+        - 换为
+        - 应该是
+
+# -----------------------------------------------------------------------------
+# 4. 高确定性断词修复
+# -----------------------------------------------------------------------------
+# 只放高确定性的通用断词修复，不放业务字段、实体或图谱属性。
+split_word_repairs:
+  description: 被空格打断的高确定性常见词修复白名单。
+  items:
+    - from: 返 回
+      to: 返回
+    - from: 查 询
+      to: 查询
+    - from: 统 计
+      to: 统计
+    - from: 判 断
+      to: 判断
+    - from: 比 较
+      to: 比较
+    - from: 列 出
+      to: 列出
