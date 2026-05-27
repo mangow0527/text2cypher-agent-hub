@@ -1,5 +1,5 @@
 {
-  "synced_at_utc": "2026-05-26T20:03:34Z",
+  "synced_at_utc": "2026-05-27T02:43:59Z",
   "sources": {
     "cypher_generator_agent": "/home/runner/work/text2cypher-agent-hub/text2cypher-agent-hub/_source/NL2Cypher/services/cypher_generator_agent",
     "testing_agent": "/home/runner/work/text2cypher-agent-hub/text2cypher-agent-hub/_source/NL2Cypher/services/testing_agent",
