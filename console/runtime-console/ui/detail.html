@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>任务详情 - 运行结果中心</title>
-  <link rel="stylesheet" href="/ui/styles.css" />
+  <title>任务详情 - NL2Cypher 工作台</title>
+  <link rel="stylesheet" href="/ui/styles.css?v=runtime-summary-layout-20260601" />
 </head>
 <body>
   <main class="layout">
     <section class="masthead">
       <div>
-        <p class="eyebrow">QA Runtime / 任务详情</p>
+        <p class="eyebrow">NL2Cypher 工作台 / 任务详情</p>
         <h1>任务详情 <span>Runtime Task Detail</span></h1>
         <p id="task-meta">正在加载任务详情。</p>
       </div>
@@ -27,14 +27,14 @@
     <section class="panel agent-evidence-panel">
       <div class="section-heading">
         <h2>Agent 落盘信息 <span>Persisted Agent Evidence</span></h2>
-        <p>按 cypher-generator-agent、testing-agent、repair-agent 展示单题完整证据。</p>
+        <p>按 cypher-generator-agent、testing-agent 展示单题完整证据，CGA 区域以 GraphTrace v1 为主。</p>
       </div>
       <div class="pipeline" id="pipeline-view">
-        <p class="empty">正在加载三个 agent 的落盘信息。</p>
+        <p class="empty">正在加载两个 agent 的落盘信息。</p>
       </div>
     </section>
   </main>
 
-  <script src="/ui/detail.js"></script>
+  <script src="/ui/detail.js?v=runtime-summary-layout-20260601"></script>
 </body>
 </html>

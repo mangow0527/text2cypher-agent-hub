@@ -1,0 +1,49 @@
+{
+  "schema_version": "restricted_query_dsl_v1",
+  "query_id": "gq-010",
+  "query_shape": "ad_hoc_aggregate",
+  "source_question": "按状态统计端口数量",
+  "bindings": {
+    "port": {
+      "vertex_name": "Port"
+    }
+  },
+  "operations": [
+    {
+      "op": "aggregate",
+      "group_by": [
+        {
+          "alias": "status",
+          "target": "port",
+          "property": {
+            "owner": "Port",
+            "name": "status"
+          }
+        }
+      ],
+      "measures": [
+        {
+          "alias": "port_count",
+          "function": "count",
+          "target": "port",
+          "property": {
+            "owner": "Port",
+            "name": "id"
+          }
+        }
+      ]
+    }
+  ],
+  "projection": {
+    "items": [
+      {
+        "alias": "status",
+        "source": "group.status"
+      },
+      {
+        "alias": "port_count",
+        "source": "measure.port_count"
+      }
+    ]
+  }
+}

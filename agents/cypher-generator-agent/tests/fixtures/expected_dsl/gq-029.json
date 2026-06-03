@@ -1,0 +1,53 @@
+{
+  "schema_version": "restricted_query_dsl_v1",
+  "query_id": "gq-029",
+  "query_shape": "top_n",
+  "source_question": "端口最多的 5 台设备",
+  "bindings": {
+    "metric": {
+      "metric_name": "port_count"
+    }
+  },
+  "operations": [
+    {
+      "op": "metric_aggregate",
+      "metric_name": "port_count",
+      "group_by": [
+        {
+          "alias": "device",
+          "target": "ne",
+          "property": {
+            "owner": "NetworkElement",
+            "name": "id"
+          }
+        }
+      ],
+      "filters": []
+    },
+    {
+      "op": "sort",
+      "by": [
+        {
+          "source": "metric.port_count",
+          "direction": "desc"
+        }
+      ]
+    },
+    {
+      "op": "limit",
+      "value": 5
+    }
+  ],
+  "projection": {
+    "items": [
+      {
+        "alias": "device",
+        "source": "group.device"
+      },
+      {
+        "alias": "port_count",
+        "source": "metric.port_count"
+      }
+    ]
+  }
+}

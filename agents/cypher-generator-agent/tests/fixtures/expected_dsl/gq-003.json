@@ -1,0 +1,43 @@
+{
+  "schema_version": "restricted_query_dsl_v1",
+  "query_id": "gq-003",
+  "query_shape": "named_path_pattern",
+  "source_question": "隧道 tun-mpls-001 经过哪些设备信息",
+  "bindings": {
+    "primary_vertex": {
+      "vertex_name": "Tunnel"
+    }
+  },
+  "operations": [
+    {
+      "op": "use_path_pattern",
+      "path_pattern_name": "tunnel_full_path",
+      "bind_as": "path",
+      "parameters": {
+        "tunnel_id": {
+          "raw": "tun-mpls-001",
+          "normalized": "tun-mpls-001",
+          "resolver_match_type": "value_index_exact"
+        }
+      }
+    }
+  ],
+  "projection": {
+    "items": [
+      {
+        "alias": "device",
+        "source": "path.device"
+      },
+      {
+        "alias": "hop",
+        "source": "path.hop"
+      }
+    ]
+  },
+  "assumptions": [
+    {
+      "type": "path_pattern_selected",
+      "name": "tunnel_full_path"
+    }
+  ]
+}

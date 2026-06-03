@@ -48,6 +48,23 @@ class TuGraphClient:
                 elapsed_ms=elapsed_ms,
             )
 
+    async def execute_raw(self, cypher: str) -> Dict[str, Any]:
+        if self.mock_mode:
+            return self._mock_execute_raw(cypher)
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            jwt = await self._login(client)
+            response = await client.post(
+                f"{self.base_url}/cypher",
+                json={"graph": self.graph, "script": cypher},
+                headers={"Authorization": f"Bearer {jwt}", "Content-Type": "application/json"},
+            )
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {"raw_text": response.text}
+            return payload
+
     async def _login(self, client: httpx.AsyncClient) -> str:
         response = await client.post(
             f"{self.base_url}/login",
@@ -119,3 +136,19 @@ class TuGraphClient:
             error_message=None,
             elapsed_ms=15,
         )
+
+    def _mock_execute_raw(self, cypher: str) -> Dict[str, Any]:
+        normalized = cypher.lower()
+        if "matchh" in normalized or "syntax_error" in normalized:
+            return {"error_message": "Cypher syntax error near RETURN."}
+        if ":film" in normalized or ":device" in normalized:
+            return {"error_message": "Schema error: requested label does not exist in network_schema_v10."}
+        if "count(" in normalized:
+            return {
+                "header": [{"name": "count"}],
+                "result": [[3]],
+            }
+        return {
+            "header": [{"name": "id"}, {"name": "name"}],
+            "result": [["ne-1", "edge-router-1"]],
+        }

@@ -3,27 +3,23 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>运行结果中心</title>
-  <link rel="stylesheet" href="/ui/styles.css" />
+  <title>NL2Cypher 工作台</title>
+  <link rel="stylesheet" href="/ui/styles.css?v=runtime-summary-layout-20260601" onerror="this.onerror=null;this.href='styles.css?v=runtime-summary-layout-20260601';" />
 </head>
 <body>
   <main class="layout">
     <section class="masthead">
       <div>
-        <p class="eyebrow">QA Runtime / 运行结果中心</p>
-        <h1>运行结果中心 <span>Runtime Results Center</span></h1>
-        <p>只展示符合 testing-agent 新契约的正式运行索引；点击任务后进入独立详情页查看 cypher-generator-agent、testing-agent、repair-agent 的落盘证据。</p>
+        <p class="eyebrow">NL2Cypher Workbench / Runtime & Query</p>
+        <h1>NL2Cypher 工作台 <span>NL2Cypher Workbench</span></h1>
       </div>
+      <nav class="view-switcher" aria-label="运行中心视图切换">
+        <button type="button" id="runtime-view-tab" class="is-active">运行中心</button>
+        <button type="button" id="user-query-view-tab">用户查询</button>
+      </nav>
     </section>
 
-    <section class="panel services-panel">
-      <div class="section-heading">
-        <h2>服务运行状态 <span>Runtime Service Status</span></h2>
-        <p>展示五个核心服务的实时状态，用来判断当前运行链路是否健康。</p>
-      </div>
-      <div class="service-grid" id="service-grid"></div>
-    </section>
-
+    <div id="runtime-center-view">
     <section class="panel difficulty-panel">
       <div class="section-heading">
         <h2>难度结论概览 <span>Final Verdict Summary by Difficulty</span></h2>
@@ -67,7 +63,18 @@
         <p id="table-meta">正在加载任务索引...</p>
       </div>
       <div class="table-shell">
-        <table>
+        <table class="task-table">
+          <colgroup>
+            <col style="width: 76px" />
+            <col style="width: 220px" />
+            <col style="width: 180px" />
+            <col style="width: 120px" />
+            <col style="width: 210px" />
+            <col style="width: 70px" />
+            <col style="width: 430px" />
+            <col style="width: 280px" />
+            <col style="width: 474px" />
+          </colgroup>
           <thead>
             <tr>
               <th>难度</th>
@@ -90,8 +97,57 @@
         <button type="button" id="next-page">下一页</button>
       </div>
     </section>
+    </div>
+
+    <div class="is-hidden" id="user-query-view">
+      <section class="panel user-query-panel">
+        <div class="section-heading">
+          <h2>用户查询 <span>Ad Hoc Query</span></h2>
+          <p>输入自定义自然语言问题，由 CGA 生成 Cypher 后通过 testing-agent 执行 TuGraph 查询。</p>
+        </div>
+        <form class="query-form" id="user-query-form">
+          <label for="query-question">
+            <span>自然语言问题</span>
+            <textarea id="query-question" rows="4" placeholder="输入自定义查询问题" required></textarea>
+          </label>
+          <div class="table-toolbar query-toolbar">
+            <button type="submit" id="run-user-query">生成并查询</button>
+            <p id="user-query-status">等待输入。</p>
+          </div>
+          <div class="query-progress is-idle" id="user-query-progress" aria-live="polite">
+            <div class="query-progress-head">
+              <span id="user-query-progress-text">等待输入。</span>
+              <strong id="user-query-progress-percent">0%</strong>
+            </div>
+            <div class="query-progress-track" aria-hidden="true">
+              <span id="user-query-progress-fill"></span>
+            </div>
+            <ol class="query-progress-steps" id="user-query-progress-steps"></ol>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel user-query-result-panel">
+        <div class="section-heading">
+          <h2>本次反馈 <span>Current Result</span></h2>
+        </div>
+        <div class="query-result" id="user-query-result">
+          <p class="empty">暂无用户查询结果。</p>
+        </div>
+      </section>
+
+      <section class="panel user-query-history-panel">
+        <div class="section-heading">
+          <h2>查询记录 <span>Recent 20</span></h2>
+          <p>服务端持久化保存最近 20 次用户查询，点击表格行进入独立详情页查看完整反馈。</p>
+        </div>
+        <div id="user-query-history">
+          <p class="empty">暂无查询记录。</p>
+        </div>
+      </section>
+    </div>
   </main>
 
-  <script src="/ui/app.js"></script>
+  <script src="/ui/app.js?v=runtime-summary-layout-20260601" onerror="this.onerror=null;this.src='app.js?v=runtime-summary-layout-20260601';"></script>
 </body>
 </html>

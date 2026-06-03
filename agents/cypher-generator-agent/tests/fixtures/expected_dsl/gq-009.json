@@ -1,0 +1,40 @@
+{
+  "schema_version": "restricted_query_dsl_v1",
+  "query_id": "gq-009",
+  "query_shape": "metric_aggregate",
+  "source_question": "按设备类型统计设备数量",
+  "bindings": {
+    "metric": {
+      "metric_name": "device_count"
+    }
+  },
+  "operations": [
+    {
+      "op": "metric_aggregate",
+      "metric_name": "device_count",
+      "group_by": [
+        {
+          "alias": "elem_type",
+          "target": "ne",
+          "property": {
+            "owner": "NetworkElement",
+            "name": "elem_type"
+          }
+        }
+      ],
+      "filters": []
+    }
+  ],
+  "projection": {
+    "items": [
+      {
+        "alias": "elem_type",
+        "source": "group.elem_type"
+      },
+      {
+        "alias": "device_count",
+        "source": "metric.device_count"
+      }
+    ]
+  }
+}

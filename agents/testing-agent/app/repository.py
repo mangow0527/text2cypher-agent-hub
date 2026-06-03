@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, Optional
 
 from .models import (
     CgaGenerationNonSuccessReport,
+    CgaQuestionReceivedReport,
     EvaluationSummary,
     ExecutionResult,
     GeneratedCypherSubmissionRequest,
@@ -24,6 +25,7 @@ from .models import (
 @dataclass
 class _PathSet:
     goldens: Path
+    question_receipts: Path
     submissions: Path
     attempts: Path
     generation_failures: Path
@@ -36,13 +38,21 @@ class TestingRepository:
     def __init__(self, data_dir: str) -> None:
         paths = _PathSet(
             goldens=Path(data_dir) / "goldens",
+            question_receipts=Path(data_dir) / "question_receipts",
             submissions=Path(data_dir) / "submissions",
             attempts=Path(data_dir) / "submission_attempts",
             generation_failures=Path(data_dir) / "generation_failures",
             tickets=Path(data_dir) / "issue_tickets",
         )
         self._paths = paths
-        for path in (paths.goldens, paths.submissions, paths.attempts, paths.generation_failures, paths.tickets):
+        for path in (
+            paths.goldens,
+            paths.question_receipts,
+            paths.submissions,
+            paths.attempts,
+            paths.generation_failures,
+            paths.tickets,
+        ):
             path.mkdir(parents=True, exist_ok=True)
 
     def save_golden(self, request: QAGoldenRequest) -> None:
@@ -62,6 +72,25 @@ class TestingRepository:
 
     def get_golden(self, qa_id: str) -> Optional[Dict[str, Any]]:
         path = self._paths.goldens / f"{qa_id}.json"
+        if not path.exists():
+            return None
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def save_question_received_report(self, report: CgaQuestionReceivedReport) -> None:
+        path = self._question_received_report_path(report.id)
+        payload = report.model_dump(mode="json")
+        payload["received_at"] = _utc_now()
+        if path.exists():
+            existing = json.loads(path.read_text(encoding="utf-8"))
+            comparable = {key: value for key, value in existing.items() if key != "received_at"}
+            if comparable == report.model_dump(mode="json"):
+                return
+            if comparable.get("generation_run_id") == report.generation_run_id:
+                raise ValueError(f"CGA question receipt conflict for id={report.id}")
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def get_question_received_report(self, qa_id: str) -> Optional[Dict[str, Any]]:
+        path = self._question_received_report_path(qa_id)
         if not path.exists():
             return None
         return json.loads(path.read_text(encoding="utf-8"))
@@ -341,6 +370,9 @@ class TestingRepository:
 
     def _generation_failure_report_path(self, qa_id: str, generation_run_id: str) -> Path:
         return self._paths.generation_failures / f"{qa_id}__{generation_run_id}.json"
+
+    def _question_received_report_path(self, qa_id: str) -> Path:
+        return self._paths.question_receipts / f"{qa_id}.json"
 
 
 def _utc_now() -> str:

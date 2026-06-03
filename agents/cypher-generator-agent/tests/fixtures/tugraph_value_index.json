@@ -1,0 +1,126 @@
+{
+  "schema_version": "static_value_index_v1",
+  "source": "tugraph_schema_static_fixture",
+  "description": "Static literal corpus generated from services/testing_agent/docs/reference/schema.json. It is not a live TuGraph lookup service.",
+  "live_lookup": false,
+  "values": {
+    "NetworkElement": {
+      "elem_type": {
+        "router": {},
+        "switch": {},
+        "firewall": {},
+        "load_balancer": {},
+        "wan_optimizer": {}
+      },
+      "id": {
+        "ne-0001": {
+          "source": "fixture_example"
+        },
+        "ne-0002": {
+          "source": "fixture_example"
+        }
+      }
+    },
+    "Protocol": {
+      "ietf_category": {
+        "Routing": {},
+        "Transport": {},
+        "Applications": {},
+        "Security": {},
+        "Management": {}
+      },
+      "id": {
+        "proto-bgp": {
+          "source": "fixture_example"
+        },
+        "proto-mpls-te": {
+          "source": "fixture_example"
+        }
+      }
+    },
+    "Tunnel": {
+      "elem_type": {
+        "MPLS-TE": {},
+        "GRE": {},
+        "IPsec": {},
+        "L2TP": {},
+        "VXLAN": {},
+        "MPLS-VPN": {}
+      },
+      "id": {
+        "tun-mpls-001": {
+          "source": "fixture_example"
+        },
+        "tun-ipsec-001": {
+          "source": "fixture_example"
+        }
+      }
+    },
+    "Service": {
+      "quality_of_service": {
+        "Gold": {},
+        "Silver": {},
+        "Bronze": {},
+        "Best_Effort": {}
+      },
+      "elem_type": {
+        "MPLS-VPN": {},
+        "QoS": {},
+        "L3VPN": {},
+        "MPLS-TE": {},
+        "Firewall_Service": {}
+      },
+      "id": {
+        "svc-gold-001": {
+          "source": "fixture_example"
+        },
+        "svc-silver-002": {
+          "source": "fixture_example"
+        }
+      }
+    },
+    "Port": {
+      "status": {
+        "up": {},
+        "down": {},
+        "administratively_down": {}
+      },
+      "elem_type": {
+        "physical": {},
+        "logical": {},
+        "virtual": {}
+      },
+      "id": {
+        "port-ge-0-0-0": {
+          "source": "fixture_example"
+        },
+        "port-xe-0-0-1": {
+          "source": "fixture_example"
+        }
+      }
+    },
+    "Fiber": {
+      "elem_type": {
+        "single-mode": {},
+        "multi-mode": {}
+      },
+      "id": {
+        "fiber-0001": {
+          "source": "fixture_example"
+        }
+      }
+    },
+    "Link": {
+      "admin_status": {
+        "up": {},
+        "down": {},
+        "testing": {}
+      },
+      "id": {
+        "link-0001": {
+          "source": "fixture_example"
+        }
+      }
+    }
+  }
+}

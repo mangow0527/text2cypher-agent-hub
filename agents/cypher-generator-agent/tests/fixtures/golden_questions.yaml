@@ -1,0 +1,414 @@
+golden_set_version: golden_test_set_v1
+description: >
+  Static Golden Test Set v1 for graph-native Cypher generation. Generated cases
+  intentionally defer exact DSL and Cypher fixtures to later IRs while declaring
+  which IR must fill them in.
+golden_questions:
+  - id: gq-001
+    question: Gold 服务使用了哪些隧道ID
+    expected_status: generated
+    primary_ir: IR-05
+    expected_reason_code: generated
+    coverage: single_hop
+    query_shape: single_hop_traversal
+    expected_dsl_ir: IR-05
+    cypher_filled_by_ir: IR-10
+    expected_dsl_fixture: expected_dsl/gq-001.json
+    expected_cypher_fixture: expected_cypher/gq-001.cypher
+    regression_scope: smoke
+    ci_smoke: true
+
+  - id: gq-002
+    question: 服务 svc-gold-001 使用了哪些隧道ID
+    expected_status: generated
+    primary_ir: IR-05
+    expected_reason_code: generated
+    coverage: literal
+    query_shape: single_hop_traversal
+    expected_dsl_ir: IR-05
+    cypher_filled_by_ir: IR-10
+    expected_dsl_fixture: expected_dsl/gq-002.json
+    expected_cypher_fixture: expected_cypher/gq-002.cypher
+    regression_scope: smoke
+    ci_smoke: true
+
+  - id: gq-003
+    question: 隧道 tun-mpls-001 经过哪些设备信息
+    expected_status: generated
+    primary_ir: IR-05
+    expected_reason_code: generated
+    coverage: path_pattern
+    query_shape: named_path_pattern
+    expected_dsl_ir: IR-05
+    cypher_filled_by_ir: IR-10
+    expected_dsl_fixture: expected_dsl/gq-003.json
+    expected_cypher_fixture: expected_cypher/gq-003.cypher
+    regression_scope: smoke
+    ci_smoke: true
+
+  - id: gq-004
+    question: tun-mpls-001 的源端设备是什么
+    expected_status: generated
+    primary_ir: IR-05
+    expected_reason_code: generated
+    coverage: single_hop
+    query_shape: single_hop_traversal
+    expected_dsl_ir: IR-05
+    cypher_filled_by_ir: IR-10
+    ci_smoke: false
+
+  - id: gq-005
+    question: tun-mpls-001 的宿端设备是什么
+    expected_status: generated
+    primary_ir: IR-05
+    expected_reason_code: generated
+    coverage: single_hop
+    query_shape: single_hop_traversal
+    expected_dsl_ir: IR-05
+    cypher_filled_by_ir: IR-10
+    ci_smoke: false
+
+  - id: gq-006
+    question: 设备 ne-0001 有哪些端口ID
+    expected_status: generated
+    primary_ir: IR-05
+    expected_reason_code: generated
+    coverage: literal
+    query_shape: single_hop_traversal
+    expected_dsl_ir: IR-05
+    cypher_filled_by_ir: IR-10
+    expected_dsl_fixture: expected_dsl/gq-006.json
+    expected_cypher_fixture: expected_cypher/gq-006.cypher
+    regression_scope: smoke
+    ci_smoke: true
+
+  - id: gq-007
+    question: 当前 down 的端口ID有哪些
+    expected_status: generated
+    primary_ir: IR-05
+    expected_reason_code: generated
+    coverage: single_hop
+    query_shape: vertex_lookup
+    expected_dsl_ir: IR-05
+    cypher_filled_by_ir: IR-10
+    expected_dsl_fixture: expected_dsl/gq-007.json
+    expected_cypher_fixture: expected_cypher/gq-007.cypher
+    regression_scope: full
+    ci_smoke: false
+
+  - id: gq-008
+    question: 全网有多少台防火墙
+    expected_status: generated
+    primary_ir: IR-18
+    expected_reason_code: generated
+    coverage: literal
+    query_shape: ad_hoc_aggregate
+    expected_dsl_ir: IR-18
+    cypher_filled_by_ir: IR-18
+    expected_dsl_fixture: expected_dsl/gq-008.json
+    expected_cypher_fixture: expected_cypher/gq-008.cypher
+    regression_scope: smoke
+    ci_smoke: true
+
+  - id: gq-009
+    question: 按设备类型统计设备数量
+    expected_status: generated
+    primary_ir: IR-18
+    expected_reason_code: generated
+    coverage: single_hop
+    query_shape: metric_aggregate
+    expected_dsl_ir: IR-18
+    cypher_filled_by_ir: IR-18
+    expected_dsl_fixture: expected_dsl/gq-009.json
+    expected_cypher_fixture: expected_cypher/gq-009.cypher
+    regression_scope: full
+    ci_smoke: false
+
+  - id: gq-010
+    question: 按状态统计端口数量
+    expected_status: generated
+    primary_ir: IR-18
+    expected_reason_code: generated
+    coverage: single_hop
+    query_shape: ad_hoc_aggregate
+    expected_dsl_ir: IR-18
+    cypher_filled_by_ir: IR-18
+    expected_dsl_fixture: expected_dsl/gq-010.json
+    expected_cypher_fixture: expected_cypher/gq-010.cypher
+    regression_scope: full
+    ci_smoke: false
+
+  - id: gq-011
+    question: 按服务等级统计业务数量
+    expected_status: generated
+    primary_ir: IR-18
+    expected_reason_code: generated
+    coverage: single_hop
+    query_shape: metric_aggregate
+    expected_dsl_ir: IR-18
+    cypher_filled_by_ir: IR-18
+    ci_smoke: false
+
+  - id: gq-012
+    question: 找出所有经过设备 ne-0001 的隧道
+    expected_status: generated
+    primary_ir: IR-17
+    expected_reason_code: generated
+    coverage: path_pattern
+    query_shape: variable_path_traversal
+    expected_dsl_ir: IR-17
+    cypher_filled_by_ir: IR-17
+    expected_dsl_fixture: expected_dsl/gq-012.json
+    expected_cypher_fixture: expected_cypher/gq-012.cypher
+    regression_scope: smoke
+    ci_smoke: true
+
+  - id: gq-013
+    question: 带宽大于 1000 的隧道有哪些
+    expected_status: generated
+    primary_ir: IR-05
+    expected_reason_code: generated
+    coverage: literal
+    query_shape: vertex_lookup
+    expected_dsl_ir: IR-05
+    cypher_filled_by_ir: IR-10
+    ci_smoke: false
+
+  - id: gq-014
+    question: VPN 类型的服务有哪些
+    expected_status: generated
+    primary_ir: IR-05
+    expected_reason_code: generated
+    coverage: single_hop
+    query_shape: vertex_lookup
+    expected_dsl_ir: IR-05
+    cypher_filled_by_ir: IR-10
+    ci_smoke: false
+
+  - id: gq-015
+    question: 防火墙设备有哪些端口
+    expected_status: generated
+    primary_ir: IR-05
+    expected_reason_code: generated
+    coverage: single_hop
+    query_shape: single_hop_traversal
+    expected_dsl_ir: IR-05
+    cypher_filled_by_ir: IR-10
+    ci_smoke: false
+
+  - id: gq-016
+    question: 隧道 tun-srte-002 的完整路径
+    expected_status: generated
+    primary_ir: IR-05
+    expected_reason_code: generated
+    coverage: path_pattern
+    query_shape: named_path_pattern
+    expected_dsl_ir: IR-05
+    cypher_filled_by_ir: IR-10
+    ci_smoke: false
+
+  - id: gq-017
+    question: 设备 ne-9999 有哪些端口ID
+    expected_status: generated
+    primary_ir: IR-03a
+    expected_reason_code: generated
+    coverage: literal
+    query_shape: single_hop_traversal
+    expected_dsl_ir: IR-03a
+    cypher_filled_by_ir: IR-03a
+    expected_dsl_fixture: expected_dsl/gq-017.json
+    expected_cypher_fixture: expected_cypher/gq-017.cypher
+    regression_scope: smoke
+    ci_smoke: true
+
+  - id: gq-018
+    question: 查一下端口情况
+    expected_status: clarification_required
+    primary_ir: IR-15
+    expected_reason_code: ambiguous_port_intent
+    reason: clarification
+    coverage: shape_mismatch
+    query_shape: vertex_lookup
+    ci_smoke: false
+
+  - id: gq-019
+    question: 收入增长情况怎么样
+    expected_status: clarification_required
+    primary_ir: IR-13
+    expected_reason_code: coverage_failure
+    reason: failure
+    coverage: coverage_failure
+    query_shape: unsupported
+    regression_scope: smoke
+    ci_smoke: true
+
+  - id: gq-020
+    question: 计算 ne-0001 到 ne-0004 的最短路径
+    expected_status: unsupported_query_shape
+    primary_ir: IR-15
+    expected_reason_code: unsupported_shortest_path
+    reason: unsupported
+    coverage: unsupported_query
+    query_shape: unsupported
+    ci_smoke: false
+
+  - id: gq-021
+    question: 用 OPTIONAL MATCH 查没有端口的设备
+    expected_status: unsupported_query_shape
+    primary_ir: IR-15
+    expected_reason_code: unsupported_optional_match
+    reason: unsupported
+    coverage: unsupported_query
+    query_shape: unsupported
+    ci_smoke: false
+
+  - id: gq-022
+    question: 把 port-0002 的状态改成 up
+    expected_status: generation_failed
+    primary_ir: IR-03a
+    expected_reason_code: cypher_readonly_violation
+    reason: failure
+    coverage: readonly_violation
+    query_shape: unsupported
+    ci_smoke: false
+
+  - id: gq-023
+    question: 删除所有 down 端口
+    expected_status: generation_failed
+    primary_ir: IR-03a
+    expected_reason_code: cypher_readonly_violation
+    reason: failure
+    coverage: readonly_violation
+    query_shape: unsupported
+    ci_smoke: false
+
+  - id: gq-024
+    question: 服务经过哪些端口
+    expected_status: generation_failed
+    primary_ir: IR-15
+    expected_reason_code: edge_endpoint_mismatch
+    reason: failure
+    coverage: single_shot_concede
+    query_shape: single_hop_traversal
+    ci_smoke: false
+
+  - id: gq-025
+    question: 返回设备端口服务的所有字段
+    expected_status: generation_failed
+    primary_ir: IR-16
+    expected_reason_code: compiler_shape_mismatch
+    reason: failure
+    coverage: shape_mismatch
+    query_shape: single_hop_traversal
+    ci_smoke: false
+
+  - id: gq-026
+    question: 对网络拓扑跑 PageRank
+    expected_status: unsupported_query_shape
+    primary_ir: IR-15
+    expected_reason_code: unsupported_graph_algorithm
+    reason: unsupported
+    coverage: unsupported_query
+    query_shape: unsupported
+    ci_smoke: false
+
+  - id: gq-027
+    question: 这条隧道的完整路径是什么
+    expected_status: clarification_required
+    primary_ir: IR-15
+    expected_reason_code: missing_required_path_pattern_parameter
+    reason: clarification
+    coverage: path_pattern
+    query_shape: named_path_pattern
+    ci_smoke: false
+
+  - id: gq-028
+    question: Gold 和金牌服务分别使用哪些隧道
+    expected_status: clarification_required
+    primary_ir: IR-15
+    expected_reason_code: duplicate_synonym_literal_ambiguity
+    reason: clarification
+    coverage: literal
+    query_shape: single_hop_traversal
+    ci_smoke: false
+
+  - id: gq-029
+    question: 端口最多的 5 台设备
+    expected_status: generated
+    primary_ir: IR-19
+    expected_reason_code: generated
+    coverage: aggregate
+    query_shape: top_n
+    expected_dsl_ir: IR-19
+    cypher_filled_by_ir: IR-19
+    expected_dsl_fixture: expected_dsl/gq-029.json
+    expected_cypher_fixture: expected_cypher/gq-029.cypher
+    regression_scope: smoke
+    ci_smoke: true
+
+  - id: gq-030
+    question: 先按状态统计端口，再取最多的 5 个状态
+    expected_status: generated
+    primary_ir: IR-19
+    expected_reason_code: generated
+    coverage: aggregate
+    query_shape: two_step_aggregate
+    expected_dsl_ir: IR-19
+    cypher_filled_by_ir: IR-19
+    expected_dsl_fixture: expected_dsl/gq-030.json
+    expected_cypher_fixture: expected_cypher/gq-030.cypher
+    regression_scope: full
+    ci_smoke: false
+
+  - id: gq-031
+    question: 查询所有服务的 ID、名称、元素类型、服务质量等级、带宽和时延
+    expected_status: generated
+    primary_ir: MIR-001
+    expected_reason_code: generated
+    coverage: projection_slot
+    query_shape: vertex_lookup
+    expected_dsl_ir: MIR-001
+    cypher_filled_by_ir: MIR-001
+    expected_dsl_fixture: expected_dsl/gq-031.json
+    expected_cypher_fixture: expected_cypher/gq-031.cypher
+    regression_scope: smoke
+    ci_smoke: true
+
+  - id: gq-032
+    question: 查询所有服务使用的隧道，返回隧道的 ID、名称和带宽
+    expected_status: generated
+    primary_ir: MIR-001
+    expected_reason_code: generated
+    coverage: projection_slot
+    query_shape: single_hop_traversal
+    expected_dsl_ir: MIR-001
+    cypher_filled_by_ir: MIR-001
+    expected_dsl_fixture: expected_dsl/gq-032.json
+    expected_cypher_fixture: expected_cypher/gq-032.cypher
+    regression_scope: smoke
+    ci_smoke: true
+
+  - id: gq-033
+    question: 查询服务质量等级为金牌的所有服务的 ID、名称和带宽
+    expected_status: generated
+    primary_ir: MIR-001
+    expected_reason_code: generated
+    coverage: projection_slot
+    query_shape: vertex_lookup
+    expected_dsl_ir: MIR-001
+    cypher_filled_by_ir: MIR-001
+    expected_dsl_fixture: expected_dsl/gq-033.json
+    expected_cypher_fixture: expected_cypher/gq-033.cypher
+    regression_scope: full
+    ci_smoke: false
+
+  - id: gq-034
+    question: Platinum 服务使用了哪些隧道
+    expected_status: clarification_required
+    primary_ir: IR-03a
+    expected_reason_code: literal_unresolved
+    reason: failure
+    coverage: literal
+    query_shape: single_hop_traversal
+    regression_scope: full
+    ci_smoke: false

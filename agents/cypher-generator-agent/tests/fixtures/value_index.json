@@ -1,0 +1,86 @@
+{
+  "schema_version": "static_value_index_v1",
+  "source": "static_fixture",
+  "description": "Static IR-01 literal index. This fixture is not a live lookup service.",
+  "live_lookup": false,
+  "values": {
+    "NetworkElement": {
+      "id": {
+        "ne-0001": {
+          "name": "PE-Beijing-01",
+          "elem_type": "router",
+          "location": "beijing-idc-a"
+        },
+        "ne-0002": {
+          "name": "FW-Beijing-01",
+          "elem_type": "firewall",
+          "location": "beijing-idc-a"
+        },
+        "ne-0003": {
+          "name": "SW-Shanghai-01",
+          "elem_type": "switch",
+          "location": "shanghai-idc-b"
+        },
+        "ne-0004": {
+          "name": "LB-Shanghai-01",
+          "elem_type": "load_balancer",
+          "location": "shanghai-idc-b"
+        }
+      },
+      "elem_type": {
+        "router": {},
+        "switch": {},
+        "firewall": {},
+        "load_balancer": {}
+      }
+    },
+    "Tunnel": {
+      "id": {
+        "tun-mpls-001": {
+          "bandwidth": 1000.0
+        },
+        "tun-srte-002": {
+          "bandwidth": 500.0
+        }
+      }
+    },
+    "Service": {
+      "id": {
+        "svc-gold-001": {
+          "quality_of_service": "GOLD",
+          "service_type": "VPN"
+        },
+        "svc-silver-002": {
+          "quality_of_service": "SILVER",
+          "service_type": "INTERNET"
+        },
+        "svc-bronze-003": {
+          "quality_of_service": "BRONZE",
+          "service_type": "VOICE"
+        }
+      },
+      "quality_of_service": {
+        "GOLD": {},
+        "SILVER": {},
+        "BRONZE": {}
+      }
+    },
+    "Port": {
+      "id": {
+        "port-0001": {
+          "status": "up"
+        },
+        "port-0002": {
+          "status": "down"
+        },
+        "port-0003": {
+          "status": "up"
+        }
+      },
+      "status": {
+        "up": {},
+        "down": {}
+      }
+    }
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "schema_version": "restricted_query_dsl_v1",
+  "query_id": "zero-hop",
+  "query_shape": "vertex_lookup",
+  "source_question": "",
+  "bindings": {
+    "target": {
+      "vertex_name": "Service"
+    }
+  },
+  "operations": [],
+  "filters": [
+    {
+      "target": "target",
+      "property": {
+        "owner": "Service",
+        "name": "quality_of_service"
+      },
+      "operator": "eq",
+      "value": {
+        "raw": "金牌",
+        "normalized": "Gold",
+        "resolver_match_type": "value_synonym"
+      }
+    }
+  ],
+  "projection": {
+    "items": [
+      {
+        "target": "target",
+        "property": {
+          "owner": "Service",
+          "name": "id"
+        },
+        "alias": "service_id",
+        "projection_terms": [
+          "ID"
+        ]
+      },
+      {
+        "target": "target",
+        "property": {
+          "owner": "Service",
+          "name": "name"
+        },
+        "alias": "service_name",
+        "projection_terms": [
+          "名称"
+        ]
+      },
+      {
+        "target": "target",
+        "property": {
+          "owner": "Service",
+          "name": "bandwidth"
+        },
+        "alias": "service_bandwidth",
+        "projection_terms": [
+          "带宽"
+        ]
+      }
+    ]
+  }
+}

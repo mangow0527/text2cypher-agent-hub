@@ -1,0 +1,63 @@
+{
+  "schema_version": "restricted_query_dsl_v1",
+  "query_id": "gq-032",
+  "query_shape": "single_hop_traversal",
+  "source_question": "查询所有服务使用的隧道，返回隧道的 ID、名称和带宽",
+  "bindings": {
+    "start": {
+      "vertex_name": "Service"
+    },
+    "edge": {
+      "edge_name": "SERVICE_USES_TUNNEL"
+    },
+    "end": {
+      "vertex_name": "Tunnel"
+    }
+  },
+  "operations": [
+    {
+      "op": "traverse_edge",
+      "from": "start",
+      "edge": "edge",
+      "to": "end",
+      "direction": "forward"
+    }
+  ],
+  "projection": {
+    "items": [
+      {
+        "alias": "tunnel_id",
+        "target": "end",
+        "property": {
+          "owner": "Tunnel",
+          "name": "id"
+        },
+        "projection_terms": [
+          "ID"
+        ]
+      },
+      {
+        "alias": "tunnel_name",
+        "target": "end",
+        "property": {
+          "owner": "Tunnel",
+          "name": "name"
+        },
+        "projection_terms": [
+          "名称"
+        ]
+      },
+      {
+        "alias": "tunnel_bandwidth",
+        "target": "end",
+        "property": {
+          "owner": "Tunnel",
+          "name": "bandwidth"
+        },
+        "projection_terms": [
+          "带宽"
+        ]
+      }
+    ]
+  }
+}

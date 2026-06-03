@@ -1,0 +1,105 @@
+question_set_version: golden_test_set_v1
+description: Static natural-language question corpus used by IR-01 and later IRs.
+questions:
+  - id: gq-001
+    question: Gold 服务使用了哪些隧道ID
+    coverage: single_hop
+  - id: gq-002
+    question: 服务 svc-gold-001 使用了哪些隧道ID
+    coverage: literal
+  - id: gq-003
+    question: 隧道 tun-mpls-001 经过哪些设备信息
+    coverage: path_pattern
+  - id: gq-004
+    question: tun-mpls-001 的源端设备是什么
+    coverage: single_hop
+  - id: gq-005
+    question: tun-mpls-001 的宿端设备是什么
+    coverage: single_hop
+  - id: gq-006
+    question: 设备 ne-0001 有哪些端口ID
+    coverage: literal
+  - id: gq-007
+    question: 当前 down 的端口ID有哪些
+    coverage: single_hop
+  - id: gq-008
+    question: 全网有多少台防火墙
+    coverage: literal
+  - id: gq-009
+    question: 按设备类型统计设备数量
+    coverage: single_hop
+  - id: gq-010
+    question: 按状态统计端口数量
+    coverage: single_hop
+  - id: gq-011
+    question: 按服务等级统计业务数量
+    coverage: single_hop
+  - id: gq-012
+    question: 找出所有经过设备 ne-0001 的隧道
+    coverage: path_pattern
+  - id: gq-013
+    question: 带宽大于 1000 的隧道有哪些
+    coverage: literal
+  - id: gq-014
+    question: VPN 类型的服务有哪些
+    coverage: single_hop
+  - id: gq-015
+    question: 防火墙设备有哪些端口
+    coverage: single_hop
+  - id: gq-016
+    question: 隧道 tun-srte-002 的完整路径
+    coverage: path_pattern
+  - id: gq-017
+    question: 设备 ne-9999 有哪些端口ID
+    coverage: literal
+  - id: gq-018
+    question: 查一下端口情况
+    coverage: shape_mismatch
+  - id: gq-019
+    question: 收入增长情况怎么样
+    coverage: coverage_failure
+  - id: gq-020
+    question: 计算 ne-0001 到 ne-0004 的最短路径
+    coverage: unsupported_query
+  - id: gq-021
+    question: 用 OPTIONAL MATCH 查没有端口的设备
+    coverage: unsupported_query
+  - id: gq-022
+    question: 把 port-0002 的状态改成 up
+    coverage: readonly_violation
+  - id: gq-023
+    question: 删除所有 down 端口
+    coverage: readonly_violation
+  - id: gq-024
+    question: 服务经过哪些端口
+    coverage: single_shot_concede
+  - id: gq-025
+    question: 返回设备端口服务的所有字段
+    coverage: shape_mismatch
+  - id: gq-026
+    question: 对网络拓扑跑 PageRank
+    coverage: unsupported_query
+  - id: gq-027
+    question: 这条隧道的完整路径是什么
+    coverage: path_pattern
+  - id: gq-028
+    question: Gold 和金牌服务分别使用哪些隧道
+    coverage: literal
+  - id: gq-029
+    question: 端口最多的 5 台设备
+    coverage: aggregate
+  - id: gq-030
+    question: 先按状态统计端口，再取最多的 5 个状态
+    coverage: aggregate
+  - id: gq-031
+    question: 查询所有服务的 ID、名称、元素类型、服务质量等级、带宽和时延
+    coverage: projection_slot
+  - id: gq-032
+    question: 查询所有服务使用的隧道，返回隧道的 ID、名称和带宽
+    coverage: projection_slot
+  - id: gq-033
+    question: 查询服务质量等级为金牌的所有服务的 ID、名称和带宽
+    coverage: projection_slot
+  - id: gq-034
+    question: Platinum 服务使用了哪些隧道
+    coverage: literal

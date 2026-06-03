@@ -1,0 +1,42 @@
+{
+  "schema_version": "restricted_query_dsl_v1",
+  "query_id": "zero-hop",
+  "query_shape": "vertex_lookup",
+  "source_question": "",
+  "bindings": {
+    "target": {
+      "vertex_name": "Port"
+    }
+  },
+  "operations": [],
+  "filters": [
+    {
+      "property": {
+        "owner": "Port",
+        "name": "status"
+      },
+      "operator": "eq",
+      "value": {
+        "raw": "down",
+        "normalized": "down",
+        "resolver_match_type": "exact"
+      },
+      "target": "target"
+    }
+  ],
+  "projection": {
+    "items": [
+      {
+        "target": "target",
+        "property": {
+          "owner": "Port",
+          "name": "id"
+        },
+        "alias": "port_id",
+        "projection_terms": [
+          "ID"
+        ]
+      }
+    ]
+  }
+}

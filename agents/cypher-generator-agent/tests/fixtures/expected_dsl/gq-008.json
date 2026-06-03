@@ -1,0 +1,51 @@
+{
+  "schema_version": "restricted_query_dsl_v1",
+  "query_id": "zero-hop-f3",
+  "query_shape": "ad_hoc_aggregate",
+  "source_question": "",
+  "bindings": {
+    "target": {
+      "vertex_name": "NetworkElement"
+    }
+  },
+  "operations": [
+    {
+      "op": "aggregate",
+      "group_by": [],
+      "measures": [
+        {
+          "alias": "network_element_count",
+          "function": "count",
+          "target": "target",
+          "property": {
+            "owner": "NetworkElement",
+            "name": "id"
+          }
+        }
+      ]
+    }
+  ],
+  "filters": [
+    {
+      "target": "target",
+      "property": {
+        "owner": "NetworkElement",
+        "name": "elem_type"
+      },
+      "operator": "eq",
+      "value": {
+        "raw": "防火墙",
+        "normalized": "firewall",
+        "resolver_match_type": "value_synonym"
+      }
+    }
+  ],
+  "projection": {
+    "items": [
+      {
+        "alias": "network_element_count",
+        "source": "measure.network_element_count"
+      }
+    ]
+  }
+}

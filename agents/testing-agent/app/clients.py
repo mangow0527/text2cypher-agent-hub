@@ -8,8 +8,6 @@ from typing import Any, Dict
 
 import httpx
 
-from .models import IssueTicket, RepairAgentResponse
-
 logger = logging.getLogger("testing_service")
 
 
@@ -38,31 +36,6 @@ class InvalidSemanticReviewResponse(RuntimeError):
         self.request_id = request_id
         self.model = model
         self.prompt_snapshot = prompt_snapshot
-
-
-class RepairServiceClient:
-    def __init__(self, base_url: str, timeout_seconds: float) -> None:
-        self.base_url = base_url.rstrip("/")
-        self.timeout_seconds = timeout_seconds
-
-    async def submit_issue_ticket(self, ticket: IssueTicket) -> RepairAgentResponse:
-        started = time.monotonic()
-        async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-            response = await client.post(
-                f"{self.base_url}/api/v1/issue-tickets",
-                json=ticket.model_dump(mode="json"),
-            )
-            response.raise_for_status()
-            logger.info(
-                "repair_issue_ticket_submitted",
-                extra={
-                    "target": "repair.issue_tickets",
-                    "qa_id": ticket.id,
-                    "ticket_id": ticket.ticket_id,
-                    "elapsed_ms": int((time.monotonic() - started) * 1000),
-                },
-            )
-            return RepairAgentResponse.model_validate(response.json())
 
 
 class OpenAIChatCompletionLLMClient:

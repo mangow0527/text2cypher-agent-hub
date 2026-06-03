@@ -1,0 +1,56 @@
+{
+  "schema_version": "restricted_query_dsl_v1",
+  "query_id": "gq-012",
+  "query_shape": "variable_path_traversal",
+  "source_question": "找出所有经过设备 ne-0001 的隧道",
+  "bindings": {
+    "start": {
+      "vertex_name": "Tunnel"
+    },
+    "through": {
+      "vertex_name": "NetworkElement"
+    }
+  },
+  "operations": [
+    {
+      "op": "variable_path",
+      "bind_as": "path",
+      "start": "start",
+      "through": {
+        "vertex_ref": "through",
+        "filters": [
+          {
+            "target": "through",
+            "property": {
+              "owner": "NetworkElement",
+              "name": "id"
+            },
+            "operator": "eq",
+            "value": {
+              "raw": "ne-0001",
+              "normalized": "ne-0001",
+              "resolver_match_type": "value_index_exact"
+            }
+          }
+        ]
+      },
+      "allowed_edges": [
+        "PATH_THROUGH"
+      ],
+      "min_hops": 1,
+      "max_hops": 8
+    }
+  ],
+  "projection": {
+    "items": [
+      {
+        "alias": "tunnel_id",
+        "target": "start",
+        "property": {
+          "owner": "Tunnel",
+          "name": "id"
+        }
+      }
+    ]
+  }
+}

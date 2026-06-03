@@ -29,7 +29,7 @@ def test_root_level_shared_and_docs_are_removed() -> None:
     docs_dir = ROOT / "docs"
     if not docs_dir.exists():
         return
-    allowed_children = {"superpowers"}
+    allowed_children = {"experiments", "superpowers"}
     actual_children = {path.name for path in docs_dir.iterdir()}
     assert actual_children <= allowed_children
 

@@ -1,0 +1,17 @@
+baseline_set_version: cga_performance_baseline_v1
+description: >
+  Small deterministic subset for IR-16.5 baseline collection. Values are
+  recorded, not gated. Non-success cases follow current pipeline behavior and
+  are not Golden conformance assertions.
+cases:
+  - id: perf-gq-001
+    source_golden_id: gq-001
+    question: Gold 服务使用了哪些隧道ID
+    expected_status: generated
+    category: generated_smoke
+
+  - id: perf-gq-019
+    question: 收入增长情况怎么样
+    expected_status: clarification_required
+    expected_reason: coverage_failure
+    category: non_success_smoke

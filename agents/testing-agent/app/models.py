@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 Difficulty = Literal["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8"]
 Verdict = Literal["pass", "fail"]
 EvaluationState = Literal[
+    "generation_pending",
     "received_golden_only",
     "received_submission_only",
     "ready_to_evaluate",
@@ -43,8 +44,29 @@ GenerationFailureReason = Literal[
     "unauthorized_schema_reference",
     "logical_plan_mismatch",
     "semantic_match_rejected",
+    "edge_endpoint_mismatch",
+    "edge_direction_mismatch",
+    "property_owner_mismatch",
+    "metric_dimension_invalid",
+    "metric_group_by_invalid",
+    "binding_plan_incomplete",
+    "structural_coverage_missing",
     "path_planning_failed",
     "cypher_fallback_cannot_generate",
+    "cypher_syntax_invalid",
+    "cypher_readonly_violation",
+    "cypher_schema_reference_invalid",
+    "compiler_shape_mismatch",
+    "target_dialect_static_error",
+    "unsupported_query_shape",
+    "coverage_failure",
+    "literal_unresolved",
+    "repair_binding_oscillation",
+    "repair_requirements_unsatisfiable",
+    "max_repair_attempts_exceeded",
+    "question_decomposer_schema_invalid",
+    "grounded_understanding_schema_invalid",
+    "single_shot_fallback_failed",
 ]
 ServiceFailureReason = Literal[
     "knowledge_context_unavailable",
@@ -52,7 +74,12 @@ ServiceFailureReason = Literal[
     "model_invocation_failed",
     "testing_agent_submission_failed",
 ]
-GenerationReportStatus = Literal["generation_failed", "clarification_required", "service_failed"]
+GenerationReportStatus = Literal[
+    "generation_failed",
+    "clarification_required",
+    "unsupported_query_shape",
+    "service_failed",
+]
 SubmissionGenerationStatus = Literal["generated", "generation_failed"]
 
 
@@ -79,6 +106,15 @@ class GeneratedCypherSubmissionRequest(BaseModel):
     generation_status: Literal["generated"] = "generated"
     generated_cypher: str
     input_prompt_snapshot: str
+
+
+class CgaQuestionReceivedReport(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    question: str
+    generation_run_id: str
+    generation_status: Literal["generation_pending"] = "generation_pending"
 
 
 class CgaGenerationNonSuccessReport(BaseModel):
@@ -112,6 +148,12 @@ class CgaGenerationNonSuccessReport(BaseModel):
             if self.parsed_cypher is not None:
                 raise ValueError("clarification_required must not include parsed_cypher")
             return self
+        if self.generation_status == "unsupported_query_shape":
+            if self.failure_reason != "unsupported_query_shape":
+                raise ValueError("unsupported_query_shape requires unsupported_query_shape failure reason")
+            if self.parsed_cypher is not None:
+                raise ValueError("unsupported_query_shape must not include parsed_cypher")
+            return self
         if self.failure_reason not in service_reasons:
             raise ValueError("service_failed requires ServiceFailure reason")
         if self.clarification is not None:
@@ -123,6 +165,13 @@ class CgaGenerationNonSuccessReport(BaseModel):
 
 class SubmissionReceipt(BaseModel):
     accepted: bool
+
+
+class TuGraphQueryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    cypher: str = Field(..., min_length=1)
+    user_query_id: Optional[str] = None
 
 
 class RepairAgentKnowledgeRequest(BaseModel):
@@ -310,6 +359,7 @@ class SaveSubmissionResult(BaseModel):
 class EvaluationStatusResponse(BaseModel):
     id: str
     golden: Optional[Dict[str, Any]] = None
+    question_receipt: Optional[Dict[str, Any]] = None
     submission: Optional[Dict[str, Any]] = None
     attempts: List[Dict[str, Any]] = Field(default_factory=list)
     generation_failures: List[Dict[str, Any]] = Field(default_factory=list)

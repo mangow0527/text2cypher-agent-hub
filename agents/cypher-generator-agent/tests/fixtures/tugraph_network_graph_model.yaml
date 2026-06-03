@@ -1,0 +1,910 @@
+semantic_model:
+- name: network_schema_v10
+  description: 由 TuGraph 网络 schema 生成的图语义模型。
+  ai_context:
+    instructions: 以这份 TuGraph schema 作为唯一事实来源。只生成只读 Cypher；隧道完整路径查询必须使用 PATH_THROUGH，并按 hop_order
+      排序。
+    synonyms:
+    - TuGraph network schema
+    - 网络拓扑
+    - 图数据库 schema
+    examples:
+    - Gold 服务使用了哪些隧道
+    - 隧道 tun-mpls-001 经过哪些设备
+    - 全网有多少台防火墙
+  vertices:
+  - name: NetworkElement
+    id_property: id
+    description: Network element (router/switch/firewall) - RFC 1812, RFC 2401
+    ai_context:
+      synonyms:
+      - 设备
+      - 网元
+      - 网络设备
+      - device
+      - network element
+    properties:
+    - name: id
+      type: string
+      required: true
+      description: Unique identifier; pattern ^ne-[0-9]{4}$
+      ai_context:
+        synonyms:
+        - ID
+        - 标识
+        - identifier
+    - name: ip_address
+      type: string
+      required: true
+      description: IPv4 address
+      ai_context:
+        synonyms:
+        - IP 地址
+        - IPv4 地址
+        - ip address
+    - name: location
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 位置
+        - 机房
+        - 站点
+        - location
+    - name: model
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 型号
+        - model
+    - name: name
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 名称
+        - 名字
+        - name
+    - name: software_version
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 软件版本
+        - 版本
+        - software version
+    - name: elem_type
+      type: string
+      required: true
+      description: router | switch | firewall | load_balancer | wan_optimizer
+      ai_context:
+        synonyms:
+        - 类型
+        - 元素类型
+        - 设备类型
+        - 服务类型
+        - type
+      valid_values:
+      - router
+      - switch
+      - firewall
+      - load_balancer
+      - wan_optimizer
+      value_synonyms:
+        router:
+        - 路由器
+        switch:
+        - 交换机
+        firewall:
+        - 防火墙
+        - FW
+        load_balancer:
+        - 负载均衡器
+        - LB
+        wan_optimizer:
+        - 广域网优化器
+        - WAN 优化器
+    - name: vendor
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 厂商
+        - 供应商
+        - vendor
+  - name: Protocol
+    id_property: id
+    description: Network protocol definition - RFC 791 (IP), RFC 4271 (BGP)
+    ai_context:
+      synonyms:
+      - 协议
+      - 网络协议
+      - protocol
+    properties:
+    - name: id
+      type: string
+      required: true
+      description: pattern ^proto-[a-z0-9-]+$
+      ai_context:
+        synonyms:
+        - ID
+        - 标识
+        - identifier
+    - name: ietf_category
+      type: string
+      required: true
+      description: Routing | Transport | Applications | Security | Management
+      ai_context:
+        synonyms:
+        - IETF 分类
+        - 协议分类
+        - category
+      valid_values:
+      - Routing
+      - Transport
+      - Applications
+      - Security
+      - Management
+      value_synonyms:
+        Routing:
+        - 路由
+        Transport:
+        - 传输
+        Applications:
+        - 应用
+        Security:
+        - 安全
+        Management:
+        - 管理
+    - name: name
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 名称
+        - 名字
+        - name
+    - name: standard
+      type: string
+      required: true
+      description: pattern RFC [0-9]+
+      ai_context:
+        synonyms:
+        - 标准
+        - RFC
+        - standard
+    - name: version
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 版本
+        - version
+  - name: Tunnel
+    id_property: id
+    description: Network tunnel instance - RFC 3209 (MPLS-TE), RFC 4301 (IPsec). Path defined
+      EXCLUSIVELY via path_through_edges / PATH_THROUGH.
+    ai_context:
+      synonyms:
+      - 隧道
+      - tunnel
+      - MPLS 隧道
+      - IPsec 隧道
+    properties:
+    - name: bandwidth
+      type: float
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 带宽
+        - bandwidth
+    - name: latency
+      type: float
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 延迟
+        - 时延
+        - latency
+    - name: id
+      type: string
+      required: true
+      description: pattern ^tun-[a-z-]+-[0-9]+$
+      ai_context:
+        synonyms:
+        - ID
+        - 标识
+        - identifier
+    - name: ietf_standard
+      type: string
+      required: true
+      description: pattern RFC [0-9]+
+      ai_context:
+        synonyms:
+        - IETF 标准
+        - RFC
+        - standard
+    - name: name
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 名称
+        - 名字
+        - name
+    - name: elem_type
+      type: string
+      required: true
+      description: MPLS-TE | GRE | IPsec | L2TP | VXLAN | MPLS-VPN
+      ai_context:
+        synonyms:
+        - 类型
+        - 元素类型
+        - 设备类型
+        - 服务类型
+        - type
+      valid_values:
+      - MPLS-TE
+      - GRE
+      - IPsec
+      - L2TP
+      - VXLAN
+      - MPLS-VPN
+      value_synonyms:
+        MPLS-TE:
+        - MPLS TE
+        - MPLS 流量工程
+        GRE:
+        - GRE 隧道
+        IPsec:
+        - IPsec 隧道
+        L2TP:
+        - L2TP 隧道
+        VXLAN:
+        - VXLAN 隧道
+        MPLS-VPN:
+        - MPLS VPN
+        - MPLS VPN 业务
+  - name: Service
+    id_property: id
+    description: Business/service layer - RFC 4364 (MPLS-VPN), RFC 2475 (DiffServ)
+    ai_context:
+      synonyms:
+      - 服务
+      - 业务
+      - service
+    properties:
+    - name: bandwidth
+      type: float
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 带宽
+        - bandwidth
+    - name: latency
+      type: float
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 延迟
+        - 时延
+        - latency
+    - name: id
+      type: string
+      required: true
+      description: pattern ^svc-[a-z-]+-[0-9]+$
+      ai_context:
+        synonyms:
+        - ID
+        - 标识
+        - identifier
+    - name: name
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 名称
+        - 名字
+        - name
+    - name: quality_of_service
+      type: string
+      required: true
+      description: Gold | Silver | Bronze | Best_Effort
+      ai_context:
+        synonyms:
+        - 服务质量
+        - 服务质量等级
+        - 服务等级
+        - QoS
+      valid_values:
+      - Gold
+      - Silver
+      - Bronze
+      - Best_Effort
+      value_synonyms:
+        Gold:
+        - Gold
+        - 金牌
+        - 黄金级
+        Silver:
+        - Silver
+        - 银牌
+        - 白银级
+        Bronze:
+        - Bronze
+        - 铜牌
+        - 青铜级
+        Best_Effort:
+        - Best Effort
+        - 尽力而为
+    - name: elem_type
+      type: string
+      required: true
+      description: MPLS-VPN | QoS | L3VPN | MPLS-TE | Firewall_Service
+      ai_context:
+        synonyms:
+        - 类型
+        - 元素类型
+        - 设备类型
+        - 服务类型
+        - type
+      valid_values:
+      - MPLS-VPN
+      - QoS
+      - L3VPN
+      - MPLS-TE
+      - Firewall_Service
+      value_synonyms:
+        MPLS-VPN:
+        - MPLS VPN
+        - MPLS VPN 业务
+        QoS:
+        - 服务质量
+        L3VPN:
+        - 三层 VPN
+        MPLS-TE:
+        - MPLS TE
+        - MPLS 流量工程
+        Firewall_Service:
+        - 防火墙服务
+  - name: Port
+    id_property: id
+    description: Physical/logical interface - RFC 2863 (Interfaces MIB), IEEE 802.3
+    ai_context:
+      synonyms:
+      - 端口
+      - 接口
+      - port
+      - interface
+    properties:
+    - name: speed
+      type: float
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 速率
+        - 端口速率
+        - speed
+    - name: id
+      type: string
+      required: true
+      description: pattern ^port-[a-z0-9-]+$
+      ai_context:
+        synonyms:
+        - ID
+        - 标识
+        - identifier
+    - name: mac_address
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - MAC 地址
+        - mac address
+    - name: name
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 名称
+        - 名字
+        - name
+    - name: status
+      type: string
+      required: true
+      description: up | down | administratively_down
+      ai_context:
+        synonyms:
+        - 状态
+        - 运行状态
+        - status
+      valid_values:
+      - up
+      - down
+      - administratively_down
+      value_synonyms:
+        up:
+        - 正常
+        - 在线
+        - 启用
+        down:
+        - 故障
+        - 离线
+        - 中断
+        administratively_down:
+        - 管理关闭
+        - 人工关闭
+    - name: elem_type
+      type: string
+      required: true
+      description: physical | logical | virtual
+      ai_context:
+        synonyms:
+        - 类型
+        - 元素类型
+        - 设备类型
+        - 服务类型
+        - type
+      valid_values:
+      - physical
+      - logical
+      - virtual
+      value_synonyms:
+        physical:
+        - 物理
+        - 物理端口
+        logical:
+        - 逻辑
+        - 逻辑端口
+        virtual:
+        - 虚拟
+        - 虚拟端口
+    - name: vlan_id
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - VLAN
+        - VLAN ID
+        - vlan
+  - name: Fiber
+    id_property: id
+    description: Physical fiber optic cable - ITU-T G.652/G.657, RFC 2615
+    ai_context:
+      synonyms:
+      - 光纤
+      - 光缆
+      - fiber
+    properties:
+    - name: bandwidth_capacity
+      type: float
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 带宽容量
+        - 容量
+        - capacity
+    - name: length
+      type: float
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 长度
+        - 光纤长度
+        - length
+    - name: id
+      type: string
+      required: true
+      description: pattern ^fiber-[0-9]{4}$
+      ai_context:
+        synonyms:
+        - ID
+        - 标识
+        - identifier
+    - name: location
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 位置
+        - 机房
+        - 站点
+        - location
+    - name: name
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 名称
+        - 名字
+        - name
+    - name: elem_type
+      type: string
+      required: true
+      description: single-mode | multi-mode
+      ai_context:
+        synonyms:
+        - 类型
+        - 元素类型
+        - 设备类型
+        - 服务类型
+        - type
+      valid_values:
+      - single-mode
+      - multi-mode
+      value_synonyms:
+        single-mode:
+        - 单模
+        multi-mode:
+        - 多模
+    - name: wavelength
+      type: string
+      required: true
+      description: pattern ^[0-9]+nm$
+      ai_context:
+        synonyms:
+        - 波长
+        - wavelength
+  - name: Link
+    id_property: id
+    description: Logical/physical link between ports - RFC 2863 (ifTable), RFC 1213 (MIB-II)
+    ai_context:
+      synonyms:
+      - 链路
+      - 连接
+      - link
+    properties:
+    - name: bandwidth
+      type: float
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 带宽
+        - bandwidth
+    - name: latency
+      type: float
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 延迟
+        - 时延
+        - latency
+    - name: mtu
+      type: int
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - MTU
+        - 最大传输单元
+    - name: admin_status
+      type: string
+      required: true
+      description: up | down | testing
+      ai_context:
+        synonyms:
+        - 管理状态
+        - admin status
+      valid_values:
+      - up
+      - down
+      - testing
+      value_synonyms:
+        up:
+        - 正常
+        - 在线
+        - 启用
+        down:
+        - 故障
+        - 离线
+        - 中断
+        testing:
+        - 测试中
+    - name: id
+      type: string
+      required: true
+      description: pattern ^link-[0-9]{4}$
+      ai_context:
+        synonyms:
+        - ID
+        - 标识
+        - identifier
+    - name: name
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 名称
+        - 名字
+        - name
+    - name: protocol
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 协议
+        - protocol
+    - name: status
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 状态
+        - 运行状态
+        - status
+    - name: elem_type
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - 类型
+        - 元素类型
+        - 设备类型
+        - 服务类型
+        - type
+    - name: vlan_id
+      type: string
+      required: true
+      description: null
+      ai_context:
+        synonyms:
+        - VLAN
+        - VLAN ID
+        - vlan
+  edges:
+  - name: HAS_PORT
+    from: NetworkElement
+    to: Port
+    cardinality: one_to_many
+    description: 'NetworkElement owns Port (RFC 2863 Interfaces MIB); JSON key: has_port_edges'
+    direction_semantics: 存储方向：NetworkElement -> Port。语义方向：设备拥有该端口。
+    ai_context:
+      synonyms:
+      - 拥有端口
+      - 包含接口
+      - has port
+    properties:
+    - name: admin_status
+      type: string
+      required: true
+      description: Administrative status per RFC 2863
+      ai_context:
+        synonyms:
+        - 管理状态
+        - admin status
+  - name: FIBER_SRC
+    from: Fiber
+    to: Port
+    cardinality: many_to_one
+    description: 'Fiber source termination: Fiber → Port (physical layer); JSON key: fiber_src_edges'
+    direction_semantics: 存储方向：Fiber -> Port。语义方向：该 Port 是光纤源端。
+    ai_context:
+      synonyms:
+      - 光纤源端
+      - 光纤起点
+      - fiber source
+    properties: []
+  - name: FIBER_DST
+    from: Fiber
+    to: Port
+    cardinality: many_to_one
+    description: 'Fiber destination termination: Fiber → Port (physical layer); JSON key:
+      fiber_dst_edges'
+    direction_semantics: 存储方向：Fiber -> Port。语义方向：该 Port 是光纤宿端。
+    ai_context:
+      synonyms:
+      - 光纤宿端
+      - 光纤终点
+      - fiber destination
+    properties: []
+  - name: LINK_SRC
+    from: Link
+    to: Port
+    cardinality: many_to_one
+    description: 'Link source termination: Link → Port (logical layer); JSON key: link_src_edges'
+    direction_semantics: 存储方向：Link -> Port。语义方向：该 Port 是链路源端。
+    ai_context:
+      synonyms:
+      - 链路源端
+      - 链路起点
+      - link source
+    properties: []
+  - name: LINK_DST
+    from: Link
+    to: Port
+    cardinality: many_to_one
+    description: 'Link destination termination: Link → Port (logical layer); JSON key: link_dst_edges'
+    direction_semantics: 存储方向：Link -> Port。语义方向：该 Port 是链路宿端。
+    ai_context:
+      synonyms:
+      - 链路宿端
+      - 链路终点
+      - link destination
+    properties: []
+  - name: TUNNEL_SRC
+    from: Tunnel
+    to: NetworkElement
+    cardinality: many_to_one
+    description: 'Tunnel source endpoint: Tunnel → NetworkElement (redundant for query efficiency,
+      primary path via path_through_edges); JSON key: tunnel_src_edges'
+    direction_semantics: 存储方向：Tunnel -> NetworkElement。语义方向：该 NetworkElement 是隧道源端设备。
+    ai_context:
+      synonyms:
+      - 隧道源端
+      - 入口设备
+      - source device
+    properties: []
+    anti_patterns:
+    - 不要只根据 TUNNEL_SRC 和 TUNNEL_DST 推断完整隧道路由路径。
+    - 完整路径查询必须使用 PATH_THROUGH，并按 hop_order 排序。
+  - name: TUNNEL_DST
+    from: Tunnel
+    to: NetworkElement
+    cardinality: many_to_one
+    description: 'Tunnel destination endpoint: Tunnel → NetworkElement; JSON key: tunnel_dst_edges'
+    direction_semantics: 存储方向：Tunnel -> NetworkElement。语义方向：该 NetworkElement 是隧道宿端设备。
+    ai_context:
+      synonyms:
+      - 隧道宿端
+      - 出口设备
+      - destination device
+    properties: []
+    anti_patterns:
+    - 不要只根据 TUNNEL_SRC 和 TUNNEL_DST 推断完整隧道路由路径。
+    - 完整路径查询必须使用 PATH_THROUGH，并按 hop_order 排序。
+  - name: TUNNEL_PROTO
+    from: Tunnel
+    to: Protocol
+    cardinality: many_to_one
+    description: 'Tunnel protocol binding: Tunnel → Protocol (RFC 3209); JSON key: tunnel_proto_edges'
+    direction_semantics: 存储方向：Tunnel -> Protocol。语义方向：该隧道使用该协议。
+    ai_context:
+      synonyms:
+      - 隧道协议
+      - 使用协议
+      - tunnel protocol
+    properties: []
+  - name: PATH_THROUGH
+    from: Tunnel
+    to: NetworkElement
+    cardinality: many_to_many
+    description: 'Tunnel path sequence: Tunnel → NetworkElement (RFC 3209 ERO). hop_order
+      defines path order (0=source, n=destination). JSON key: path_through_edges'
+    direction_semantics: 存储方向：Tunnel -> NetworkElement。语义方向：隧道路由路径经过该设备。
+    ai_context:
+      synonyms:
+      - 经过
+      - 路径
+      - 走过
+      - traverses
+    properties:
+    - name: hop_order
+      type: int
+      required: true
+      description: Path sequence index (0=ingress LSR, n=egress LSR)
+      ai_context:
+        synonyms:
+        - 跳序
+        - 第几跳
+        - hop
+        - path order
+  - name: SERVICE_USES_TUNNEL
+    from: Service
+    to: Tunnel
+    cardinality: many_to_many
+    description: 'Service leverages Tunnel: Service → Tunnel (RFC 4364 MPLS-VPN architecture);
+      JSON key: service_uses_tunnel_edges'
+    direction_semantics: 存储方向：Service -> Tunnel。语义方向：业务承载于一个或多个 Tunnel。
+    ai_context:
+      synonyms:
+      - 使用隧道
+      - 承载于
+      - uses tunnel
+    properties: []
+  path_patterns:
+  - name: tunnel_full_path
+    description: Full ordered tunnel path using PATH_THROUGH.hop_order.
+    parameters:
+    - name: tunnel_id
+      type: string
+      description: Target Tunnel.id.
+    cypher: 'MATCH (t:Tunnel {id: $tunnel_id})-[p:PATH_THROUGH]->(ne:NetworkElement)
+
+      RETURN ne AS device, p.hop_order AS hop
+
+      ORDER BY p.hop_order ASC'
+    ai_context:
+      examples:
+      - 隧道 tun-mpls-001 经过哪些设备
+      - tun-mpls-001 的完整路径
+  metrics:
+  - name: device_count
+    description: Count network devices.
+    pattern: (ne:NetworkElement)
+    expression: count(ne)
+    valid_dimensions:
+    - ne.elem_type
+    - ne.vendor
+    - ne.location
+    ai_context:
+      synonyms:
+      - 设备数量
+      - 网元数量
+      - device count
+  - name: port_count
+    description: Count ports through the HAS_PORT edge.
+    pattern: (ne:NetworkElement)-[:HAS_PORT]->(port:Port)
+    expression: count(port)
+    valid_dimensions:
+    - ne.id
+    - ne.elem_type
+    - port.status
+    - port.elem_type
+    ai_context:
+      synonyms:
+      - 端口数量
+      - 接口数量
+      - port count
+  - name: service_count
+    description: Count services.
+    pattern: (svc:Service)
+    expression: count(svc)
+    valid_dimensions:
+    - svc.quality_of_service
+    - svc.elem_type
+    ai_context:
+      synonyms:
+      - 服务数量
+      - 业务数量
+      - service count
+  - name: tunnel_count
+    description: Count tunnels.
+    pattern: (t:Tunnel)
+    expression: count(t)
+    valid_dimensions:
+    - t.elem_type
+    - t.ietf_standard
+    ai_context:
+      synonyms:
+      - 隧道数量
+      - tunnel count
+  - name: link_count
+    description: Count links.
+    pattern: (link:Link)
+    expression: count(link)
+    valid_dimensions:
+    - link.status
+    - link.protocol
+    - link.elem_type
+    ai_context:
+      synonyms:
+      - 链路数量
+      - link count

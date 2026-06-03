@@ -1,0 +1,359 @@
+semantic_model:
+  - name: network_topology
+    description: Static network topology graph semantic model fixture for IR-01.
+    ai_context:
+      instructions: |
+        Use graph-native vocabulary only. Service-to-tunnel traversal must use
+        SERVICE_USES_TUNNEL. Tunnel path queries must use PATH_THROUGH ordered by
+        hop_order, or the named path_pattern tunnel_full_path.
+      synonyms:
+        - network topology
+        - 网络拓扑
+      examples:
+        - Gold 服务使用了哪些隧道
+        - 隧道 tun-mpls-001 经过哪些设备
+        - 全网有多少台防火墙
+
+    vertices:
+      - name: NetworkElement
+        id_property: id
+        description: Network device or managed network element.
+        ai_context:
+          synonyms:
+            - 设备
+            - 网元
+            - device
+            - network element
+        properties:
+          - name: id
+            type: string
+            required: true
+            description: Stable device identifier.
+            ai_context:
+              synonyms:
+                - 设备ID
+                - 网元ID
+                - device id
+
+          - name: name
+            type: string
+            description: Human-readable device name.
+            ai_context:
+              synonyms:
+                - 设备名
+                - 网元名称
+                - device name
+
+          - name: elem_type
+            type: string
+            description: Device type.
+            ai_context:
+              synonyms:
+                - 类型
+                - 设备类型
+                - device type
+            valid_values:
+              - router
+              - switch
+              - firewall
+              - load_balancer
+            value_synonyms:
+              router:
+                - 路由器
+              switch:
+                - 交换机
+              firewall:
+                - 防火墙
+                - FW
+              load_balancer:
+                - 负载均衡器
+                - LB
+
+          - name: location
+            type: string
+            description: Site, room, or physical location.
+            ai_context:
+              synonyms:
+                - 机房
+                - 位置
+                - location
+
+      - name: Tunnel
+        id_property: id
+        description: Network tunnel instance.
+        ai_context:
+          synonyms:
+            - 隧道
+            - tunnel
+            - MPLS 隧道
+        properties:
+          - name: id
+            type: string
+            required: true
+            description: Stable tunnel identifier.
+            ai_context:
+              synonyms:
+                - 隧道ID
+                - tunnel id
+
+          - name: bandwidth
+            type: float
+            description: Provisioned tunnel bandwidth in Mbps.
+            ai_context:
+              synonyms:
+                - 带宽
+                - bandwidth
+
+      - name: Service
+        id_property: id
+        description: Customer-facing or internal network service.
+        ai_context:
+          synonyms:
+            - 服务
+            - 业务
+            - service
+        properties:
+          - name: id
+            type: string
+            required: true
+            description: Stable service identifier.
+            ai_context:
+              synonyms:
+                - 服务ID
+                - service id
+
+          - name: quality_of_service
+            type: string
+            description: Service quality tier from the official vocabulary.
+            ai_context:
+              synonyms:
+                - QoS
+                - 服务质量
+                - 服务质量等级
+                - 服务等级
+            valid_values:
+              - GOLD
+              - SILVER
+              - BRONZE
+            value_synonyms:
+              GOLD:
+                - Gold
+                - 金牌
+              SILVER:
+                - Silver
+                - 银牌
+              BRONZE:
+                - Bronze
+                - 铜牌
+
+          - name: service_type
+            type: string
+            description: Service type from the official vocabulary.
+            ai_context:
+              synonyms:
+                - 服务类型
+                - 业务类型
+            valid_values:
+              - VPN
+              - INTERNET
+              - VOICE
+            value_synonyms:
+              VPN:
+                - VPN业务
+              INTERNET:
+                - 互联网
+              VOICE:
+                - 语音
+
+      - name: Port
+        id_property: id
+        description: Physical or logical device port.
+        ai_context:
+          synonyms:
+            - 端口
+            - port
+            - 接口
+        properties:
+          - name: id
+            type: string
+            required: true
+            description: Stable port identifier.
+            ai_context:
+              synonyms:
+                - 端口ID
+                - port id
+
+          - name: status
+            type: string
+            description: Port operational state.
+            ai_context:
+              synonyms:
+                - 端口状态
+                - 接口状态
+            valid_values:
+              - up
+              - down
+            value_synonyms:
+              up:
+                - 正常
+                - online
+              down:
+                - 故障
+                - offline
+
+    edges:
+      - name: SERVICE_USES_TUNNEL
+        from: Service
+        to: Tunnel
+        cardinality: many_to_many
+        direction_semantics: |
+          存储方向：Service -> Tunnel。
+          语义方向：业务承载于一个或多个 Tunnel。
+        description: 服务与隧道的依赖关系。
+        ai_context:
+          synonyms:
+            - 使用隧道
+            - 承载于
+            - uses tunnel
+          examples:
+            - Gold 服务使用了哪些隧道
+
+      - name: PATH_THROUGH
+        from: Tunnel
+        to: NetworkElement
+        cardinality: many_to_many
+        direction_semantics: |
+          存储方向：Tunnel -> NetworkElement。
+          语义方向：隧道路由路径经过该设备。
+          这是有序隧道路由路径查询的唯一权威边。
+        description: 有序隧道路由跳点。
+        ai_context:
+          synonyms:
+            - 经过
+            - 路径
+            - 走过
+            - traverses
+          examples:
+            - 隧道 tun-mpls-001 经过哪些设备
+        properties:
+          - name: hop_order
+            type: int
+            required: true
+            description: 有序路径跳号。0 表示入口，数值越大越靠近出口。
+            ai_context:
+              synonyms:
+                - 跳序
+                - 第几跳
+                - hop
+
+      - name: TUNNEL_SRC
+        from: Tunnel
+        to: NetworkElement
+        cardinality: one_to_one
+        direction_semantics: |
+          存储方向：Tunnel -> NetworkElement。
+          语义方向：该 NetworkElement 是隧道源端设备。
+        anti_patterns:
+          - 不要只根据 TUNNEL_SRC 和 TUNNEL_DST 推断完整隧道路由路径。
+          - 完整路径查询必须使用 PATH_THROUGH，并按 hop_order 排序。
+        description: 隧道源端。
+        ai_context:
+          synonyms:
+            - 源端
+            - 入口设备
+            - source device
+
+      - name: TUNNEL_DST
+        from: Tunnel
+        to: NetworkElement
+        cardinality: one_to_one
+        direction_semantics: |
+          存储方向：Tunnel -> NetworkElement。
+          语义方向：该 NetworkElement 是隧道宿端设备。
+        anti_patterns:
+          - 不要只根据 TUNNEL_SRC 和 TUNNEL_DST 推断完整隧道路由路径。
+          - 完整路径查询必须使用 PATH_THROUGH，并按 hop_order 排序。
+        description: 隧道宿端。
+        ai_context:
+          synonyms:
+            - 宿端
+            - 出口设备
+            - destination device
+
+      - name: HAS_PORT
+        from: NetworkElement
+        to: Port
+        cardinality: one_to_many
+        direction_semantics: |
+          存储方向：NetworkElement -> Port。
+          语义方向：设备拥有或暴露该端口。
+        description: 设备与端口的归属关系。
+        ai_context:
+          synonyms:
+            - 拥有端口
+            - 包含接口
+            - has port
+
+    path_patterns:
+      - name: tunnel_full_path
+        description: Full ordered tunnel path using PATH_THROUGH.hop_order.
+        parameters:
+          - name: tunnel_id
+            type: string
+            description: Target Tunnel.id.
+        cypher: |
+          MATCH (t:Tunnel {id: $tunnel_id})-[p:PATH_THROUGH]->(ne:NetworkElement)
+          RETURN ne AS device, p.hop_order AS hop
+          ORDER BY p.hop_order ASC
+        ai_context:
+          examples:
+            - 隧道 tun-mpls-001 经过哪些设备
+            - tun-mpls-001 的完整路径
+
+    metrics:
+      - name: device_count
+        description: Count network devices.
+        pattern: "(ne:NetworkElement)"
+        expression: "count(ne)"
+        valid_dimensions:
+          - ne.elem_type
+          - ne.location
+        ai_context:
+          synonyms:
+            - 设备数量
+            - 网元数量
+            - device count
+          examples:
+            - 全网有多少台防火墙
+            - 按位置统计设备数量
+
+      - name: port_count
+        description: Count ports through the HAS_PORT edge.
+        pattern: "(ne:NetworkElement)-[:HAS_PORT]->(port:Port)"
+        expression: "count(port)"
+        valid_dimensions:
+          - ne.id
+          - port.status
+        ai_context:
+          synonyms:
+            - 端口数量
+            - port count
+          examples:
+            - 按状态统计端口数量
+            - 端口最多的设备
+
+      - name: service_count
+        description: Count services.
+        pattern: "(svc:Service)"
+        expression: "count(svc)"
+        valid_dimensions:
+          - svc.quality_of_service
+          - svc.service_type
+        ai_context:
+          synonyms:
+            - 服务数量
+            - 业务数量
+            - service count
+          examples:
+            - 按服务等级统计业务数量
+            - Gold 服务有多少个

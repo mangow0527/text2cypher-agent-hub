@@ -1,0 +1,53 @@
+{
+  "schema_version": "restricted_query_dsl_v1",
+  "query_id": "gq-006",
+  "query_shape": "single_hop_traversal",
+  "source_question": "设备 ne-0001 有哪些端口ID",
+  "bindings": {
+    "start": {
+      "vertex_name": "NetworkElement"
+    },
+    "end": {
+      "vertex_name": "Port"
+    },
+    "edge": {
+      "edge_name": "HAS_PORT"
+    }
+  },
+  "operations": [
+    {
+      "op": "traverse_edge",
+      "from": "start",
+      "edge": "edge",
+      "to": "end",
+      "direction": "forward"
+    }
+  ],
+  "filters": [
+    {
+      "target": "start",
+      "property": {
+        "owner": "NetworkElement",
+        "name": "id"
+      },
+      "operator": "eq",
+      "value": {
+        "raw": "ne-0001",
+        "normalized": "ne-0001",
+        "resolver_match_type": "value_index_exact"
+      }
+    }
+  ],
+  "projection": {
+    "items": [
+      {
+        "alias": "port_id",
+        "target": "end",
+        "property": {
+          "owner": "Port",
+          "name": "id"
+        }
+      }
+    ]
+  }
+}

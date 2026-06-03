@@ -15,7 +15,6 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8003
     data_dir: str = "data/testing_service"
-    repair_service_url: str = "http://127.0.0.1:8002"
     request_timeout_seconds: float = 120.0
     tugraph_url: str = "http://101.37.211.45:7070"
     tugraph_username: str = "admin"

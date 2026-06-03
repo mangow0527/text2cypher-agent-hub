@@ -1,0 +1,64 @@
+{
+  "schema_version": "restricted_query_dsl_v1",
+  "query_id": "gq-030",
+  "query_shape": "two_step_aggregate",
+  "source_question": "先按状态统计端口，再取最多的 5 个状态",
+  "bindings": {
+    "port": {
+      "vertex_name": "Port"
+    }
+  },
+  "operations": [
+    {
+      "op": "subquery",
+      "bind_as": "port_status_counts",
+      "query_shape": "ad_hoc_aggregate",
+      "group_by": [
+        {
+          "alias": "status",
+          "target": "port",
+          "property": {
+            "owner": "Port",
+            "name": "status"
+          }
+        }
+      ],
+      "measures": [
+        {
+          "alias": "port_count",
+          "function": "count",
+          "target": "port",
+          "property": {
+            "owner": "Port",
+            "name": "id"
+          }
+        }
+      ]
+    },
+    {
+      "op": "sort",
+      "by": [
+        {
+          "source": "port_status_counts.port_count",
+          "direction": "desc"
+        }
+      ]
+    },
+    {
+      "op": "limit",
+      "value": 5
+    }
+  ],
+  "projection": {
+    "items": [
+      {
+        "alias": "status",
+        "source": "port_status_counts.status"
+      },
+      {
+        "alias": "port_count",
+        "source": "port_status_counts.port_count"
+      }
+    ]
+  }
+}

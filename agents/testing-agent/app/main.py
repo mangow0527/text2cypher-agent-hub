@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Any, Dict
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
@@ -6,7 +6,13 @@ import uvicorn
 
 from .config import get_settings
 from .models import EvaluationStatusResponse, IssueTicket, QAGoldenResponse, SubmissionReceipt
-from .schemas import CgaGenerationNonSuccessReport, GeneratedCypherSubmissionRequest, QAGoldenRequest
+from .schemas import (
+    CgaGenerationNonSuccessReport,
+    CgaQuestionReceivedReport,
+    GeneratedCypherSubmissionRequest,
+    QAGoldenRequest,
+    TuGraphQueryRequest,
+)
 from .service import get_testing_service
 
 app = FastAPI(title="testing-agent", version="2.0.0")
@@ -48,6 +54,14 @@ async def submit_evaluation(request: GeneratedCypherSubmissionRequest) -> Submis
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@app.post("/api/v1/evaluations/questions", response_model=SubmissionReceipt)
+async def submit_question_received(request: CgaQuestionReceivedReport) -> SubmissionReceipt:
+    try:
+        return await get_testing_service().ingest_question_received(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @app.post("/api/v1/evaluations/generation-failures", response_model=SubmissionReceipt)
 async def submit_generation_failure(request: CgaGenerationNonSuccessReport) -> SubmissionReceipt:
     try:
@@ -67,6 +81,11 @@ async def get_issue_ticket(ticket_id: str) -> IssueTicket:
     if ticket is None:
         raise HTTPException(status_code=404, detail=f"No issue ticket found for ticket_id={ticket_id}")
     return ticket
+
+
+@app.post("/api/v1/tugraph/query")
+async def execute_tugraph_query(request: TuGraphQueryRequest) -> Dict[str, Any]:
+    return await get_testing_service().execute_cypher(request)
 
 
 if __name__ == "__main__":

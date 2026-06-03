@@ -1,0 +1,83 @@
+{
+  "schema_version": "restricted_query_dsl_v1",
+  "query_id": "zero-hop",
+  "query_shape": "vertex_lookup",
+  "source_question": "",
+  "bindings": {
+    "target": {
+      "vertex_name": "Service"
+    }
+  },
+  "operations": [],
+  "filters": [],
+  "projection": {
+    "items": [
+      {
+        "target": "target",
+        "property": {
+          "owner": "Service",
+          "name": "id"
+        },
+        "alias": "service_id",
+        "projection_terms": [
+          "ID"
+        ]
+      },
+      {
+        "target": "target",
+        "property": {
+          "owner": "Service",
+          "name": "name"
+        },
+        "alias": "service_name",
+        "projection_terms": [
+          "名称"
+        ]
+      },
+      {
+        "target": "target",
+        "property": {
+          "owner": "Service",
+          "name": "elem_type"
+        },
+        "alias": "service_elem_type",
+        "projection_terms": [
+          "元素类型"
+        ]
+      },
+      {
+        "target": "target",
+        "property": {
+          "owner": "Service",
+          "name": "quality_of_service"
+        },
+        "alias": "service_quality_of_service",
+        "projection_terms": [
+          "服务质量等级"
+        ]
+      },
+      {
+        "target": "target",
+        "property": {
+          "owner": "Service",
+          "name": "bandwidth"
+        },
+        "alias": "service_bandwidth",
+        "projection_terms": [
+          "带宽"
+        ]
+      },
+      {
+        "target": "target",
+        "property": {
+          "owner": "Service",
+          "name": "latency"
+        },
+        "alias": "service_latency",
+        "projection_terms": [
+          "时延"
+        ]
+      }
+    ]
+  }
+}

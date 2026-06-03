@@ -1,0 +1,56 @@
+{
+  "schema_version": "restricted_query_dsl_v1",
+  "query_id": "multihop-f5",
+  "query_shape": "single_hop_traversal",
+  "source_question": "",
+  "bindings": {
+    "v0": {
+      "vertex_name": "Service"
+    },
+    "v1": {
+      "vertex_name": "Tunnel"
+    },
+    "edge_0": {
+      "edge_name": "SERVICE_USES_TUNNEL"
+    }
+  },
+  "operations": [
+    {
+      "op": "traverse_edge",
+      "from": "v0",
+      "edge": "edge_0",
+      "to": "v1",
+      "direction": "forward"
+    }
+  ],
+  "filters": [
+    {
+      "target": "v0",
+      "property": {
+        "owner": "Service",
+        "name": "id"
+      },
+      "operator": "eq",
+      "value": {
+        "raw": "svc-gold-001",
+        "normalized": "svc-gold-001",
+        "resolver_match_type": "value_index_exact"
+      }
+    }
+  ],
+  "projection": {
+    "items": [
+      {
+        "target": "v1",
+        "property": {
+          "owner": "Tunnel",
+          "name": "id"
+        },
+        "alias": "tunnel_id",
+        "projection_terms": [
+          "ID"
+        ]
+      }
+    ]
+  }
+}
